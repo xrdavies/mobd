@@ -498,8 +498,26 @@ func postTask(t *testing.T, s *Server, body string) task.Task {
 }
 
 func TestDesktopQueueRunsOneTaskAtATime(t *testing.T) {
-	s, _ := fakeCodexServer(t, slowReply)
+	s, dir := fakeCodexServer(t, `cat > /dev/null
+while [ ! -f release ]; do sleep 0.01; done
+printf '%s\n' '{"type":"thread.started","thread_id":"th"}' '{"type":"item.completed","item":{"id":"m","type":"agent_message","text":"ok"}}' '{"type":"turn.completed"}'
+`)
 	first := postTask(t, s, `{"prompt":"first"}`)
+	// Dispatch is asynchronous; hold the first turn until queue assertions finish.
+	deadline := time.Now().Add(20 * time.Second)
+	for {
+		got, err := s.store.Get(first.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.Status == task.StatusRunning {
+			break
+		}
+		if got.Status.Terminal() || time.Now().After(deadline) {
+			t.Fatalf("first task did not start: %+v", got)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 	second := postTask(t, s, `{"prompt":"second"}`)
 	if second.Status != task.StatusQueued || second.QueuePosition != 1 {
 		t.Fatalf("second should wait behind first: %+v", second)
@@ -507,9 +525,15 @@ func TestDesktopQueueRunsOneTaskAtATime(t *testing.T) {
 	rr := httptest.NewRecorder()
 	s.Handler().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/queue", nil))
 	var q struct{ Running, Queued []task.Task }
-	_ = json.Unmarshal(rr.Body.Bytes(), &q)
-	if len(q.Queued) != 1 || q.Queued[0].ID != second.ID || q.Queued[0].QueuePosition != 1 {
+	if err := json.Unmarshal(rr.Body.Bytes(), &q); err != nil {
+		t.Fatal(err)
+	}
+	if len(q.Running) != 1 || q.Running[0].ID != first.ID ||
+		len(q.Queued) != 1 || q.Queued[0].ID != second.ID || q.Queued[0].QueuePosition != 1 {
 		t.Fatalf("queue: %s", rr.Body.String())
+	}
+	if err := os.WriteFile(filepath.Join(dir, "release"), nil, 0600); err != nil {
+		t.Fatal(err)
 	}
 	a, b := waitTask(t, s, first.ID), waitTask(t, s, second.ID)
 	if a.Status != task.StatusSucceeded || b.Status != task.StatusSucceeded {
