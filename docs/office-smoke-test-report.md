@@ -1,5 +1,10 @@
 # Office Mac smoke test report
 
+> Historical evidence from 2026-10-12, before MCP moved into Go and mobd became a
+> separate repository. These results do not verify the signed `v0.0.2` release.
+> Preserve the original observations below; use the [current checklist](office-smoke-checklist.md)
+> for new testing and [releases](releases.md) for installation.
+
 Date: 2026-10-12
 Repository: `mob`
 Code baseline: `d048da1` (`docs: VNC and svnc viewOnly setup`)

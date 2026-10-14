@@ -4,6 +4,10 @@
 
 Accepted
 
+Implementation update (2026-10-15): the default MCP is `mobd mcp`, included in
+the signed daemon binary ([ADR 0008](0008-actuation-in-mobd.md)). No separate
+Python server is needed; use the [office checklist](../office-smoke-checklist.md).
+
 ## Context
 
 The office Mac must open applications and operate GUI elements under agent control. Options include:

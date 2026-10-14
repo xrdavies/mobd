@@ -1,8 +1,10 @@
 # Phase 2 lite — home Mac App `apps/mob` (embed svnc)
 
-> Historical product plan from before the repository split. Current server setup is in
-> [README](../README.md); desktop code and build commands are in
-> [xrdavies/mob](https://github.com/xrdavies/mob).
+> Archived client plan. As of 2026-10-15, the desktop app lives at the root of
+> [xrdavies/mob](https://github.com/xrdavies/mob), uses React/Tauri and connects to
+> mobd's API and `/vnc` relay. The old `apps/mob` layout and MVP exclusions below
+> are historical. Current daemon installation is in the [README](../README.md);
+> implemented server capabilities are listed in the [roadmap](roadmap.md).
 
 **Status:** scaffold landed in [`apps/mob`](https://github.com/xrdavies/mob) (Tauri 2 + Vite/TS MVP). Auth still deferred.
 **Decision (user):** intranet auth is **deferred** until this App work; Phase 1 `MOBD_SHARED_SECRET` stays optional and unset for now.

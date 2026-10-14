@@ -4,6 +4,12 @@ A **runner** connects mobd to one agent CLI (Codex and Claude Code today; Gemini
 
 Related: [mobd-v3.md](mobd-v3.md) (API), [ADR 0004](adr/0004-runner-codex-first.md) (Codex first), [ADR 0008](adr/0008-actuation-in-mobd.md) (desktop tools via `mobd mcp`).
 
+Install mobd with the [published installer](releases.md#4-安装和升级), then install
+and authenticate the agent CLI separately as the same office user. The archive
+contains mobd and its documentation; it does not bundle Codex or Claude Code.
+Set executable paths and working directories in `~/.mobd/config.json`, then
+`mobd restart` after configuration changes. `/health` reports each runner's availability.
+
 ## Contract (`internal/runner`)
 
 ```go

@@ -1,8 +1,10 @@
 # Phase 1 implementation plan
 
-> Historical product plan from before the repository split. Current server setup is in
-> [README](../README.md); desktop code and build commands are in
-> [xrdavies/mob](https://github.com/xrdavies/mob).
+> Archived Phase 1 plan. As of 2026-10-15, mobd is a standalone repository with
+> a signed macOS installer, API v3, built-in MCP, Codex/Claude runners and a VNC relay.
+> The monorepo layout, Python installation steps and remaining-work lists below
+> describe the original plan, not current setup. Use [installation](releases.md#4-安装和升级),
+> the [office checklist](office-smoke-checklist.md) and [current roadmap](roadmap.md).
 
 > **Note (2026-10-13):** actuation has since moved into the `mobd` binary as `mobd mcp` ([ADR 0008](adr/0008-actuation-in-mobd.md)); `services/mob-mcp` (Python) references below are historical. Current API: [mobd-v3.md](mobd-v3.md).
 

@@ -4,6 +4,12 @@
 
 Accepted
 
+Implementation update (2026-10-15): the desktop client is in
+[xrdavies/mob](https://github.com/xrdavies/mob) and connects through mobd's
+[`/vnc` relay](0010-vnc-relay-in-mobd.md). Human input is disabled by default;
+Control mode is an explicit opt-in. The client uses svnc input modes to switch
+control; a standalone monitor may use `viewOnly: true` permanently.
+
 ## Context
 
 Operators need to watch the office Mac desktop while an agent works. Cloud desktop products (Manus, Grok Bot) embed that experience but are not suitable for private office intranet deployment. Existing remote-agent tools (e.g. Paseo, Orca) can start agents remotely but do not show the live desktop inside the product.

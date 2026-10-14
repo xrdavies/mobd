@@ -25,8 +25,8 @@ ADR 0007 chose an in-repo stdio MCP server, `services/mob-mcp`, written in Pytho
 
 ## Consequences
 
-- One binary to build, sign and grant permissions to. Setup becomes: build `mobd`, grant Accessibility and Screen Recording to the launching host, run it.
+- One binary to build, sign and grant permissions to. Users install the signed macOS binary via the [release installer](../releases.md#4-安装和升级), grant Accessibility and Screen Recording to the responsible process/host, then run `mobd init` and `mobd start`. Building from source is optional.
 - Building requires macOS with Xcode command line tools (cgo). Non-darwin builds still compile with stub actuation for tests and CI.
-- The macOS permission identity is the *responsible process* that launched the chain (Terminal/iTerm when started from a shell, or `mobd` itself under launchd). `/health` reports `AXIsProcessTrusted` and `CGPreflightScreenCaptureAccess` as seen by mobd, which the `mobd mcp` children inherit.
+- The macOS permission identity is the *responsible process* that launched the chain (Terminal/iTerm when started from a shell, or `mobd` itself under launchd). `/health` reports `CGPreflightPostEventAccess` and `CGPreflightScreenCaptureAccess` as seen by mobd. Verify actual tool operation after granting permissions.
 - Python-only extras (OCR, image diffing) are no longer free. If needed later, add them in Go or as an optional, separate MCP. An Objective-C/Swift shim via cgo stays possible for the Accessibility element tree and ScreenCaptureKit.
-- `scripts/` no longer looks for `services/mob-mcp/.venv`.
+- Service management is built into the mobd CLI; the distributed binary does not require the old `scripts/` or Python virtual environment.

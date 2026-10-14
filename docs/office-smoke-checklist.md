@@ -1,90 +1,107 @@
-# Office Mac manual smoke checklist
+# Office Mac smoke checklist
 
-Do this **on the office Mac** (and home viewer for step 3) **before** `mobd` exists. Goal: prove Codex + in-repo **`mob-mcp`** can actuate the real desktop, and that humans can watch over VNC via [svnc](https://github.com/xrdavies/svnc) in **viewOnly**.
+Verify the installed mobd, one configured agent runner, and the home client's live
+view on the real office desktop. This is the current deployment checklist; the
+[2026-10-12 report](office-smoke-test-report.md) records the earlier Python MCP prototype.
 
-See [research-computer-use.md](research-computer-use.md) and [ADR 0007](adr/0007-actuation-mob-mcp.md). Codex on the office machine can perform parts of this checklist (install commands, config edits, self-checks). Prefer intranet or VPN; do not expose raw VNC to the public internet ([security](security.md)).
+Use an office LAN or VPN. The release download domain distributes files; it is
+not the task API address. See [security](security.md) for the current access controls.
 
-**Out of scope here:** shipping third-party desktop MCPs as product defaults, human remote keyboard/mouse, and `mobd` / the MOB task API.
+## 1. Install and configure mobd
 
-**Do not** install [nix18/ControlMCP](https://github.com/nix18/ControlMCP) (GPL-3.0; abandoned for MOB’s purposes — [ADR 0006](adr/0006-actuation-controlmcp-first.md) superseded). Default actuation is the built-in **`mobd mcp`** server ([ADR 0008](adr/0008-actuation-in-mobd.md)).
+On a macOS 13+ Apple Silicon office Mac, as the normal logged-in user:
 
-## 1. mob-mcp — install, permissions, verify actuation
+```bash
+curl -fsSL https://mob-releases.0xd.app/mobd/install.sh | sh
+export PATH="$HOME/.local/bin:$PATH"
+mobd --version
+mobd init
+```
 
-1. On the office Mac, check out this repo and build `mobd` (Go + Xcode command line tools; see [mobd README](../README.md)):
+For an upgrade, finish active tasks and stop the old service first. See
+[installation and upgrades](releases.md#4-安装和升级). Developers may instead use
+`make build` and `./bin/mobd` from this repository.
+
+Edit `~/.mobd/config.json` before starting:
+
+- Set `workdir` to an existing absolute directory.
+- Install and authenticate Codex or Claude Code as this user; set its executable
+  path if it will not be found on the service's PATH. Enable the intended runners
+  and choose `defaultRunner` ([runner configuration](runners.md)).
+- `mobd init` sets `listen` to `127.0.0.1:8080`. For remote clients, select a
+  LAN/VPN bind address or `0.0.0.0:8080` behind appropriate network controls.
+- Keep `maxRunning: 1` on a shared desktop.
+- Set `codexPermissions` / `claudePermissions` to `approve` if provider approvals
+  are required; the default is `bypass`. Shared-secret behavior is in [security](security.md).
+
+## 2. Start and check readiness
+
+1. In macOS System Settings → Privacy & Security, grant Accessibility and Screen
+   Recording to the responsible process or launching app (Terminal/iTerm for a
+   shell launch, or mobd under launchd). Restart after changing permissions.
+2. Enable System Settings → General → Sharing → Screen Sharing. Confirm its
+   host, port and credentials, then set `vncAddr` if it differs from `127.0.0.1:5900`.
+3. Start the daemon and inspect readiness:
 
    ```bash
-   go build -o bin/mobd ./cmd/mobd
-   ./bin/mobd mcp   # stdio MCP server; Ctrl+C after a quick sanity start, or leave for Codex
+   mobd start
+   mobd status
+   curl -fsS http://127.0.0.1:8080/health
    ```
 
-2. System Settings → Privacy & Security:
-   - Grant **Accessibility** to the host that launches `mobd` (Terminal / iTerm, or `mobd` itself under launchd).
-   - Grant **Screen Recording** (needed for `screenshot`).
-3. Run a smoke check via Codex (next section) or by calling tools: `screenshot`, then a harmless `open_app` / click. Confirm the **real** desktop UI changes—not only a text reply.
+   Adjust the health address if listening on a different interface or port.
+   `ok: true` means the API is serving; inspect `checks` and `runners` for agent,
+   macOS permissions and VNC readiness. Use `mobd logs` to investigate failures.
 
-If Accessibility or Screen Recording is missing, stop and fix permissions before continuing.
+`mobd mcp` is built into the same binary. mobd injects its configuration into each
+agent turn; no Python MCP installation or global Codex MCP registration is needed.
 
-Temporary MIT third-party spikes (e.g. [CursorTouch/MacOS-MCP](https://github.com/CursorTouch/MacOS-MCP)) are **optional** only if you need to validate TCC prompts while debugging — **not** a product dependency and **not** the documented default.
+## 3. Submit a task through mobd
 
-## 2. Codex CLI — auth and wire mob-mcp
+From the mob client, add the office Mac's mobd URL and start a new chat with an
+available runner. Ask it to use mob-mcp to open TextEdit and type a unique smoke
+marker without saving a file. Alternatively, submit a local request:
 
-1. Install the Codex CLI on the office Mac and authenticate (login / API credentials as required by current Codex docs).
-2. Add `mob-mcp` to Codex’s MCP configuration. Example (absolute paths):
+```bash
+curl -fsS http://127.0.0.1:8080/tasks \
+  -H 'Content-Type: application/json' \
+  -d '{"prompt":"Use mob-mcp to open TextEdit and type MOB smoke check in a new unsaved document. Do not save it."}'
+```
 
-   ```json
-   {
-     "mcpServers": {
-       "mob-mcp": {
-         "command": "/absolute/path/to/mobd/bin/mobd",
-         "args": ["mcp"]
-       }
-     }
-   }
-   ```
+If `sharedSecret` is configured, include `Authorization: Bearer <token>` on the
+request. Use the returned task ID with `GET /tasks/{id}` and
+`GET /tasks/{id}/events`, or watch the client's timeline.
 
-   Restart Codex or reload MCP so the server is listed as available.
-3. **Smoke prompt (must drive real UI):** ask Codex to do something observable on the desktop via tools, for example open Safari (or another installed app) and navigate to a known URL, or open TextEdit and type a short unique string.
+**Pass:** the real desktop changes, tool activity is visible, and the task succeeds.
+A text-only description without tool execution does not pass. Submit a follow-up
+in the same session to verify conversation continuation. For approval mode, answer
+any presented question/approval card and confirm the turn resumes.
 
-**Pass:** you see the office UI change accordingly (app opens, URL loads, text appears).
-**Fail:** Codex only describes steps in chat without MCP tool use, or tools error on permissions—fix MCP config and macOS privacy grants, then retry.
+## 4. Verify the home view
 
-`mobd` is **not** required for this step; spawn Codex manually.
+1. First confirm Screen Sharing works from another trusted machine.
+2. In the mob client, use the office mobd URL. The default VNC connection is its
+   `/vnc` WebSocket relay; mob users do not need a separate websockify process.
+3. Watch the smoke task in the default preview. Keyboard/mouse input must remain
+   disabled until the user explicitly enables Control mode.
+4. If testing Control mode, finish the agent task first: human takeover does not
+   automatically pause the agent.
 
-## 3. VNC + websockify/WSS + home svnc (viewOnly)
+For a standalone svnc monitor, use `viewOnly: true`; the optional websockify path
+is documented in [VNC setup](vnc-svnc-setup.md).
 
-With mobd running, no bridge is needed: turn on Screen Sharing and the App connects through `ws://<office>:<mobd-port>/vnc` ([ADR 0010](adr/0010-vnc-relay-in-mobd.md)). The websockify steps below apply to plain svnc. Step-by-step (Screen Sharing, websockify examples, WSS, home `viewOnly` snippet): **[vnc-svnc-setup.md](vnc-svnc-setup.md)**.
-
-1. On the office Mac, enable **System Settings → General → Sharing → Screen Sharing** (or another VNC server). Note host, port, and credentials — ports are site-specific; see setup doc for examples only.
-2. Bridge TCP VNC → WebSocket with **websockify** (or equivalent). Prefer **intranet/VPN**; use **WSS** (or SSH/VPN) when the path leaves a trusted LAN ([svnc](https://github.com/xrdavies/svnc) peripheral security).
-3. From the **home** Mac (or VPN), connect with [svnc](https://github.com/xrdavies/svnc) using **`viewOnly: true`**.
-
-**Pass:** the office desktop is visible in near real time.
-**Pass (input):** mouse and keyboard from the viewer do **not** control the office Mac.
-
-## 4. Acceptance
+## 5. Acceptance and service lifecycle
 
 | Check | Criterion |
 | --- | --- |
-| **A — Actuation** | Codex + **mob-mcp** changes the office Mac UI (step 2). |
-| **B — View-only monitor** | Home svnc shows that desktop; human input is disabled (step 3). |
+| Install | `mobd --version` matches the selected published release. |
+| Readiness | Configured runner, permissions and VNC checks are ready. |
+| Actuation | A task submitted through mobd visibly changes the office UI. |
+| View | Home preview shows the same desktop with input disabled by default. |
+| Persistence | After completed tasks, `mobd restart` retains conversations and configuration. |
+| Upgrade | Stop, install and start preserves configuration and conversations. |
 
-Both A and B must pass. After that, Phase 1 coding can attach `mobd` to the same `mob-mcp` + VNC path ([implementation-phase1.md](implementation-phase1.md)).
-
-## Notes
-
-- Run install and actuation steps on the **office Mac**; use home only for the svnc viewer (and later task dispatch).
-- Prefer **intranet / VPN**; see [security.md](security.md) for exposure rules.
-- Third-party MCPs (including ControlMCP / GhostDesk) are **not** required; see research + ADR 0007.
-- **`mobd` is not required yet**—this checklist is the manual vertical slice before the Go control plane.
-
-## References
-
-- [VNC + svnc viewOnly setup](vnc-svnc-setup.md)
-- [mobd README (actuation)](../README.md#desktop-actuation-mobd-mcp)
-- [Computer-use research](research-computer-use.md)
-- [Phase 1 implementation plan](implementation-phase1.md)
-- [Architecture](architecture.md)
-- [ADR 0001 — Screen view: VNC + svnc](adr/0001-screen-view-vnc-svnc.md)
-- [ADR 0004 — Runner: Codex first](adr/0004-runner-codex-first.md)
-- [ADR 0007 — Actuation: in-repo mob-mcp](adr/0007-actuation-mob-mcp.md)
-- [svnc](https://github.com/xrdavies/svnc)
+Record the tested release, macOS version, runner version, launch method and results
+in a new dated report. Do not treat the old prototype report as verification of
+this release. Use `mobd start --login` only when login startup is desired;
+`mobd stop` removes that registration.

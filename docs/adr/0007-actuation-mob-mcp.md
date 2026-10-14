@@ -4,6 +4,10 @@
 
 Accepted; **implementation language superseded** by [ADR 0008](0008-actuation-in-mobd.md) (Go, inside the `mobd` binary as `mobd mcp`). The in-repo, MIT, local-MCP-by-default decision stands.
 
+As of 2026-10-15, `services/mob-mcp` no longer exists in this repository.
+The Python decisions below are historical; the [published installer](../releases.md#4-安装和升级)
+provides the daemon and MCP as one binary.
+
 ## Context
 
 [ADR 0003](0003-actuation-local-mcp.md) requires local computer-use MCP on the office Mac. [ADR 0006](0006-actuation-controlmcp-first.md) chose [nix18/ControlMCP](https://github.com/nix18/ControlMCP) as the Phase 1 default.

@@ -2,6 +2,11 @@
 
 MOB splits **control** (what the agent should do) from **view** (what the human sees) and from **actuation** (how the agent drives the office Mac UI).
 
+This repository owns the office daemon, `mobd mcp`, the API and release tooling.
+The desktop client lives in [xrdavies/mob](https://github.com/xrdavies/mob).
+Signed and notarized macOS Apple Silicon binaries are distributed through
+`https://mob-releases.0xd.app/mobd/`; see [installation and releases](releases.md).
+
 ## Components
 
 ### Client (dispatcher + monitor)
@@ -9,25 +14,25 @@ MOB splits **control** (what the agent should do) from **view** (what the human 
 Runs on the home Mac and iPhone.
 
 - **Dispatcher:** send tasks, watch task status, converse with the office agent session.
-- **Monitor:** view the office desktop in real time. Humans are **view-only** by default (no mouse/keyboard forwarding). Phase 1 may open the viewer in a separate window; later the viewer embeds inside MOB clients via svnc.
+- **Monitor:** the desktop client embeds svnc. Human input is disabled by default; an explicit Control mode enables it in the full-size view.
 
 Clients are a remote control + monitor, not the place where the agent runtime lives.
 
 ### Control plane (task API)
 
-Thin HTTP/API layer owned by MOB, implemented in **Go** as `mobd` (see [ADR 0005](adr/0005-backend-go.md) and [Phase 1 plan](implementation-phase1.md)):
+Thin HTTP/API layer owned by MOB, implemented in **Go** as `mobd` (see [ADR 0005](adr/0005-backend-go.md) and the [API reference](mobd-v3.md)):
 
 - create / list / cancel tasks
 - list conversations and restore their complete user/assistant transcripts
-- attach each task/turn to a stable runner session (Codex first)
+- attach each task/turn to a stable runner session (Codex or Claude Code)
 - stream or poll status (SSE)
-- (later) human approval gates for sensitive actions
+- questions and approval requests, plus steering when supported by the runner
 
 MOB learns UX concepts from tools like Paseo / Orca (remote start of coding agents, task state) but does **not** fork those projects. See [ADR 0002](adr/0002-orchestration-thin-custom.md).
 
 `mobd` v3 ([design](mobd-v3.md)) adds typed agent activities, a global desktop queue (one driver at a time), session admin, a global event stream, desktop snapshots and uploads.
 
-`mobd` stores conversations, messages, turn states and native Codex thread IDs in an atomic private JSON snapshot (`MOBD_STATE_PATH`). Each conversation allows one active turn. The CLI runner uses JSONL `agent_message` events and explicitly resumes that conversation's thread; SSE debug logs are separate from chat messages. See [the session API](../README.md#conversations-and-runner-lifecycle).
+`mobd` stores conversations, messages, activities, questions, turn states and runner resume IDs in an atomic private JSON snapshot (`MOBD_STATE_PATH`). Each conversation allows one active turn. Codex defaults to app-server mode; its exec fallback and the Claude runner translate provider output into the same model. SSE debug logs are separate from chat messages. See [the session API](../README.md#conversations-and-runner-lifecycle).
 
 ### Office runner (Codex first)
 
@@ -43,7 +48,7 @@ Process(es) on the office Mac that:
 
 How the agent opens apps and operates the GUI on the office Mac.
 
-- **Default:** the `mob-mcp` tool set, built into the `mobd` binary (`internal/actuate`, served by `mobd mcp` over stdio; Codex launches it per task). One binary holds the macOS Accessibility + Screen Recording grants, and mobd reuses actuation for `/screen` and the `/health` permission checks. See [ADR 0008](adr/0008-actuation-in-mobd.md), [ADR 0007](adr/0007-actuation-mob-mcp.md) and [research-computer-use.md](research-computer-use.md).
+- **Default:** the `mob-mcp` tool set, built into the `mobd` binary (`internal/actuate`, served by `mobd mcp` over stdio; the agent launches it per task). Grant macOS Accessibility and Screen Recording to the responsible process or launching app; mobd reuses actuation for `/screen` and the `/health` permission checks. See [ADR 0008](adr/0008-actuation-in-mobd.md), [ADR 0007](adr/0007-actuation-mob-mcp.md) and [research-computer-use.md](research-computer-use.md).
 - **Later optional:** other local MCP servers via configuration **after license review** (GhostDesk FSL Competing Use is a poor fit to ship as MOB’s core; see research).
 - **Fallback:** svnc Automation (click / type over VNC), on a path separate from the human viewOnly session.
 
@@ -82,7 +87,7 @@ flowchart TB
 
   subgraph officeNet [Office network]
     API[MOB task API - Go]
-    Runner[Codex runner]
+    Runner[Codex or Claude runner]
     MCP[mobd mcp]
     VNC[VNC server]
   end
@@ -94,4 +99,7 @@ flowchart TB
   API -->|/vnc relay| VNC
 ```
 
-Sensitive operations (payments, credentials) should eventually require explicit human approval in the control plane; not required for Phase 1 scaffolding.
+`ask_user` and `request_approval` are implemented. Runner permissions default to
+`bypass`; `approve` enables provider approval gates for Codex app-server and Claude.
+The MCP request tool alone is an instruction-based gate, not a sandbox. See
+[runners](runners.md) and [security](security.md) for the supported boundaries.

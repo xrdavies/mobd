@@ -4,6 +4,9 @@
 
 **Superseded** by [ADR 0007](0007-actuation-mob-mcp.md) (2026-10-12).
 
+Current implementation: [ADR 0008](0008-actuation-in-mobd.md) places the local MCP
+inside the distributed `mobd` binary. Install using the [release guide](../releases.md).
+
 Do not use [nix18/ControlMCP](https://github.com/nix18/ControlMCP) as MOB’s default or bundled actuation. See [research-computer-use.md](../research-computer-use.md) for the evaluation (maintenance signals, **GPL-3.0** vs MOB MIT, alternatives).
 
 ## Context (historical)

@@ -4,6 +4,11 @@
 
 Accepted
 
+Implementation update (2026-10-15): Codex and Claude Code are both implemented.
+Codex defaults to app-server mode with exec as a fallback. The original
+Codex-first ordering below is historical; see [runners](../runners.md) for the
+current registry, session pinning, approvals and steering behavior.
+
 ## Context
 
 The office runner starts an AI coding/agent session with access to actuation tools. Multiple backends are desirable long-term (Codex, Claude, Grok, others). Shipping all at once delays proving the dispatch + view loop.

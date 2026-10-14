@@ -1,7 +1,7 @@
-# mobd v3 — features and API design
+# mobd API v3 — features and reference
 
 **Status:** implemented, including step 7 ([ADR 0008](adr/0008-actuation-in-mobd.md)). `GET /health` reports `apiVersion: 3`.
-**Scope:** the office control plane (`cmd/mobd`, `internal/...`). Auth and hardening are out of scope while MOB is in development (see [roadmap](roadmap.md)).
+**Scope:** the office control plane (`cmd/mobd`, `internal/...`). API version `3` is independent of binary release versions such as `0.0.2`. See [releases](releases.md) for installation and [security](security.md) for the implemented authentication limits.
 **Related:** [ADR 0008](adr/0008-actuation-in-mobd.md) (actuation merged into mobd), [ADR 0009](https://github.com/xrdavies/mob/blob/main/docs/adr/0009-app-frontend-react.md) and [apps-mob-ui.md](https://github.com/xrdavies/mob/blob/main/docs/ui.md) (the client that uses these APIs).
 
 ## Goals
@@ -14,13 +14,19 @@
 6. **Desktop snapshots without VNC**: `GET /screen` for thumbnails (iPhone, session previews) and readiness checks.
 7. **Readiness**: `/health` explains what is missing on the office Mac (Codex, actuation, macOS permissions, VNC).
 
-## Non-goals (for v3)
+## Current scope
 
-Auth/tokens, an audit log, multiple runners in production (the interface lands, Codex stays the only implementation), mid-turn steering (needs the Codex app-server protocol), a database. The JSON snapshot stays, and SQLite is the next storage step when history size requires it.
+Codex and Claude Code runners, questions/approvals and Codex app-server steering
+are implemented. Shared-secret authentication is optional on mutating routes;
+there is no multi-user login or dedicated security audit log. Storage remains an
+atomic JSON snapshot with separate image files, not a database. Per-agent desktops
+and automatic pause for human takeover remain planned work.
 
-## Codex events → MOB model
+## Codex exec events → MOB model
 
-`codex exec --json` (verified with codex-cli 0.162.1) emits:
+The following is the exec fallback mapping, verified with codex-cli 0.162.1.
+The default is now app-server; [runners](runners.md) covers both Codex modes and Claude.
+`codex exec --json` emits:
 
 ```jsonl
 {"type":"thread.started","thread_id":"…"}
@@ -56,9 +62,10 @@ Activities are **upserted by ID** (`<taskId>:<itemId>`): `item.started` creates 
 type Task = {
   // existing: id, sessionId, resumeId (was threadId), eventId, prompt, status, runner, createdAt, updatedAt, error, vncViewUrl
   model?: string;
-  effort?: "minimal" | "low" | "medium" | "high" | "xhigh";
+  effort?: string;                // allowed values come from the selected runner in /health
   attachments?: string[];          // upload artifact IDs
-  usage?: { inputTokens: number; cachedInputTokens: number; outputTokens: number; reasoningOutputTokens: number };
+  usage?: { inputTokens: number; cachedInputTokens: number; outputTokens: number; reasoningOutputTokens: number; costUsd?: number };
+  waiting?: boolean;              // awaiting a user answer or approval
   queuePosition?: number;          // 1-based while queued, computed on read
   startedAt?: string;
   finishedAt?: string;
@@ -68,6 +75,7 @@ type Session = {
   // existing: id, title, runner, resumeId (was threadId), activeTaskId, status, createdAt, updatedAt, messages
   pinned: boolean;
   archived: boolean;
+  waiting?: boolean;
 };
 
 type Activity = {
@@ -95,8 +103,9 @@ The App builds the conversation timeline by merging `messages` and `activities` 
 - `MOBD_MAX_RUNNING` (default **1**) limits how many tasks run at once, across all sessions.
 - `POST /tasks` always returns `queued`. A dispatcher starts queued tasks in FIFO order as slots free up.
 - A session still allows only one non-terminal task. A follow-up while queued or running returns **409** as before.
-- Cancelling a queued task makes it `cancelled` straight away without starting Codex.
+- Cancelling an undispatched queued task makes it `cancelled` straight away without starting a runner. A dispatched task can briefly still report `queued`; cancellation then waits for its worker to stop.
 - `queuePosition` is set on queued tasks in every response and in `task` global events.
+- Dispatch is asynchronous. Two immediate submissions can initially have positions 1 and 2; once the first becomes `running`, the second becomes queued position 1.
 
 ## Endpoints
 
@@ -106,10 +115,10 @@ Existing v2 endpoints keep their shape. New fields are additive.
 | --- | --- | --- |
 | GET | `/health` | Adds `apiVersion: 3`, `features`, `checks`, `runners`, default runner's `models`/`efforts`, `maxRunning` |
 | GET | `/sessions` | `?archived=false` (default) \| `true` \| `all`. Sorted pinned first, then `updatedAt` descending |
-| GET | `/sessions/{id}` | Adds `activities` |
+| GET | `/sessions/{id}` | `{session, tasks, activities, questions}` |
 | PATCH | `/sessions/{id}` | Body `{title?, pinned?, archived?}` → updated session |
 | DELETE | `/sessions/{id}` | **409** while a turn is active; removes its tasks, activities and artifacts → **204** |
-| POST | `/tasks` | Body adds `model?`, `effort?`, `attachments?` (upload IDs) |
+| POST | `/tasks` | `{prompt, sessionId?, runner?, model?, effort?, attachments?}`; attachments are upload IDs; runner is pinned per session |
 | GET | `/tasks` | `?sessionId=`, `?status=`, `?limit=` (default 100, max 500) |
 | GET | `/tasks/{id}/events` | Adds `activity` and `usage` events |
 | POST | `/tasks/{id}/cancel` | Also cancels queued tasks |
@@ -130,7 +139,7 @@ Existing v2 endpoints keep their shape. New fields are additive.
   "ok": true, "service": "mobd", "apiVersion": 3,
   "runner": "codex", "maxRunning": 1,
   "vncViewUrl": "…", "mobMcp": "/path/to/mobd",
-  "features": ["queue", "activities", "sessionAdmin", "events", "screen", "uploads", "taskOptions"],
+  "features": ["queue", "activities", "sessionAdmin", "events", "screen", "uploads", "taskOptions", "vncProxy", "runners", "questions", "steer"],
   "models": ["gpt-5.5-codex", "…"],
   "efforts": ["minimal", "low", "medium", "high", "xhigh"],
   "checks": {
@@ -157,7 +166,9 @@ SSE with monotonic `id`s from a 1024-entry in-memory ring. `Last-Event-ID` / `?a
 | `queue` | same shape as `GET /queue` whenever it changes |
 | `reset` | `{}` |
 
-Per-task timelines stay on `/tasks/{id}/events`. The global stream carries only summaries, so it stays cheap for every connected client.
+Per-task timelines stay on `/tasks/{id}/events`, including `question` events for
+question/approval changes. The global stream carries session/task summaries with
+their `waiting` flags; question snapshots are also available in `GET /sessions/{id}`.
 
 ## Configuration additions
 
@@ -172,20 +183,22 @@ Per-task timelines stay on `/tasks/{id}/events`. The global stream carries only 
 ## Internal structure
 
 ```text
-cmd/mobd            main; subcommands: (serve) | mcp (after ADR 0008)
+cmd/mobd            CLI: init, serve, start, stop, restart, status, logs, mcp, --version
 internal/api        HTTP handlers, SSE, global event hub
 internal/task       Store (snapshot persistence), queue ordering, activities
-internal/runner     Runner interface; runner/codex adapter + JSONL → event mapping
-internal/actuate    Desktop capture and input (screenshot via screencapture now; cgo input after ADR 0008)
+internal/runner     Registry, Codex app-server/exec and Claude adapters, shared CLI lifecycle
+internal/actuate    Desktop capture and cgo input on macOS; stubs elsewhere
+internal/mcpserver  mobd mcp: desktop tools, questions and approvals over stdio
 internal/artifact   Content-addressed file store for screenshots and uploads
-internal/config     Env config
+internal/config     JSON config, environment overrides and CLI flags
+internal/service    Per-user macOS LaunchAgent and saved service configuration
 ```
 
-- `runner.Runner` interface: `Start(ctx, *task.Task, Options, EmitFunc) error`. Codex is the only implementation for now.
+- `runner.Runner` interface: `Start(ctx, *task.Task, Options, EmitFunc) error`. Codex and Claude implement it; optional `runner.Steerer` enables mid-turn input.
 - In-memory debug logs are capped per task (oldest log lines dropped first). Persisted messages and activities are never dropped from replay.
 - Every state change still goes through the atomic snapshot commit. Image bytes never enter the snapshot.
 
-## Delivery order
+## Original delivery order (completed)
 
 1. Runner interface + activity mapping + usage + log cap
 2. Desktop queue + `/queue` + queued cancel

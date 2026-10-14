@@ -4,6 +4,11 @@
 > [README](../README.md); desktop code and build commands are in
 > [xrdavies/mob](https://github.com/xrdavies/mob).
 
+> Current implementation (2026-10-15): `internal/actuate` and `internal/mcpserver`
+> in this mobd repository provide `mobd mcp` ([ADR 0008](adr/0008-actuation-in-mobd.md)).
+> The Python prototype and external-project metrics below are dated research.
+> Install the current binary through the [release guide](releases.md#4-安装和升级).
+
 **Date:** 2026-10-12 (Asia/Shanghai calendar; GitHub timestamps below are UTC)
 **Repo:** [xrdavies/mob](https://github.com/xrdavies/mob) (MIT)
 **Question:** How should Codex on the office Mac actuate the real desktop via MCP — without depending on unmaintained or license-hostile third-party servers?

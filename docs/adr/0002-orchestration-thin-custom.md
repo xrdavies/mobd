@@ -4,6 +4,11 @@
 
 Accepted
 
+Implementation update (2026-10-15): the control plane is maintained in this
+standalone [mobd repository](../repository-split.md); the desktop client is in
+[xrdavies/mob](https://github.com/xrdavies/mob). API v3, Codex/Claude runners and
+independent signed releases are implemented ([current status](../roadmap.md)).
+
 ## Context
 
 Task dispatch and session orchestration could be:

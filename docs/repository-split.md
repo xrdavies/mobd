@@ -42,6 +42,11 @@ publisher reads and writes only `mobd/` in R2, including `mobd/install.sh`,
 Public paths and the website's manifest format are unchanged. Choose versions above
 any existing public mobd release; release history is not reset by the repository move.
 
+The public download root is `https://mob-releases.0xd.app`. The latest installer is
+`https://mob-releases.0xd.app/mobd/install.sh`; [latest.json](https://mob-releases.0xd.app/mobd/latest.json)
+selects the stable version. As of 2026-10-15 (Asia/Tokyo), `v0.0.2` has been published
+to GitHub and R2. Binary installation requires no source checkout or Go toolchain.
+
 Create this repository's `release` environment using the
 [release checklist](releases.md): 8 Secrets and 3 Variables. Existing mob environment
 values are not inherited. Apple credentials and R2 infrastructure can be reused;

@@ -1,28 +1,34 @@
 # Office VNC + home svnc (viewOnly)
 
-Practical setup for **acceptance B** of the [office smoke checklist](office-smoke-checklist.md): humans at home watch the office Mac desktop over VNC via [svnc](https://github.com/xrdavies/svnc) with **`viewOnly: true`**, while the agent actuates through **`mob-mcp`** on the office machine (not through this viewer path).
+Practical setup for the live-view checks in the [office smoke checklist](office-smoke-checklist.md).
+The mob client disables human input by default and offers explicit Control mode;
+a standalone [svnc](https://github.com/xrdavies/svnc) monitor can use `viewOnly: true`.
+The agent actuates through `mobd mcp` on the office machine.
 
 Related: [ADR 0001](adr/0001-screen-view-vnc-svnc.md), [security.md](security.md), svnc [peripheral security](https://github.com/xrdavies/svnc/blob/main/docs/peripheral-security.md) and [websockify decision](https://github.com/xrdavies/svnc/blob/main/docs/websockify-decision.md).
 
-> **mob users (2026-10-13):** mobd now relays the live view itself on `GET /vnc` ([ADR 0010](adr/0010-vnc-relay-in-mobd.md)). Turn on Screen Sharing (section 1) and paste only the mobd URL into the App; the websockify steps below are for plain svnc or custom bridges.
+> **Current mob setup:** install [mobd](releases.md#4-安装和升级), enable Screen Sharing,
+> and enter the office Mac's mobd URL in the App. mobd relays the live view on
+> `GET /vnc` ([ADR 0010](adr/0010-vnc-relay-in-mobd.md)). websockify is only needed
+> for standalone svnc setups that do not use this relay.
 
 **Ports below are examples only** — pick free ports and firewall rules that fit your LAN. Nothing here mandates a specific port number.
 
-## Topology (Phase 1)
+## Topology (mob)
 
 ```text
-Home browser (svnc, viewOnly: true)
+Home mob client (svnc, human input disabled by default)
         │  WebSocket (prefer WSS off-LAN)
         ▼
 [optional] reverse proxy / VPN / SSH tunnel
         │
         ▼
-Office: websockify (or equiv)  ──TCP──►  macOS Screen Sharing / VNC
+Office: mobd /vnc relay       ──TCP──►  macOS Screen Sharing / VNC
                                               (office Mac desktop)
 ```
 
-- **Human path:** viewOnly WebSocket → bridge → VNC framebuffer. No intentional key/mouse from the monitor.
-- **Agent path:** Codex + `mob-mcp` on the office Mac (separate from this VNC session).
+- **Human path:** WebSocket → mobd relay → VNC framebuffer. Input is disabled by default in the client.
+- **Agent path:** Codex or Claude + `mobd mcp` on the office Mac (separate from this VNC session).
 
 Prefer **office intranet or VPN**. Do not expose raw VNC (`5900`-style TCP) to the public internet.
 
@@ -46,9 +52,9 @@ Browsers cannot open raw TCP VNC. [svnc](https://github.com/xrdavies/svnc) expec
 `mobd` relays VNC itself on `GET /vnc`. Start it with the [mobd CLI](../README.md) and point the App at the mobd URL only:
 
 ```bash
-make init   # edit ~/.mobd/config.json (listen, vncAddr)
-make start
-make status
+mobd init   # first install; edit ~/.mobd/config.json (listen, vncAddr)
+mobd start
+mobd status
 ```
 
 The rest of this section is for plain svnc without mob.
@@ -65,9 +71,8 @@ Notes:
 - Bind the bridge to **loopback** or a private interface when possible; put VPN or a reverse proxy in front for remote viewers.
 - Pin the TCP target (do not run an open relay that can connect anywhere).
 - Alternatives: a native WebSocket VNC server (no bridge), or a thin lab bridge such as svnc’s non-production [`examples/ws-tcp-bridge/`](https://github.com/xrdavies/svnc/tree/main/examples/ws-tcp-bridge) for local experiments only.
-- A future **`mobvnc`** package may replace these scripts; the viewer contract remains a WebSocket RFB URL.
 
-Leave mobd running while you test (the CLI manages a user LaunchAgent). Restart with `make restart`. For plain svnc without mob, run websockify yourself (e.g. `websockify 6080 127.0.0.1:5900`).
+Leave mobd running while you test (the CLI manages a user LaunchAgent). Restart with `mobd restart`. For plain svnc without mob, run websockify yourself (e.g. `websockify 6080 127.0.0.1:5900`).
 
 ## 3. TLS / WSS (when the path leaves a trusted LAN)
 
@@ -91,7 +96,7 @@ Details: [svnc peripheral-security.md](https://github.com/xrdavies/svnc/blob/mai
 On the **home** Mac (or any machine that can reach the WebSocket URL over intranet/VPN/WSS):
 
 ```bash
-npm install svnc
+npm install @xrdavies/svnc
 ```
 
 Minimal connect (replace URL, password, and mount element; **keep `viewOnly: true` for MOB humans**):
@@ -105,7 +110,7 @@ const client = await SVNCClient.connect(mount, {
   // Example URL — use your bridge host/port or WSS path
   url: 'ws://office-mac.local:6080/',
   credentials: { password: 'your-vnc-password' }, // if VNC Auth is enabled
-  viewOnly: true, // required for acceptance B — no human input path
+  viewOnly: true, // standalone monitor: no human input path
 });
 
 // Optional: observe frames; do not call click / typeText on this session
@@ -116,7 +121,7 @@ You can also clone [svnc](https://github.com/xrdavies/svnc), `npm install && npm
 
 Quick start reference: [svnc quick-start](https://github.com/xrdavies/svnc/blob/main/docs/quick-start.md) (that doc’s Agent examples use `viewOnly: false` — **do not** copy that for MOB’s human monitor).
 
-## 5. Verify acceptance B
+## 5. Verify the view-only monitor
 
 | Check | How |
 | --- | --- |
@@ -124,12 +129,14 @@ Quick start reference: [svnc quick-start](https://github.com/xrdavies/svnc/blob/
 | No human input | With `viewOnly: true`, clicks and keypresses in the viewer must **not** move the office cursor or type into office apps. |
 | Separation | Agent work still goes through `mob-mcp` / Codex on the office Mac, not through this viewOnly session. |
 
-Checklist row: [office-smoke-checklist.md](office-smoke-checklist.md) §3 / acceptance **B**. Record outcome in [office-smoke-test-report.md](office-smoke-test-report.md) when you run it.
+Use the current [office smoke checklist](office-smoke-checklist.md#4-verify-the-home-view)
+and record the tested release in a new dated report. The existing
+[smoke report](office-smoke-test-report.md) covers the 2026-10-12 prototype only.
 
 ## Troubleshooting
 
-- **Connect fails:** Confirm Screen Sharing works with a native VNC client first; then confirm websockify targets that same host:port; then open the WS URL from home (VPN up if required).
-- **Black / stuck frame:** Check encodings/auth (None or VNC Auth — what svnc supports today); wrong password or blocked Screen Recording on the office Mac can also break capture for other tools.
+- **Connect fails:** Confirm Screen Sharing works with a native VNC client first, then check mobd's `vncAddr` and `/health`, or the target of your standalone websockify bridge. Verify the WS URL from home with VPN connected when required.
+- **Black / stuck frame:** Check VNC credentials and the client's supported authentication modes. mobd passes RFB through unchanged, including Apple Remote Desktop sign-in; capture permission for `/screen` and MCP tools is a separate macOS grant.
 - **Viewer still controls the Mac:** Session is not viewOnly — reconnect with `viewOnly: true` and avoid Automation `click` / `typeText` on the human monitor path.
 - **Internet exposure:** Shut public VNC ports; put VPN or WSS+auth in front ([security.md](security.md)).
 

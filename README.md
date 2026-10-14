@@ -11,17 +11,25 @@ See [architecture](docs/architecture.md), [API v3](docs/mobd-v3.md),
 [runners](docs/runners.md) and [repository split notes](docs/repository-split.md).
 
 Releasing: configure the GitHub `release` environment using the [release guide](docs/releases.md),
-then run `make release VERSION=v0.4.0` from a clean `main` matching `origin/main`
+then run `make release VERSION=vX.Y.Z` with a new stable version from a clean `main` matching `origin/main`
 (Node.js 24+ and Git required). CI signs and notarizes the binary and creates a draft
 Release; test its archive, then publish the stable Release on GitHub to distribute it through R2.
 
 ## Install / run (office Mac)
 
-Published packages and the one-line installer are served from the public R2 download
-domain, independently of the private source repository. See the product website's
-download page and the [release/installation guide](docs/releases.md#4-安装和升级).
-The installer uses `~/.local/bin`, verifies the archive and Apple signing identity,
-and preserves configuration. Stop an existing service before upgrading.
+Install on macOS 13+ with Apple Silicon, as your normal user:
+
+```bash
+curl -fsSL https://mob-releases.0xd.app/mobd/install.sh | sh
+export PATH="$HOME/.local/bin:$PATH"
+```
+
+Add the `export PATH=…` line to `~/.zshrc` to make it available in new terminals.
+The installer downloads the latest stable version from [the public manifest](https://mob-releases.0xd.app/mobd/latest.json),
+checks SHA-256 and the Apple signing identity, and installs only `mobd` into
+`~/.local/bin`. The archive also includes `LICENSE` and `README.md`.
+No sudo, Go, Node.js, Python or source checkout is needed to install the binary.
+See the [release/installation guide](docs/releases.md#4-安装和升级) for a pinned version or custom directory.
 
 The standalone binary needs no source checkout, Go, Makefile or service scripts:
 
@@ -38,6 +46,18 @@ mobd stop                       # stop; also removes login startup
 mobd start --login               # opt into startup at user login
 mobd serve                      # foreground; Ctrl-C to stop
 ```
+
+Install and authenticate the agent CLI you plan to use (Codex or Claude Code).
+Grant Accessibility and Screen Recording to the responsible app or mobd process,
+and enable macOS Screen Sharing for live viewing. Configure `listen` for your
+LAN/VPN interface when connecting from another device; `mobd init` binds to loopback.
+The download domain serves files; clients connect to your office Mac's mobd URL.
+Follow the [office smoke checklist](docs/office-smoke-checklist.md) to verify the setup.
+
+To upgrade, finish active tasks, run `mobd stop`, rerun the installer, then run
+`mobd start` (or `mobd start --login` to restore login startup). Configuration,
+conversations and attachments are preserved. Stop a foreground `mobd serve`
+process manually before installing. mobd does not use Tauri updater.
 
 The background service is a per-user macOS LaunchAgent, not a root daemon. `start`
 rejects an already loaded service or occupied port. `restart` preserves login
@@ -262,7 +282,7 @@ curl -s -X POST localhost:8080/tasks \
 | `workdir` | `MOBD_CODEX_WORKDIR` | process cwd | Codex working directory |
 | `mcpCommand` | `MOBD_MOB_MCP_COMMAND` | this `mobd` binary | MCP server command for Codex `-c` injection; empty = built-in `mobd mcp` |
 | `mcpArgs` | `MOBD_MOB_MCP_ARGS` | `["mcp"]` when built-in, else `[]` | JSON array of args (external command only) |
-| `sharedSecret` | `MOBD_SHARED_SECRET` | empty | Optional auth for POST create/cancel — **deferred** until Phase 2 App; leave unset |
+| `sharedSecret` | `MOBD_SHARED_SECRET` | empty | Optional token for mutating API routes; reads and `/vnc` are not covered ([security](docs/security.md)) |
 | `vncViewUrl` | `MOBD_VNC_VIEW_URL` | empty | Returned on tasks / health for svnc viewOnly |
 | `statePath` | `MOBD_STATE_PATH` | user config directory + `mob/state.json` | Private conversation snapshot; on macOS: `~/Library/Application Support/mob/state.json` |
 | `maxRunning` | `MOBD_MAX_RUNNING` | `1` | Tasks running at once across all sessions; others wait in the FIFO desktop queue |
@@ -284,18 +304,26 @@ curl -s -X POST localhost:8080/tasks \
 
 ## Conversations and runner lifecycle
 
-Update the office **mobd** together with the client. `/health` advertises `apiVersion: 3` with `features`, `runners` (each with models, efforts and readiness), the default runner's `codexModels`/`efforts`, and readiness `checks`; v2 clients keep working because v3 only adds fields and routes. Old in-memory tasks cannot be recovered after upgrading/restarting.
+mobd and the desktop client are released independently. `/health` advertises `apiVersion: 3` with `features`, `runners` (each with models, efforts and readiness), the default runner's `models`/`efforts`, and readiness `checks`. Clients should use these capabilities rather than require matching product versions. API version 3 is separate from the binary release version printed by `mobd --version`.
 
-- Every new turn starts `queued`. A FIFO dispatcher runs at most `MOBD_MAX_RUNNING` turns at once so agents never fight over the desktop; queued tasks report `queuePosition`, and cancelling one finishes it without starting Codex. Queued turns are marked failed on restart, like running ones.
+- Every new turn starts `queued`. A FIFO dispatcher runs at most `MOBD_MAX_RUNNING` turns at once; keep the default `1` for a shared desktop. Dispatch is asynchronous, so a newly submitted turn can still be queued before its runner starts. Queued tasks report `queuePosition`; cancelling an undispatched task finishes it without starting a runner. Queued turns are marked failed on restart, like running ones.
 - Codex `mcp_tool_call`, `command_execution`, `reasoning`, `todo_list`, `file_change`, `web_search` and `error` items become persisted **activities** (upserted by item ID, text capped at 16 KiB); tool screenshots are saved as artifacts. `turn.completed` usage is stored on the task.
 - `POST /tasks` without `sessionId` creates a conversation and its first turn atomically. With `sessionId`, it continues that conversation; an active turn returns **409**, without adding a user message.
-- The first turn uses `codex exec --json`; following turns use `codex exec … resume <resumeId> -`. Each conversation is pinned to the runner that started it ([runners](docs/runners.md)). Prompts travel through stdin. Completed `agent_message` items become assistant messages; stderr/tool output stays in debug logs. Replies appear when Codex completes a message item, rather than token by token.
+- Codex defaults to `app-server` mode: a new conversation starts a thread, and later turns resume its stored ID. It supports streamed replies, mid-turn steering and approval requests. `codexMode: "exec"` selects the JSONL CLI fallback. Claude Code is also implemented; each conversation stays pinned to the runner that started it ([runners](docs/runners.md)).
 - Conversation IDs, runner resume IDs, messages and task states are written atomically before acknowledgement/delivery. The file has mode **0600**. Keep it and Codex's own session directory on the office host. Run one mobd writer per state path; this snapshot store is intended for a single office daemon.
 - On restart, interrupted turns become **failed** and are never rerun automatically. Completed messages and resume IDs remain available for continuation.
 - Cancel returns **202** and keeps the conversation busy until the process stops and output readers finish. SIGINT/SIGTERM also cancels active turns before shutdown.
 - Use a service supervisor that cleans up child processes after a hard daemon crash/SIGKILL; otherwise stop any orphaned Codex process before resuming its conversation. Snapshot recovery marks the interrupted turn failed, but cannot stop a process left by a dead daemon.
 - SSE events have monotonic per-task `id` fields. `Last-Event-ID` / `?after=` resume in-process replay without duplicating messages. Raw logs are memory-only and capped at 2000 lines per task; after a daemon restart, `GET /sessions/:id` is the authoritative transcript and task snapshot.
 
-The runner follows the session/turn separation and structured message recovery used by [Paseo](https://github.com/getpaseo/paseo/blob/main/packages/server/src/server/agent/providers/codex-app-server-agent.ts) and [Orca](https://github.com/stablyai/orca/blob/main/src/main/codex/codex-app-server-session.ts). MOB keeps the existing CLI runner; app-server RPC is a later option for token deltas or interactive approvals. CLI event and resume behavior follows the [Codex non-interactive documentation](https://developers.openai.com/codex/noninteractive/).
+Runner protocol details, approval behavior and the shared contract tests are documented in [runners](docs/runners.md).
 
-CORS covers API responses and SSE, plus `OPTIONS` preflight for `GET`/`POST` with `Content-Type`, `Authorization`, or `X-Mob-Token`. Use the client's origin (scheme, host, and port, without a trailing slash), not the office API address. CORS does not replace authentication or LAN/VPN access controls.
+CORS covers API responses and SSE, plus `OPTIONS` preflight for `GET`/`POST`/`PATCH`/`DELETE` with `Content-Type`, `Authorization`, or `X-Mob-Token`. Use the client's origin (scheme, host, and port, without a trailing slash), not the office API address. CORS does not replace authentication or LAN/VPN access controls.
+
+## Documentation
+
+- [Releases and installation](docs/releases.md): signing, GitHub Actions, R2, install and upgrade.
+- [Architecture](docs/architecture.md), [API v3](docs/mobd-v3.md), [runners](docs/runners.md): implemented server behavior.
+- [Office smoke checklist](docs/office-smoke-checklist.md), [VNC setup](docs/vnc-svnc-setup.md), [security](docs/security.md): deployment and verification.
+- [Repository split](docs/repository-split.md), [roadmap](docs/roadmap.md): repository ownership and current delivery status.
+- Phase 1/2 plans, dated research, ADRs and the 2026-10-12 smoke report preserve design history; use the current guides above for installation.

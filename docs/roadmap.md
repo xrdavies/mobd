@@ -1,45 +1,56 @@
-# Roadmap
+# Roadmap and delivery status
 
-> Historical product plan from before the repository split. Current server setup is in
-> [README](../README.md); desktop code and build commands are in
-> [xrdavies/mob](https://github.com/xrdavies/mob).
+Status checked against the mobd repository on 2026-10-15 (Asia/Tokyo).
+The daemon is maintained in [xrdavies/mobd](https://github.com/xrdavies/mobd);
+the desktop client is in [xrdavies/mob](https://github.com/xrdavies/mob).
+Product versions are independent of the API version advertised by `/health`.
 
-Phased delivery. Do not skip the separation of **view** (human) and **actuation** (agent).
+## Implemented
 
-## Phase 1 — Prove the loop
+- Go task API v3: persistent conversations, runner resume IDs, messages and
+  activities; session management; per-task and global SSE; screenshots and uploads.
+- FIFO desktop queue, with one running agent task by default and cancellation.
+- Codex app-server (default) and exec fallback, plus Claude Code runner. App-server
+  supports streamed replies, steering and provider approval requests.
+- `mobd mcp`: local desktop tools, `ask_user`, `request_approval` and Claude's
+  permission prompt bridge. No separate Python MCP package is needed.
+- Built-in `/vnc` WebSocket relay to macOS Screen Sharing. The desktop client
+  embeds svnc with input disabled by default and an explicit Control mode.
+- JSON configuration, environment/CLI overrides, and per-user LaunchAgent commands:
+  `init`, `start`, `stop`, `restart`, `status`, `logs` and foreground `serve`.
+- Independent release tagging, Developer ID signing and Apple notarization;
+  GitHub Releases, R2 distribution, and the public install/upgrade script at
+  `https://mob-releases.0xd.app/mobd/install.sh`.
 
-- Office Mac: **Go** `mobd` control plane + **Codex** runner with **mob-mcp** (local computer-use MCP); see [implementation-phase1.md](implementation-phase1.md)
-- Office Mac: VNC server for the desktop
-- Human monitor: **svnc** in view-only mode (embedded in the App)
-- Minimal task dispatch via the thin MOB Go API (`POST /tasks`, status, SSE) to start work on the office machine
+[v0.0.2](https://github.com/xrdavies/mobd/releases/tag/v0.0.2) is published to GitHub
+and R2 as of the date above. See [releases](releases.md) for release steps and the
+[office smoke checklist](office-smoke-checklist.md) for manual acceptance.
+CI success does not replace a real office/home desktop test.
 
-**Auth:** Phase 1 optional shared secret (`MOBD_SHARED_SECRET`) stays **deferred / unset**. Do not block the loop on intranet auth; rely on intranet/VPN bind. Auth moves to Phase 2 with the App.
+## Current limits
 
-**Remaining (non-auth):** Codex path hardening on office Mac via `mobd`, richer `/health` readiness hints, optional static `web/` dispatch page. Home-client CORS is implemented via `MOBD_CORS_ORIGINS`. Detail: [client-phase2-lite.md](client-phase2-lite.md) (Phase 1 leftover table) and [implementation-phase1.md](implementation-phase1.md).
+- One shared desktop: the queue coordinates agents, but human Control mode does
+  not automatically pause the active agent.
+- Optional shared-secret checks cover mutating API routes, not read routes or
+  `/vnc`. There is no multi-user login system or dedicated security audit log.
+  Deployment remains LAN/VPN oriented ([security](security.md)).
+- Runner permissions default to `bypass`; approval enforcement depends on the
+  runner mode and configured policy ([runners](runners.md)).
+- Official binary distribution targets macOS 13+ / Apple Silicon. State is an
+  atomic JSON snapshot owned by a single daemon, with separate image artifacts.
 
-**Exit criteria:** From home, dispatch a Codex task that drives the office Mac UI, and watch the desktop live over VNC via svnc without sending human input. ✓ Delivered.
+## Planned, not implemented
 
-## Phase 2 — Productize the client
+- Pause/resume coordination for human takeover.
+- Additional runner adapters (for example Gemini, opencode or pi).
+- Multi-user authentication and broader security/audit controls.
+- Separate desktops per agent through user sessions or external VM runtimes
+  ([research](research-per-agent-desktop-vm.md)); no VM orchestration ships today.
+- Alternative view transports such as WebRTC/ScreenCaptureKit when needed.
 
-Order of work (2026-10-13): design docs ([mobd-v3](mobd-v3.md), [apps-mob-ui v2](https://github.com/xrdavies/mob/blob/main/docs/ui.md), ADR [0008](adr/0008-actuation-in-mobd.md) / [0009](https://github.com/xrdavies/mob/blob/main/docs/adr/0009-app-frontend-react.md)) → **mobd v3** APIs and features → **merge mob-mcp into mobd** → **App v2** (React port, then redesign). Security hardening is deferred while in development. Status: all four delivered on 2026-10-13 (mobd API v3, `mobd mcp`, `apps/mob` 0.2.0).
+## Historical plans
 
-Agent runners (2026-10-13, [runners.md](runners.md)): pluggable runner contract and shared tests; `ask_user` / `request_approval` with question cards; Claude Code runner (with an optional hard approval gate); Codex app-server mode with hard approvals, interrupt, steering and streaming. Next candidates: pause the agent while the user takes control, more runners (Gemini, opencode, pi; possibly via ACP).
-
-
-- Integrate the svnc viewer into MOB clients (home Mac first via **`apps/mob`**, then iPhone) — see **[client-phase2-lite.md](client-phase2-lite.md)** (recommended stack: **Tauri 2 + Vite/TS**)
-- Unified UX: chat / task list + embedded live desktop (view-only by default, Control mode opt-in)
-- **Intranet auth and basic audit log land with the App** (not as a Phase 1 gate). Wire tokens/session to `mobd` when the home client exists.
-
-**Exit criteria:** One MOB client surface for dispatch + monitor on home Mac; iPhone usable for the same core flow.
-
-## Phase 3 — View protocol flexibility (delivered: Control mode)
-
-- Optional `DesktopView` implementation: WebRTC / ScreenCaptureKit (or similar) for lower-latency self-hosted streaming
-- Human input channel for remote mouse/keyboard — **default off** (view-only); **Control** mode is an explicit opt-in toggle in the App
-- Human approval gates for sensitive actions
-
-**Exit criteria:** Clients can switch view backends without rewriting task/actuation paths; human control remains an explicit, rare escape hatch.
-
-## Later — Per-agent desktops (planning)
-
-Not an MVP gate. Target shape: shared filesystem, independent GUI desktop per agent (Grok Bot–like). Options and Tart/UTM orchestration notes: **[research-per-agent-desktop-vm.md](research-per-agent-desktop-vm.md)**. Until then, keep the **single desktop + global queue**.
+[Phase 1](implementation-phase1.md), [Phase 2 lite](client-phase2-lite.md) and the
+dated research/ADRs retain the original design decisions. Their old directory
+layouts, pending feature lists and prototype installation commands are historical;
+current installation starts in the [README](../README.md).

@@ -1,5 +1,10 @@
 # Research: per-agent independent desktop (Tart / UTM planning)
 
+> Current status (2026-10-15): mobd ships one shared-desktop queue and a built-in
+> `/vnc` relay; no VM provisioning or per-agent GUI-session scheduler is implemented.
+> The comparisons below are dated planning material, not installation instructions.
+> See [roadmap](roadmap.md) and [releases](releases.md) for the shipped daemon.
+
 **Date:** 2026-10-13 (Asia/Shanghai)
 **Repo:** [xrdavies/mob](https://github.com/xrdavies/mob)
 **Status:** planning only — **no product code** in this note. MVP remains a **single shared desktop + global queue**.
@@ -149,7 +154,7 @@ Home App (apps/mob)
 | `mobd` scheduler | Global desktop queue (one GUI driver) | Per-slot queue (or host orchestrator assigning slots); cross-slot parallelism OK |
 | Actuation | Host `mobd mcp` on the shared desktop | Per-guest (or per-user) `mobd mcp` |
 | View | One VNC / mobd `/vnc` relay | N relays or N upstream VNC targets; svnc still view/control separated |
-| Packaging | websockify OK for MVP | Stable release may fold relay/deps ([ADR 0010](adr/0010-vnc-relay-in-mobd.md) direction); hypervisor stays **external** |
+| Packaging | Signed mobd binary includes the `/vnc` relay ([ADR 0010](adr/0010-vnc-relay-in-mobd.md)); no websockify needed for mob | Hypervisor stays **external**; provision mobd inside each guest |
 
 MOB continues to **not** own a fork of Tart/UTM/svnc’s core; it integrates and orchestrates.
 

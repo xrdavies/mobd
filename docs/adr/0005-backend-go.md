@@ -4,6 +4,11 @@
 
 Accepted
 
+Implementation update (2026-10-15): the standalone daemon includes the service
+CLI, native actuation, MCP and VNC relay. Go/Xcode are needed to build from
+source; users can install a signed macOS Apple Silicon binary without those
+toolchains ([installation](../releases.md#4-安装和升级)).
+
 ## Context
 
 Phase 1 needs a long-running office process that exposes a thin task HTTP API (including SSE) and spawns/cancels a Codex CLI session with local MCP. Candidate stacks discussed: Go, Rust, Node, and Bun.
