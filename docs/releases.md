@@ -84,21 +84,40 @@ R2 发布只需要 `contents: read`。Apple 凭据缺失或签名、公证失败
 
 ## 3. 构建和发布
 
-在 mobd 仓库打标签（与桌面端版本独立）：
+配置好 `release` 环境后，在 **mobd 仓库根目录**运行。需要 Node.js 24+、Git 和
+`origin` 的推送权限；签名证书由 CI 读取，本机无需安装，也不需要 GitHub CLI。
+先提交并推送要发布的修改，让本地 `main` 与远端一致。版本号与桌面端独立：
 
 ```bash
-git tag v0.4.0
-git push origin v0.4.0
+git switch main
+git pull --ff-only
+# 如果有本地提交，先执行 git push origin main
+make release VERSION=v0.4.0
 ```
 
-也可手动运行 **Release mobd macOS arm64** 并填写已存在的稳定标签。
+将示例版本替换成实际版本。脚本 `.github/release/tag.mjs` 会：
+
+1. 校验 `vMAJOR.MINOR.PATCH` 格式，不接受预发布后缀或带前导零的版本。
+2. 要求当前分支为 `main`，工作区和暂存区干净（包括未跟踪文件）。
+3. 在线读取 `origin/main` 和版本标签，确认当前提交已经推送、没有落后远端。
+4. 拒绝本地或远端已有的标签，以及低于远端已有稳定标签的版本。
+5. 在当前提交创建附注标签，只推送该标签，触发 **Release mobd macOS arm64**。
+
+也可以直接运行 `node .github/release/tag.mjs v0.4.0`。脚本不自动提交、合并或推送
+分支，也不修改源码中的版本号；二进制版本由 CI 根据标签注入。测试、打包和签名在
+Actions 中执行。本地可先运行 `make check`；只测试发布工具使用 `make release-test`。
+
+推送标签成功表示构建请求已提交，**不表示构建或公开发布已经完成**。
+到仓库的 Actions 页面查看 **Release mobd macOS arm64**；也可以手动运行它，
+填写已存在的稳定标签。
 `.github/workflows/release.yml` 将标签解析为确切提交，运行 Go vet/test，以 CGO
 构建 arm64 二进制并注入版本；验证版本和架构后，执行 Developer ID 签名、Apple
 公证和签名验证，打包 `mobd`、LICENSE、README，并生成 `SHA256SUMS` 和草稿 Release。
-Node.js 24 只用于 CI 的分发测试；用户运行二进制不需要 Node.js 或 Go。
+Node.js 用于发布脚本及分发测试；用户运行二进制不需要 Node.js 或 Go。
 
-在另一台 Apple Silicon Mac 上试装，编辑面向用户的 release notes，然后发布稳定
-GitHub Release。**Publish mobd downloads to R2** 随之运行：
+在另一台 Apple Silicon Mac 上试装，编辑面向用户的 release notes，然后在 GitHub
+的 Releases 页面打开草稿，点击 **Publish release**，保持 **Set as a pre-release**
+未勾选。脚本不会自动发布草稿。**Publish mobd downloads to R2** 随之运行：
 
 1. 下载这个 mobd Release 的二进制归档和 `SHA256SUMS`，验证校验和。
 2. 生成版本清单、校验文件及固定下载域名和 Apple Team ID 的安装脚本。
@@ -128,6 +147,22 @@ mobd/
 
 下载域名和以上路径保持不变，官网 `mob-site` 仍读取 `mobd/latest.json` 和
 `mobd/releases.json`；桌面端和服务端无需同时发布，也无需相同版本号。
+
+等 R2 工作流成功后，打开 `${DOWNLOAD_BASE_URL}/mobd/latest.json` 确认版本，
+并按下一节的安装步骤验证下载和签名。
+
+### 失败与重试
+
+- 本地检查失败：根据提示处理工作区、分支或版本；此时尚未创建标签。
+- 标签推送失败：保留本地标签，避免丢失或改变发布提交。先用
+  `git ls-remote origin refs/tags/v0.4.0` 查看远端；若没有该标签，修复网络或权限后执行
+  `git -c push.followTags=false push origin refs/tags/v0.4.0:refs/tags/v0.4.0`。
+  若标签已存在，查看 Actions；不要重新创建或强制移动标签。
+- 构建、签名或公证失败：修正 GitHub 环境配置后，在 Actions 重跑失败任务，
+  或手动运行 **Release mobd macOS arm64**，使用原标签。
+- 需要修改代码：提交并推送修改，使用新的更高版本标签。
+- R2 发布失败：手动运行 **Publish mobd downloads to R2**，填写已发布的原标签；
+  保持产物和发布说明不变。已公开版本的内容变化需要新版本。
 
 ## 4. 安装和升级
 

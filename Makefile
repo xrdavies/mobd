@@ -6,7 +6,7 @@ ARGS    ?=
 
 .DEFAULT_GOAL := help
 .PHONY: help build test race vet fmt check clean \
-	init serve start stop restart status logs release-test
+	init serve start stop restart status logs release release-test
 
 help: ## List targets
 	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z_-]+:.*## / {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -49,7 +49,11 @@ status: build ## Show mobd status and address
 logs: build ## Follow the mobd log
 	$(BIN) logs
 
-release-test: ## Test R2 publishing and installer
+release: export RELEASE_TAG = $(VERSION)
+release: ## Create and push a release tag (VERSION=vX.Y.Z)
+	node .github/release/tag.mjs "$$RELEASE_TAG"
+
+release-test: ## Test release tagging, R2 publishing and installer
 	node --test .github/release/*.test.mjs
 
 check: vet test release-test ## Go vet, Go tests and distribution tests

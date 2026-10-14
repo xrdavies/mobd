@@ -10,6 +10,11 @@ Source: Go 1.27+ and Xcode Command Line Tools on macOS. Run `make build`,
 See [architecture](docs/architecture.md), [API v3](docs/mobd-v3.md),
 [runners](docs/runners.md) and [repository split notes](docs/repository-split.md).
 
+Releasing: configure the GitHub `release` environment using the [release guide](docs/releases.md),
+then run `make release VERSION=v0.4.0` from a clean `main` matching `origin/main`
+(Node.js 24+ and Git required). CI signs and notarizes the binary and creates a draft
+Release; test its archive, then publish the stable Release on GitHub to distribute it through R2.
+
 ## Install / run (office Mac)
 
 Published packages and the one-line installer are served from the public R2 download
