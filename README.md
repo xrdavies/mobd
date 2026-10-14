@@ -1,14 +1,14 @@
 # mobd
 
-Office control plane: HTTP task API + Codex and Claude Code runners. The same binary is the desktop actuation MCP server (`mobd mcp`, [ADR 0008](docs/adr/0008-actuation-in-mobd.md)); Codex launches it for each task.
+Office control plane: HTTP task API + Codex and Claude Code runners. The same binary provides the desktop actuation MCP server (`mobd mcp`), launched by the agent for each task.
 
 Desktop clients connect over HTTP/SSE and the VNC relay. The desktop app lives in
 [xrdavies/mob](https://github.com/xrdavies/mob); this repository builds independently.
 
 Source: Go 1.27+ and Xcode Command Line Tools on macOS. Run `make build`,
 `make check` (Go vet/tests plus Node.js 24+ distribution tests), or `make race`.
-See [architecture](docs/architecture.md), [API v3](docs/mobd-v3.md),
-[runners](docs/runners.md) and [repository split notes](docs/repository-split.md).
+See [architecture](docs/architecture.md), [API reference](docs/mobd-v3.md)
+and [runners](docs/runners.md).
 
 Releasing: configure the GitHub `release` environment using the [release guide](docs/releases.md),
 then run `make release VERSION=vX.Y.Z` with a new stable version from a clean `main` matching `origin/main`
@@ -99,13 +99,11 @@ in long-lived configs; JSON does not expand `~`, `$HOME`, or shell expressions.
 All JSON keys and their environment equivalents are listed below. An exported
 empty string overrides JSON too: it clears optional values, but is invalid for
 required settings. `MOBD_MOB_MCP_ARGS` must be a JSON array (no comma fallback).
-Existing snapshots stay at `~/Library/Application Support/mob/state.json` on
-macOS, so this upgrade does not hide or move conversation history. Explicit
-`statePath` / `MOBD_STATE_PATH` still takes precedence. The old `scripts/.env`
-is not automatically migrated; export it yourself once or copy its values into
-JSON. Stop any old script-managed process before starting the LaunchAgent.
+Conversation snapshots default to `~/Library/Application Support/mob/state.json`
+on macOS. Set `statePath` / `MOBD_STATE_PATH` to use a different location.
 
-If `codex` is not on `PATH`, creating a task still works: the runner logs a clear error and marks the task **failed** (safe stub — mobd does not crash).
+If the configured agent executable is unavailable, its runner reports an error
+and marks the task **failed**.
 
 ### JSON configuration (recommended for end users)
 
@@ -142,7 +140,7 @@ choose `"approve"` to request approval for supported actions.
 
 The example listens on `127.0.0.1:8080`; change `listen` to `"0.0.0.0:8080"`
 for LAN/VPN clients. Optional fields omitted from the example use their defaults,
-including the existing conversation and artifact locations. JSON must not contain
+including the conversation and artifact locations. JSON must not contain
 comments or trailing commas, and paths do not expand `~` or `$HOME`.
 
 After editing the config, run `mobd restart` to apply it. Use `mobd serve` to run
@@ -208,7 +206,7 @@ curl -s -X POST localhost:8080/tasks \
   -H 'Content-Type: application/json' \
   -d '{"prompt":"Use mob-mcp to open Safari"}' | jq .
 
-# follow-up: reuse the returned sessionId (never use Codex --last)
+# follow-up: reuse the returned sessionId
 curl -s -X POST localhost:8080/tasks \
   -H 'Content-Type: application/json' \
   -d '{"sessionId":"SESSION_ID","prompt":"Now open example.com in that window"}' | jq .
@@ -233,7 +231,8 @@ curl -N -H 'Last-Event-ID: 12' localhost:8080/tasks/TASK_ID/events
 curl -s -X POST localhost:8080/tasks/TASK_ID/cancel | jq .
 ```
 
-v3 additions ([design](docs/mobd-v3.md)):
+Task options, attachments, session management and live updates
+([API reference](docs/mobd-v3.md)):
 
 ```bash
 # per-turn model / reasoning effort / image attachments
@@ -253,7 +252,7 @@ curl -s -X DELETE localhost:8080/sessions/SESSION_ID -o /dev/null -w '%{http_cod
 # timeline: messages + activities (tool calls, commands, plans…) + task usage
 curl -s localhost:8080/sessions/SESSION_ID | jq '.activities'
 
-# live view: WebSocket relay to Screen Sharing (ADR 0010)
+# live view: WebSocket relay to Screen Sharing
 # ws://localhost:8080/vnc   ← svnc / the App connect here
 
 # global live stream (session / session.deleted / task / queue / reset)
@@ -287,7 +286,7 @@ curl -s -X POST localhost:8080/tasks \
 | `statePath` | `MOBD_STATE_PATH` | user config directory + `mob/state.json` | Private conversation snapshot; on macOS: `~/Library/Application Support/mob/state.json` |
 | `maxRunning` | `MOBD_MAX_RUNNING` | `1` | Tasks running at once across all sessions; others wait in the FIFO desktop queue |
 | `dataDir` | `MOBD_DATA_DIR` | directory of `MOBD_STATE_PATH` | Root of `artifacts/` (tool screenshots, uploads) |
-| `codexModels` | `MOBD_CODEX_MODELS` (legacy `MOBD_MODELS`) | empty | Comma-separated model IDs advertised on `/health` for client pickers |
+| `codexModels` | `MOBD_CODEX_MODELS` | empty | Comma-separated model IDs advertised on `/health` for client pickers; `MOBD_MODELS` is also accepted, with lower priority |
 | `vncAddr` | `MOBD_VNC_ADDR` | `127.0.0.1:5900` | VNC server (macOS Screen Sharing) relayed by `GET /vnc` and checked by `/health` |
 | `corsOrigins` | `MOBD_CORS_ORIGINS` | `http://localhost:1420,http://127.0.0.1:1420,tauri://localhost,http://tauri.localhost` | Comma-separated exact origins; a nonempty value replaces the defaults |
 | `questionTimeout` | `MOBD_QUESTION_TIMEOUT` | `30m` | How long a turn waits for your answer to the agent's question or approval request |
@@ -323,7 +322,5 @@ CORS covers API responses and SSE, plus `OPTIONS` preflight for `GET`/`POST`/`PA
 ## Documentation
 
 - [Releases and installation](docs/releases.md): signing, GitHub Actions, R2, install and upgrade.
-- [Architecture](docs/architecture.md), [API v3](docs/mobd-v3.md), [runners](docs/runners.md): implemented server behavior.
+- [Architecture](docs/architecture.md), [API reference](docs/mobd-v3.md), [runners](docs/runners.md): server behavior and supported capabilities.
 - [Office smoke checklist](docs/office-smoke-checklist.md), [VNC setup](docs/vnc-svnc-setup.md), [security](docs/security.md): deployment and verification.
-- [Repository split](docs/repository-split.md), [roadmap](docs/roadmap.md): repository ownership and current delivery status.
-- Phase 1/2 plans, dated research, ADRs and the 2026-10-12 smoke report preserve design history; use the current guides above for installation.

@@ -1,17 +1,18 @@
 # Security notes
 
-Short guidance aligned with the product design. Details of VNC transport should follow [svnc](https://github.com/xrdavies/svnc) peripheral / deployment docs.
+Access controls and deployment requirements for mobd. See [VNC setup](vnc-svnc-setup.md)
+for the live-view connection.
 
 ## Deployment posture
 
 - Prefer **office intranet** or **VPN**. Do not expose raw VNC to the public internet.
-- For remote access, terminate TLS at a **WSS reverse proxy** or use **SSH** tunneling for VNC. Avoid relying on VeNCrypt as the primary story (same stance as svnc guidance).
+- For remote access, terminate TLS at a **WSS reverse proxy** or use **SSH** tunneling.
 - `mobd init` writes a loopback listen address. Without a config override, the runtime default is `:8080`; choose the bind address explicitly for deployment.
 
 ## View vs actuation
 
 - **Humans:** the mob desktop client disables input by default and offers an explicit Control mode. A standalone svnc monitor can use **`viewOnly: true`**. This is client behavior; mobd relays RFB bytes and does not enforce view-only access.
-- **Agent:** Prefer **local MCP** on the office Mac. If svnc Automation is used as fallback, it must be a **separate** connection/path from the human viewOnly session.
+- **Agent:** desktop tools run through **local MCP** (`mobd mcp`) on the office Mac, independently of the human VNC connection.
 
 Keeping these channels apart limits accidental remote control and makes auditing clearer.
 

@@ -4,12 +4,8 @@
 桌面应用在 [mob](https://github.com/xrdavies/mob) 独立发布，Tauri updater 配置也只在
 桌面仓库。两端可共享 R2 桶和下载域名；本仓库仅维护 `mobd/`，无需桌面构建产物。
 
-公开下载根地址为 **https://mob-releases.0xd.app**。截至 2026-10-15（Asia/Tokyo），
-[v0.0.2](https://github.com/xrdavies/mobd/releases/tag/v0.0.2) 已发布，
-[R2 分发任务](https://github.com/xrdavies/mobd/actions/runs/38649050239) 已成功。
-公共安装脚本的签名参数修复已通过[单独发布任务](https://github.com/xrdavies/mobd/actions/runs/38650187252)
-上线，并用真实归档完成临时目录安装验证；不代表已完成远程桌面或另一台 Mac 的验收。
-后续最新版本以 [latest.json](https://mob-releases.0xd.app/mobd/latest.json) 为准。
+公开下载根地址为 **https://mob-releases.0xd.app**。
+最新稳定版本以 [latest.json](https://mob-releases.0xd.app/mobd/latest.json) 为准。
 普通用户直接看[安装和升级](#4-安装和升级)；以下 GitHub/Cloudflare 配置面向维护者。
 
 ## 1. 准备 Cloudflare R2
@@ -104,7 +100,7 @@ git pull --ff-only
 make release VERSION=v0.0.3
 ```
 
-`v0.0.3` 是在已发布 `v0.0.2` 后创建新版本的示例；执行时选择高于已有标签的版本。
+`v0.0.3` 是版本号示例；执行时选择高于已有标签的版本。
 若只需重试已发布版本的 R2 分发，直接使用下方的 R2 工作流，不运行此命令。
 脚本 `.github/release/tag.mjs` 会：
 
@@ -158,13 +154,13 @@ GitHub Release 发布后，分发不需要重新构建或签名，按以下步�
 gh workflow run publish-r2.yml --repo xrdavies/mobd --ref main -f tag=v0.0.3
 ```
 
-`v0.0.2` 已完成分发，且它的公共安装脚本已单独修复。维护该版本的安装脚本时使用
-下一节的 `installer_only`；用新模板重新完整分发旧版本会因固定文件内容变化而被拒绝。
+仅更新安装脚本时使用下一节的 `installer_only`；完整分发会校验版本目录内
+所有文件，模板变化导致已发布文件内容不同时会拒绝覆盖。
 
-### 仅修复公共安装脚本
+### 仅更新公共安装脚本
 
-若二进制和版本清单已经发布，只需修复安装脚本，在上述工作流中勾选
-`installer_only`，`tag` 填写 **当前 stable 版本**。对应命令：
+若二进制和版本清单已经发布，只需更新安装脚本，在上述工作流中勾选
+`installer_only`，`tag` 填写 **当前 stable 版本**。对应命令（替换示例标签）：
 
 ```bash
 gh workflow run publish-r2.yml --repo xrdavies/mobd --ref main \
@@ -172,8 +168,8 @@ gh workflow run publish-r2.yml --repo xrdavies/mobd --ref main \
 ```
 
 此模式先核对 R2 当前 stable 清单和归档校验和，再更新并验证 `mobd/install.sh`。
-它不修改任何版本目录、二进制、Release 附件或版本清单。修复后的安装入口始终是
-`https://mob-releases.0xd.app/mobd/install.sh`；版本目录内的旧脚本保持原样。
+它不修改任何版本目录、二进制、Release 附件或版本清单。安装入口是
+`https://mob-releases.0xd.app/mobd/install.sh`；版本目录内的脚本固定不变。
 普通新版本发布保持 `installer_only` 未勾选。
 
 默认 `GITHUB_TOKEN` 发布的 Release 事件不会触发另一工作流，遇到这种情况需要手动
@@ -191,7 +187,7 @@ mobd/
   releases.json
 ```
 
-下载域名和以上路径保持不变，官网 `mob-site` 仍读取 `mobd/latest.json` 和
+官网 `mob-site` 读取 `mobd/latest.json` 和
 `mobd/releases.json`；桌面端和服务端无需同时发布，也无需相同版本号。
 
 等 R2 工作流成功后，打开 `https://mob-releases.0xd.app/mobd/latest.json` 确认版本，
@@ -210,8 +206,6 @@ mobd/
 - R2 发布失败：手动运行 **Publish mobd downloads to R2**，填写已发布的原标签；
   保持产物和发布说明不变。已公开版本的内容变化需要新版本。
   若只有公共安装脚本修复，使用 `installer_only` 更新当前 stable 的入口。
-- 安装时出现 `invalid requirement specification`：早期安装脚本缺少 `codesign -R`
-  内联表达式的 `=` 前缀。使用公共 `mobd/install.sh` 的修复版；不需要重新签名二进制。
 - 工作流代码已更新时，在 `main` 上点击 **Run workflow** 并填写版本标签；
   旧运行的 **Re-run jobs** 使用原提交，不会采用新的工作流代码。
 

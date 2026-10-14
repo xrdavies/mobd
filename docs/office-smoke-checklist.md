@@ -1,8 +1,7 @@
 # Office Mac smoke checklist
 
 Verify the installed mobd, one configured agent runner, and the home client's live
-view on the real office desktop. This is the current deployment checklist; the
-[2026-10-12 report](office-smoke-test-report.md) records the earlier Python MCP prototype.
+view on the real office desktop.
 
 Use an office LAN or VPN. The release download domain distributes files; it is
 not the task API address. See [security](security.md) for the current access controls.
@@ -54,7 +53,7 @@ Edit `~/.mobd/config.json` before starting:
    macOS permissions and VNC readiness. Use `mobd logs` to investigate failures.
 
 `mobd mcp` is built into the same binary. mobd injects its configuration into each
-agent turn; no Python MCP installation or global Codex MCP registration is needed.
+agent turn; no separate MCP installation or global agent configuration is needed.
 
 ## 3. Submit a task through mobd
 
@@ -101,7 +100,5 @@ is documented in [VNC setup](vnc-svnc-setup.md).
 | Persistence | After completed tasks, `mobd restart` retains conversations and configuration. |
 | Upgrade | Stop, install and start preserves configuration and conversations. |
 
-Record the tested release, macOS version, runner version, launch method and results
-in a new dated report. Do not treat the old prototype report as verification of
-this release. Use `mobd start --login` only when login startup is desired;
+Use `mobd start --login` when login startup is desired;
 `mobd stop` removes that registration.

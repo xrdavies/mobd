@@ -1,8 +1,11 @@
 # Runners
 
-A **runner** connects mobd to one agent CLI (Codex and Claude Code today; Gemini, opencode, pi are candidates). mobd never sees an agent's own output format: each runner translates it into neutral events, and the API, store and App only deal with those.
+A **runner** connects mobd to an agent CLI. Codex and Claude Code are supported.
+Each runner translates its provider's output into shared events used by the API,
+store and App.
 
-Related: [mobd-v3.md](mobd-v3.md) (API), [ADR 0004](adr/0004-runner-codex-first.md) (Codex first), [ADR 0008](adr/0008-actuation-in-mobd.md) (desktop tools via `mobd mcp`).
+Related: [API reference](mobd-v3.md) and [architecture](architecture.md)
+(desktop tools via `mobd mcp`).
 
 Install mobd with the [published installer](releases.md#4-安装和升级), then install
 and authenticate the agent CLI separately as the same office user. The archive
@@ -39,7 +42,7 @@ Returning an error fails the turn with that message.
 
 ### Sessions are pinned to a runner
 
-A conversation's `resumeId` only means something to the runner that created it. The first turn records `session.runner`; later turns use the same runner, and asking for another one returns **409** ("start a new chat to switch"). State written before runners existed is migrated on start: `threadId` becomes `resumeId`, and the runner becomes `codex`.
+A conversation's `resumeId` only means something to the runner that created it. The first turn records `session.runner`; later turns use the same runner, and asking for another one returns **409** ("start a new chat to switch").
 
 ### Shared pieces
 
@@ -76,7 +79,7 @@ For Codex in `exec` mode, approval is a soft gate: the instructions tell it to c
 
 `MOBD_CODEX_MODE=app-server` (default; `exec` is the fallback) runs `codex app-server`, Codex's JSON-RPC server over stdio (one message per line, no `jsonrpc` field), one process per turn: `initialize` → `initialized` → `thread/start` or `thread/resume` (cwd, `sandbox: danger-full-access`, approval policy, `developerInstructions`, model) → `turn/start` (text and `localImage` inputs, model, effort). Notifications map like the exec JSONL: `item/started`/`item/completed` → steps and replies, `thread/tokenUsage/updated` → turn usage (thread total minus what preceded the turn), `turn/completed` ends the turn and closes stdin so the server exits. mob-mcp is configured with the same `-c mcp_servers.mob-mcp.*` overrides as exec. Resume IDs are Codex thread IDs in both modes.
 
-What app-server adds:
+App-server capabilities:
 
 - **Hard approvals.** `MOBD_CODEX_PERMISSIONS=approve` sets `approvalPolicy: "untrusted"`. Codex's `item/commandExecution/requestApproval` and `item/fileChange/requestApproval` requests become approval cards ("Allow the agent to run …?") through `Options.Ask`, answered `accept`/`decline`; no answer means decline. Default `bypass` uses `never`.
 - **Interrupt.** Cancelling sends `turn/interrupt` and gives Codex 3 s to stop before the process group is killed.
@@ -101,5 +104,5 @@ The protocol is marked experimental by Codex; `codex app-server generate-ts --ou
 
 Enabled runners come from `MOBD_RUNNERS` (default `codex,claude`); missing CLIs show as unavailable on `/health` and in the App.
 
-- **Codex:** models offered to clients come from `MOBD_CODEX_MODELS` (`MOBD_MODELS` is still read).
+- **Codex:** models offered to clients come from `MOBD_CODEX_MODELS` (`MOBD_MODELS` is also accepted, with lower priority).
 - **Claude Code:** `MOBD_CLAUDE_BIN`, `MOBD_CLAUDE_WORKDIR` (default: Codex's), `MOBD_CLAUDE_MODELS` (default `opus,sonnet,haiku`), `MOBD_CLAUDE_PERMISSIONS` (`bypass` default, or `approve`). Only mob's MCP server is loaded, and `MOBD_CLAUDE_SETTING_SOURCES=project` (default) keeps your personal `~/.claude` hooks and settings out of office runs; `all` loads them. Output mapping: `system/init` → resume, `text` → message, `thinking` → reasoning, `tool_use`/`tool_result` → steps (`Bash` → command, `TodoWrite` → plan, `Edit`/`Write` → file change, `mcp__mob-mcp__*` → desktop tools), `result` → usage with `costUsd`.

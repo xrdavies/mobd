@@ -5,11 +5,12 @@ The mob client disables human input by default and offers explicit Control mode;
 a standalone [svnc](https://github.com/xrdavies/svnc) monitor can use `viewOnly: true`.
 The agent actuates through `mobd mcp` on the office machine.
 
-Related: [ADR 0001](adr/0001-screen-view-vnc-svnc.md), [security.md](security.md), svnc [peripheral security](https://github.com/xrdavies/svnc/blob/main/docs/peripheral-security.md) and [websockify decision](https://github.com/xrdavies/svnc/blob/main/docs/websockify-decision.md).
+Related: [architecture](architecture.md), [security](security.md) and
+svnc [peripheral security](https://github.com/xrdavies/svnc/blob/main/docs/peripheral-security.md).
 
-> **Current mob setup:** install [mobd](releases.md#4-安装和升级), enable Screen Sharing,
+> **mob setup:** install [mobd](releases.md#4-安装和升级), enable Screen Sharing,
 > and enter the office Mac's mobd URL in the App. mobd relays the live view on
-> `GET /vnc` ([ADR 0010](adr/0010-vnc-relay-in-mobd.md)). websockify is only needed
+> `GET /vnc`. websockify is only needed
 > for standalone svnc setups that do not use this relay.
 
 **Ports below are examples only** — pick free ports and firewall rules that fit your LAN. Nothing here mandates a specific port number.
@@ -39,15 +40,17 @@ Prefer **office intranet or VPN**. Do not expose raw VNC (`5900`-style TCP) to t
 3. Note how you will reach the machine from the bridge host:
    - Same Mac as Screen Sharing: often `127.0.0.1` and the local VNC port Screen Sharing uses (commonly illustrated as `5900` — **verify on your Mac**; it can differ with multi-display / custom setups).
    - Another host on the LAN: use the office Mac’s LAN IP or hostname instead of inventing a fixed port in docs or scripts.
-4. Confirm from another Mac on the same trusted network with the built-in Screen Sharing client (or any VNC client) that the desktop appears **before** adding websockify.
+4. Confirm from another Mac on the same trusted network with the built-in Screen Sharing client (or any VNC client) that the desktop appears before connecting through the WebSocket relay.
 
 Optional: another VNC server (e.g. TigerVNC) is fine if you already run one; MOB only needs a classic RFB TCP endpoint the bridge can target.
 
 ## 2. Office — bridge TCP VNC → WebSocket
 
-Browsers cannot open raw TCP VNC. [svnc](https://github.com/xrdavies/svnc) expects a **WebSocket** that carries RFB bytes. Use **[websockify](https://github.com/novnc/websockify)** (or an equivalent WS↔TCP bridge). svnc itself does not ship a production bridge.
+Browsers cannot open raw TCP VNC. [svnc](https://github.com/xrdavies/svnc) expects a
+**WebSocket** that carries RFB bytes. mobd provides this relay at `/vnc`;
+standalone svnc can use **[websockify](https://github.com/novnc/websockify)**.
 
-### With mob: no bridge needed
+### With mob: built-in relay
 
 `mobd` relays VNC itself on `GET /vnc`. Start it with the [mobd CLI](../README.md) and point the App at the mobd URL only:
 
@@ -76,7 +79,7 @@ Leave mobd running while you test (the CLI manages a user LaunchAgent). Restart 
 
 ## 3. TLS / WSS (when the path leaves a trusted LAN)
 
-Align with svnc **D7**: encrypt at the **edge**, not via RFB VeNCrypt-first.
+Terminate TLS at a reverse proxy or carry the connection through a VPN/SSH tunnel.
 
 | Situation | Suggestion |
 | --- | --- |
@@ -86,7 +89,7 @@ Align with svnc **D7**: encrypt at the **edge**, not via RFB VeNCrypt-first.
 Example mental model (ports/hostnames are yours to choose):
 
 ```text
-Browser ──WSS──► reverse proxy ──WS──► websockify ──TCP──► VNC on office Mac
+Browser ──WSS──► reverse proxy ──WS──► mobd /vnc ──TCP──► VNC on office Mac
 ```
 
 Details: [svnc peripheral-security.md](https://github.com/xrdavies/svnc/blob/main/docs/peripheral-security.md).
@@ -129,9 +132,8 @@ Quick start reference: [svnc quick-start](https://github.com/xrdavies/svnc/blob/
 | No human input | With `viewOnly: true`, clicks and keypresses in the viewer must **not** move the office cursor or type into office apps. |
 | Separation | Agent work still goes through `mob-mcp` / Codex on the office Mac, not through this viewOnly session. |
 
-Use the current [office smoke checklist](office-smoke-checklist.md#4-verify-the-home-view)
-and record the tested release in a new dated report. The existing
-[smoke report](office-smoke-test-report.md) covers the 2026-10-12 prototype only.
+Use the [office smoke checklist](office-smoke-checklist.md#4-verify-the-home-view)
+to verify the full task and live-view flow.
 
 ## Troubleshooting
 
@@ -146,5 +148,4 @@ and record the tested release in a new dated report. The existing
 - [websockify](https://github.com/novnc/websockify)
 - [mobd CLI](../README.md) — office service and configuration
 - [Office smoke checklist](office-smoke-checklist.md)
-- [Office smoke test report](office-smoke-test-report.md)
 - [Architecture](architecture.md)

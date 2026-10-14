@@ -20,58 +20,69 @@ Clients are a remote control + monitor, not the place where the agent runtime li
 
 ### Control plane (task API)
 
-Thin HTTP/API layer owned by MOB, implemented in **Go** as `mobd` (see [ADR 0005](adr/0005-backend-go.md) and the [API reference](mobd-v3.md)):
+The HTTP API is implemented in **Go** as `mobd` (see the [API reference](mobd-v3.md)):
 
 - create / list / cancel tasks
 - list conversations and restore their complete user/assistant transcripts
 - attach each task/turn to a stable runner session (Codex or Claude Code)
 - stream or poll status (SSE)
 - questions and approval requests, plus steering when supported by the runner
-
-MOB learns UX concepts from tools like Paseo / Orca (remote start of coding agents, task state) but does **not** fork those projects. See [ADR 0002](adr/0002-orchestration-thin-custom.md).
-
-`mobd` v3 ([design](mobd-v3.md)) adds typed agent activities, a global desktop queue (one driver at a time), session admin, a global event stream, desktop snapshots and uploads.
+- typed agent activities and a global FIFO desktop queue
+- session management, a global event stream, desktop snapshots and image uploads
 
 `mobd` stores conversations, messages, activities, questions, turn states and runner resume IDs in an atomic private JSON snapshot (`MOBD_STATE_PATH`). Each conversation allows one active turn. Codex defaults to app-server mode; its exec fallback and the Claude runner translate provider output into the same model. SSE debug logs are separate from chat messages. See [the session API](../README.md#conversations-and-runner-lifecycle).
 
-### Office runner (Codex first)
+### Office runners
 
 Process(es) on the office Mac that:
 
 - receive a task from the control plane
-- start or attach a **Codex** session with the configured computer-use / MCP tools
+- start or resume a **Codex** or **Claude Code** session with the configured MCP tools
 - report progress back to the control plane
 
-**Codex** and **Claude Code** are the built runners; others (Gemini, opencode, pi) are pluggable behind the same interface. See [ADR 0004](adr/0004-runner-codex-first.md).
+**Codex** and **Claude Code** implement the shared runner interface. Each adapter
+translates its provider's output into mobd events. See [runners](runners.md) for
+configuration, capabilities and the adapter contract.
 
 ### Actuation (local MCP)
 
 How the agent opens apps and operates the GUI on the office Mac.
 
-- **Default:** the `mob-mcp` tool set, built into the `mobd` binary (`internal/actuate`, served by `mobd mcp` over stdio; the agent launches it per task). Grant macOS Accessibility and Screen Recording to the responsible process or launching app; mobd reuses actuation for `/screen` and the `/health` permission checks. See [ADR 0008](adr/0008-actuation-in-mobd.md), [ADR 0007](adr/0007-actuation-mob-mcp.md) and [research-computer-use.md](research-computer-use.md).
-- **Later optional:** other local MCP servers via configuration **after license review** (GhostDesk FSL Competing Use is a poor fit to ship as MOB’s core; see research).
-- **Fallback:** svnc Automation (click / type over VNC), on a path separate from the human viewOnly session.
+The `mob-mcp` tool set is built into the `mobd` binary and served by `mobd mcp`
+over stdio. The agent launches it as a separate process for each task.
+`internal/actuate` implements macOS capture and input; mobd also uses it directly
+for `/screen` and `/health` permission checks. Non-macOS builds use stubs for
+desktop operations.
 
-See [ADR 0003](adr/0003-actuation-local-mcp.md).
+The desktop tools are `screenshot`, `click`, `type_text`, `key`, `list_windows`
+and `open_app`. Screenshots return PNG data and display metadata, including
+`scale_factor`; clicks use logical point coordinates. Grant Accessibility and
+Screen Recording to the responsible process or launching app and verify actual
+tool operation with the [office checklist](office-smoke-checklist.md).
+
+`mcpCommand` and `mcpArgs` configure an external MCP command when needed.
+The default command is this mobd binary with the `mcp` argument.
 
 ### View (VNC + svnc)
 
 - Office Mac runs a VNC server exposing the desktop.
-- Humans connect with **[svnc](https://github.com/xrdavies/svnc)** through mobd's WebSocket relay at `/vnc` ([ADR 0010](adr/0010-vnc-relay-in-mobd.md)); view-only by default, with an explicit Control mode in the App's full-size view.
-- Transport: prefer intranet / VPN; use WSS reverse proxy or SSH as documented for svnc peripherals (not VeNCrypt).
+- Humans connect with **[svnc](https://github.com/xrdavies/svnc)** through mobd's WebSocket relay at `/vnc`; view-only by default, with an explicit Control mode in the App's full-size view.
+- The relay connects to `vncAddr` (default `127.0.0.1:5900`) and copies RFB bytes without interpreting them. Screen Sharing handles VNC authentication, including Apple Remote Desktop sign-in.
+- The client derives the WebSocket URL from the mobd URL. `/health` reports VNC reachability and the number of open relays in `vncSessions`.
+- Browser origins must match the relay host or `corsOrigins`; clients without an Origin header are accepted. Relays close when mobd shuts down.
+- Transport: use the intranet / VPN, a WSS reverse proxy or an SSH tunnel.
 
-See [ADR 0001](adr/0001-screen-view-vnc-svnc.md) and [security](security.md).
+See [VNC setup](vnc-svnc-setup.md) and [security](security.md).
 
-### DesktopView interface
+## Operating limits
 
-Monitor implementations should sit behind a small abstraction (name: `DesktopView`) so the client depends on “show office desktop,” not on raw VNC forever.
-
-- **Default implementation:** VNC via svnc
-- **Later candidates:** WebRTC + ScreenCaptureKit (macOS), other protocols
-
-Actuation APIs are **not** part of `DesktopView`. Viewing and driving stay separate.
-
-**Later (planning):** parallel agents need separate GUI sessions (multi-user Screen Sharing or Tart/UTM VMs), not Spaces on one desktop — see [research-per-agent-desktop-vm.md](research-per-agent-desktop-vm.md). MVP stays one desktop + global queue.
+- Tasks share one desktop. Keep `maxRunning: 1` to serialize agent input; mobd
+  does not provision separate desktops or virtual machines.
+- Human Control mode does not automatically pause an active agent.
+- Run one daemon per state path. Storage is an atomic JSON snapshot with separate
+  image files; interrupted turns fail on restart and are not rerun automatically.
+- Shared-secret checks cover mutating API routes. Reads and `/vnc` require trusted
+  network access; mobd has no multi-user login or dedicated security audit log.
 
 ## Trust and network sketch
 
