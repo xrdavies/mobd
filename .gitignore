@@ -1,0 +1,29 @@
+# Go and release outputs
+bin/
+dist/
+release-assets/
+*.exe
+*.test
+*.out
+/mobd
+cmd/mobd/mobd
+vendor/
+
+# Local configuration, credentials and runtime files
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+credentials.json
+*.log
+scripts/
+.pytest_cache/
+
+# Editor and OS files
+.idea/
+.vscode/
+.DS_Store
+*.swp
+*.swo
+*~

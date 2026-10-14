@@ -1,0 +1,37 @@
+name: Import Developer ID certificate
+description: Import a signing identity into an ephemeral macOS keychain
+inputs:
+  certificate:
+    required: true
+    description: Base64 encoded Developer ID Application p12
+  password:
+    required: true
+    description: Password of the p12
+outputs:
+  keychain:
+    description: Temporary keychain to delete in an always step
+    value: ${{ steps.import.outputs.keychain }}
+runs:
+  using: composite
+  steps:
+    - id: import
+      shell: bash
+      env:
+        CERTIFICATE: ${{ inputs.certificate }}
+        CERTIFICATE_PASSWORD: ${{ inputs.password }}
+      run: |
+        set -euo pipefail
+        test -n "$CERTIFICATE"
+        test -n "$CERTIFICATE_PASSWORD"
+        signing_keychain="$RUNNER_TEMP/mob-signing.keychain-db"
+        signing_password="$(openssl rand -hex 32)"
+        echo "::add-mask::$signing_password"
+        echo "keychain=$signing_keychain" >> "$GITHUB_OUTPUT"
+        printf '%s' "$CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/certificate.p12"
+        trap 'rm -f "$RUNNER_TEMP/certificate.p12"' EXIT
+        security create-keychain -p "$signing_password" "$signing_keychain"
+        security set-keychain-settings -lut 21600 "$signing_keychain"
+        security unlock-keychain -p "$signing_password" "$signing_keychain"
+        security import "$RUNNER_TEMP/certificate.p12" -k "$signing_keychain" -P "$CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+        security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$signing_password" "$signing_keychain"
+        security list-keychains -d user -s "$signing_keychain" login.keychain-db

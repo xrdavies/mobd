@@ -1,0 +1,16 @@
+{
+  "listen": "127.0.0.1:8080",
+  "workdir": "/Users/you/Projects",
+  "maxRunning": 1,
+  "questionTimeout": "30m",
+  "runners": ["codex", "claude"],
+  "defaultRunner": "codex",
+  "codexBin": "codex",
+  "codexMode": "app-server",
+  "codexPermissions": "bypass",
+  "claudeBin": "claude",
+  "claudeModels": ["opus", "sonnet", "haiku"],
+  "claudePermissions": "bypass",
+  "claudeSettingSources": "project",
+  "vncAddr": "127.0.0.1:5900"
+}

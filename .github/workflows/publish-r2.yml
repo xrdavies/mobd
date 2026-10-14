@@ -1,0 +1,55 @@
+name: Publish mobd downloads to R2
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Published stable release tag (vMAJOR.MINOR.PATCH)
+        required: true
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: r2-mobd-stable-publication
+  cancel-in-progress: false
+jobs:
+  publish:
+    if: github.event_name == 'workflow_dispatch' || !github.event.release.prerelease
+    runs-on: ubuntu-latest
+    environment: release
+    env:
+      RELEASE_TAG: ${{ inputs.tag || github.event.release.tag_name }}
+      DOWNLOAD_BASE_URL: ${{ vars.DOWNLOAD_BASE_URL }}
+      R2_ACCOUNT_ID: ${{ vars.R2_ACCOUNT_ID }}
+      R2_BUCKET: ${{ vars.R2_BUCKET }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: auto
+      AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+      AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Test distribution logic
+        run: node --test .github/release/*.test.mjs
+      - name: Download signed release artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
+          mkdir release-assets
+          gh release view "$RELEASE_TAG" --json tagName,isDraft,isPrerelease,body,publishedAt > release-assets/release-metadata.json
+          gh release download "$RELEASE_TAG" --dir release-assets --pattern 'mobd_*' --pattern SHA256SUMS
+          cd release-assets
+          sha256sum --check SHA256SUMS
+      - name: Upload immutable files, verify public downloads, then promote stable
+        run: |
+          set -euo pipefail
+          aws configure set default.s3.preferred_transfer_client classic
+          node .github/release/release.mjs publish release-assets

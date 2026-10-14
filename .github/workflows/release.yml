@@ -1,0 +1,139 @@
+name: Release mobd macOS arm64
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing stable tag (vMAJOR.MINOR.PATCH)
+        required: true
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+      version: ${{ steps.version.outputs.version }}
+      commit: ${{ steps.version.outputs.commit }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Test distribution logic
+        run: node --test .github/release/*.test.mjs
+      - id: version
+        env:
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
+          commit="$(git rev-parse --verify "refs/tags/$RELEASE_TAG^{commit}")"
+          echo "tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
+          echo "version=${RELEASE_TAG#v}" >> "$GITHUB_OUTPUT"
+          echo "commit=$commit" >> "$GITHUB_OUTPUT"
+  mobd:
+    needs: prepare
+    runs-on: macos-15
+    environment: release
+    env:
+      MACOSX_DEPLOYMENT_TARGET: '13.0'
+      CGO_ENABLED: '1'
+      GOOS: darwin
+      GOARCH: arm64
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.commit }}
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Test and build
+        env:
+          RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          set -euo pipefail
+          go vet ./...
+          go test ./...
+          mkdir -p dist/mobd release-assets
+          go build -trimpath -ldflags "-s -w -X main.version=$RELEASE_VERSION" -o dist/mobd/mobd ./cmd/mobd
+          test "$(dist/mobd/mobd --version)" = "mobd $RELEASE_VERSION"
+          test "$(lipo -archs dist/mobd/mobd)" = arm64
+          dist/mobd/mobd --help
+      - name: Import Apple certificate
+        id: signing
+        uses: ./.github/actions/apple-signing
+        with:
+          certificate: ${{ secrets.APPLE_CERTIFICATE }}
+          password: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+      - name: Sign, notarize and package mobd
+        env:
+          RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          test -n "$APPLE_SIGNING_IDENTITY"
+          test -n "$APPLE_ID"
+          test -n "$APPLE_PASSWORD"
+          test -n "$APPLE_TEAM_ID"
+          codesign --force --timestamp --options runtime --identifier com.xrdavies.mobd \
+            --sign "$APPLE_SIGNING_IDENTITY" dist/mobd/mobd
+          codesign --verify --strict --verbose=2 dist/mobd/mobd
+          ditto -c -k dist/mobd/mobd "$RUNNER_TEMP/mobd-notarize.zip"
+          xcrun notarytool submit "$RUNNER_TEMP/mobd-notarize.zip" \
+            --apple-id "$APPLE_ID" --password "$APPLE_PASSWORD" --team-id "$APPLE_TEAM_ID" \
+            --wait --timeout 30m --output-format json > "$RUNNER_TEMP/mobd-notary.json"
+          jq -e '.status == "Accepted"' "$RUNNER_TEMP/mobd-notary.json"
+          # A bare CLI cannot carry a stapled ticket; the signed binary is registered with Apple.
+          codesign --verify --strict --verbose=2 dist/mobd/mobd
+          test "$(dist/mobd/mobd --version)" = "mobd $RELEASE_VERSION"
+          cp LICENSE dist/mobd/LICENSE
+          cp README.md dist/mobd/README.md
+          COPYFILE_DISABLE=1 tar -czf "release-assets/mobd_${RELEASE_VERSION}_darwin_arm64.tar.gz" -C dist/mobd mobd LICENSE README.md
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mobd-release
+          path: release-assets/*
+          if-no-files-found: error
+      - name: Remove signing keychain
+        if: always() && steps.signing.outputs.keychain != ''
+        env:
+          SIGNING_KEYCHAIN: ${{ steps.signing.outputs.keychain }}
+        run: security delete-keychain "$SIGNING_KEYCHAIN"
+  release:
+    needs: [prepare, mobd]
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: mobd-release
+          path: release-assets
+      - name: Create draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          set -euo pipefail
+          cd release-assets
+          sha256sum ./* > SHA256SUMS
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            test "$(gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft)" = true
+          else
+            gh release create "$RELEASE_TAG" --verify-tag --draft --title "mobd $RELEASE_TAG" --generate-notes
+          fi
+          gh release upload "$RELEASE_TAG" ./* --clobber
