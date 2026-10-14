@@ -17,7 +17,11 @@ function fixture(t) {
   script('sw_vers', 'echo 13.0');
   script('launchctl', '[ "${TEST_RUNNING:-0}" = 1 ]');
   script('pgrep', 'exit 1');
-  script('codesign', '[ "${TEST_BAD_SIGNATURE:-0}" != 1 ]');
+  script('codesign', `
+[ "$1" = --verify ] && [ "$2" = --strict ] && [ "$3" = --verbose=2 ] && [ "$4" = -R ] || exit 1
+[ "$5" = '=anchor apple generic and identifier "com.xrdavies.mobd" and certificate leaf[subject.OU] = "A123456789" and certificate leaf[field.1.2.840.113635.100.6.1.13] exists' ] || { echo 'invalid requirement specification' >&2; exit 1; }
+[ -f "$6" ] && [ "\${TEST_BAD_SIGNATURE:-0}" != 1 ]
+`);
   script('curl', 'while [ "$#" -gt 0 ]; do case "$1" in https://*) url="$1" ;; -o) shift; dest="$1" ;; esac; shift; done\ncp "$TEST_DOWNLOADS/${url##*/}" "$dest"');
   writeFileSync(join(bin, 'plutil'), `#!${process.execPath}\nconst fs=require('fs'); const args=process.argv.slice(2); let v=JSON.parse(fs.readFileSync(args.at(-1),'utf8')); for(const k of args[1].split('.')) v=v[k]; process.stdout.write(String(v));\n`, { mode: 0o755 });
   writeFileSync(join(payload, 'mobd'), '#!/bin/sh\necho "mobd 1.2.3"\n', { mode: 0o755 });

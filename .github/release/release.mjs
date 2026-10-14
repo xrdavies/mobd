@@ -106,6 +106,17 @@ export async function publish(output, manifests, remote) {
   }
 }
 
+export async function publishInstaller(output, manifest, remote) {
+  if (json(await remote.readJSON('mobd/latest.json')) !== json(manifest)) {
+    throw Error('Installer updates require the current stable release with unchanged metadata');
+  }
+  const prefix = `mobd/v${version(manifest.version)}`;
+  await remote.verify(`${prefix}/mobd_${manifest.version}_darwin_arm64.tar.gz`, manifest.download.sha256);
+  const installer = join(output, prefix, 'install.sh');
+  await remote.upload('mobd/install.sh', installer, false);
+  await remote.verify('mobd/install.sh', sha256(readFileSync(installer)));
+}
+
 function r2Remote(output, base) {
   const account = process.env.R2_ACCOUNT_ID;
   const bucket = process.env.R2_BUCKET;
@@ -143,7 +154,7 @@ function r2Remote(output, base) {
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const [command, path] = process.argv.slice(2);
-  if (command === 'publish') {
+  if (command === 'publish' || command === 'publish-installer') {
     const metadata = JSON.parse(readFileSync(join(path, 'release-metadata.json'), 'utf8'));
     if (metadata.isDraft || metadata.isPrerelease) throw Error('Only published stable releases can be distributed');
     const v = version(process.env.RELEASE_TAG?.replace(/^v/, ''));
@@ -154,8 +165,9 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     const manifests = prepareDistribution(path, output, { version: v, base, team: process.env.APPLE_TEAM_ID, notes: metadata.body, date: metadata.publishedAt });
     // Keep remote reads outside the immutable artifact tree.
     const remote = r2Remote(process.env.RUNNER_TEMP, base);
-    await publish(output, manifests, remote);
+    if (command === 'publish-installer') await publishInstaller(output, manifests.mobd, remote);
+    else await publish(output, manifests, remote);
   } else {
-    throw Error('Usage: node release.mjs publish <assets-dir>');
+    throw Error('Usage: node release.mjs <publish|publish-installer> <assets-dir>');
   }
 }

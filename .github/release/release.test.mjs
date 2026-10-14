@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { baseURL, checkPromotion, prepareDistribution, publish, sha256 } from './release.mjs';
+import { baseURL, checkPromotion, prepareDistribution, publish, publishInstaller, sha256 } from './release.mjs';
 
 function fixture(t) {
   const root = mkdtempSync(join(tmpdir(), 'mob-release-test-'));
@@ -95,4 +95,36 @@ test('publication only reads and writes the mobd namespace', async t => {
   assert.ok(reads.length > 0);
   assert.ok(reads.every(key => key.startsWith('mobd/')));
   assert.ok(events.every(event => event.key.startsWith('mobd/')));
+});
+
+test('installer update verifies the stable binary and changes only the public script', async t => {
+  const { output, manifests } = fixture(t), events = [];
+  await publishInstaller(output, manifests.mobd, remote(events, {
+    async readJSON() { return manifests.mobd; },
+    async verify(key, digest) { events.push({ type: 'verify', key, digest }); },
+  }));
+  assert.deepEqual(events, [
+    { type: 'verify', key: 'mobd/v1.2.3/mobd_1.2.3_darwin_arm64.tar.gz', digest: manifests.mobd.download.sha256 },
+    { type: 'upload', key: 'mobd/install.sh', immutable: false },
+    { type: 'verify', key: 'mobd/install.sh', digest: sha256(readFileSync(join(output, 'mobd/v1.2.3/install.sh'))) },
+  ]);
+});
+
+test('installer update refuses another stable release or changed metadata before uploading', async t => {
+  const { output, manifests } = fixture(t), events = [];
+  for (const current of [null, { ...manifests.mobd, version: '1.2.4' }, { ...manifests.mobd, notes: 'changed' }]) {
+    await assert.rejects(publishInstaller(output, manifests.mobd, remote(events, {
+      async readJSON() { return current; },
+    })), /current stable release/);
+  }
+  assert.equal(events.length, 0);
+});
+
+test('installer update stops if the published binary fails verification', async t => {
+  const { output, manifests } = fixture(t), events = [];
+  await assert.rejects(publishInstaller(output, manifests.mobd, remote(events, {
+    async readJSON() { return manifests.mobd; },
+    async verify() { throw Error('Public checksum mismatch'); },
+  })), /checksum/);
+  assert.equal(events.length, 0);
 });

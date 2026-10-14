@@ -8,6 +8,10 @@ on:
         description: Published stable release tag (vMAJOR.MINOR.PATCH)
         required: true
         type: string
+      installer_only:
+        description: Update only the public installer for the current stable release
+        type: boolean
+        default: false
 permissions:
   contents: read
 concurrency:
@@ -48,8 +52,10 @@ jobs:
           gh release download "$RELEASE_TAG" --dir release-assets --pattern 'mobd_*' --pattern SHA256SUMS
           cd release-assets
           sha256sum --check SHA256SUMS
-      - name: Upload immutable files, verify public downloads, then promote stable
+      - name: Publish downloads or update the public installer
+        env:
+          PUBLISH_COMMAND: ${{ inputs.installer_only && 'publish-installer' || 'publish' }}
         run: |
           set -euo pipefail
           aws configure set default.s3.preferred_transfer_client classic
-          node .github/release/release.mjs publish release-assets
+          node .github/release/release.mjs "$PUBLISH_COMMAND" release-assets

@@ -59,7 +59,7 @@ main() {
   [ "$(LC_ALL=C sort "$temp_dir/contents")" = "$(printf 'LICENSE\nREADME.md\nmobd')" ] || { printf 'Unexpected archive contents.\n' >&2; return 1; }
   tar -tvzf "$temp_dir/$archive" | awk 'substr($0,1,1) != "-" {bad=1} END {exit bad}' || { printf 'Archive contains links or special files.\n' >&2; return 1; }
   tar -xzf "$temp_dir/$archive" -C "$temp_dir" mobd
-  codesign --verify --strict --verbose=2 -R "anchor apple generic and identifier \"com.xrdavies.mobd\" and certificate leaf[subject.OU] = \"$apple_team\" and certificate leaf[field.1.2.840.113635.100.6.1.13] exists" "$temp_dir/mobd"
+  codesign --verify --strict --verbose=2 -R "=anchor apple generic and identifier \"com.xrdavies.mobd\" and certificate leaf[subject.OU] = \"$apple_team\" and certificate leaf[field.1.2.840.113635.100.6.1.13] exists" "$temp_dir/mobd"
   chmod 755 "$temp_dir/mobd"
   [ "$("$temp_dir/mobd" --version)" = "mobd $requested_version" ] || { printf 'Binary version mismatch.\n' >&2; return 1; }
   mkdir -p "$install_dir"
