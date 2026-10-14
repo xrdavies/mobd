@@ -70,7 +70,11 @@ curl 不依赖浏览器 CORS，官网获取发布清单需要它。
 | `R2_ACCOUNT_ID` | Cloudflare 的 32 位账户 ID |
 | `R2_BUCKET` | 发布桶名称，如 `mob-releases` |
 
-在 **mobd 仓库**单独创建 `release` environment 并配置上述 **8 个 Secrets、3 个 Variables**。
+这三个值也支持配置为同名 Environment secrets；两处都有值时优先使用 Variables。
+R2 访问密钥仍必须放在 Secrets 中。
+
+在 **mobd 仓库**单独创建 `release` environment，推荐配置上述 **8 个 Secrets、3 个 Variables**
+（也可全部配置为 **11 个 Secrets**）。
 可以复用同一 Developer ID 证书、Apple 公证账号和 R2 桶，但 mob 仓库的 environment
 配置不会自动继承；若使用组织级 Secrets，须给 mobd 仓库授权。这里不需要 Tauri 密钥。
 
@@ -163,6 +167,10 @@ mobd/
 - 需要修改代码：提交并推送修改，使用新的更高版本标签。
 - R2 发布失败：手动运行 **Publish mobd downloads to R2**，填写已发布的原标签；
   保持产物和发布说明不变。已公开版本的内容变化需要新版本。
+- 提示 `Missing DOWNLOAD_BASE_URL`（旧版为 `Invalid URL` 且 `input: ''`）：检查
+  mobd 仓库 `release` 环境中的 `DOWNLOAD_BASE_URL`、`R2_ACCOUNT_ID`、`R2_BUCKET`。
+  支持 Variables 或同名 Secrets。若工作流代码已更新，在 `main` 上使用
+  **Run workflow** 并填写原标签；旧运行的 **Re-run jobs** 不会采用新的工作流代码。
 
 ## 4. 安装和升级
 
@@ -206,7 +214,7 @@ Codex/Claude 的安装和登录、辅助功能、屏幕录制、屏幕共享仍�
 
 ## 首次发布验收
 
-- [ ] mobd 仓库 `release` 环境已配置 8 个 Secrets 和 3 个 Variables。
+- [ ] mobd 仓库 `release` 环境已配置 8 个 Secrets 和 3 个 Variables（或 11 个 Secrets）。
 - [ ] R2 下载域名公开可访问，CORS 允许官网，动态入口绕过缓存。
 - [ ] 签名与公证成功，在另一台 Apple Silicon Mac 上试装。
 - [ ] 发布后无 GitHub 登录也能下载安装；旧配置和会话保留。

@@ -10,6 +10,7 @@ export function version(value) {
 }
 
 export function baseURL(value) {
+  if (!value) throw Error('Missing DOWNLOAD_BASE_URL: set it as a Variable or Secret in the release environment');
   const url = new URL(value);
   if (url.protocol !== 'https:' || url.username || url.password || url.port || url.search || url.hash || url.pathname !== '/' || !/^[a-z0-9.-]+$/.test(url.hostname) || url.hostname.endsWith('.r2.dev')) {
     throw Error('DOWNLOAD_BASE_URL must be an HTTPS custom-domain origin without a path or credentials');

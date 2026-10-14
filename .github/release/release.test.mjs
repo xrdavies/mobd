@@ -17,6 +17,12 @@ function fixture(t) {
   return { output, manifests };
 }
 
+test('distribution identifies a missing download origin', () => {
+  for (const base of [undefined, '']) {
+    assert.throws(() => baseURL(base), /Missing DOWNLOAD_BASE_URL/);
+  }
+});
+
 test('distribution rejects unsafe download origins', () => {
   assert.equal(baseURL('https://download.example.com/'), 'https://download.example.com');
   for (const base of ['http://download.example.com', 'https://user:pass@example.com', 'https://example.com/path', 'https://example.com/?token=x', 'https://pub-123.r2.dev']) {
