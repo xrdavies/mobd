@@ -15,16 +15,16 @@ concurrency:
   cancel-in-progress: false
 jobs:
   prepare:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
       tag: ${{ steps.version.outputs.tag }}
       version: ${{ steps.version.outputs.version }}
       commit: ${{ steps.version.outputs.commit }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: '24'
       - name: Test distribution logic
@@ -49,10 +49,10 @@ jobs:
       GOOS: darwin
       GOARCH: arm64
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.prepare.outputs.commit }}
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: true
@@ -101,7 +101,7 @@ jobs:
           cp LICENSE dist/mobd/LICENSE
           cp README.md dist/mobd/README.md
           COPYFILE_DISABLE=1 tar -czf "release-assets/mobd_${RELEASE_VERSION}_darwin_arm64.tar.gz" -C dist/mobd mobd LICENSE README.md
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: mobd-release
           path: release-assets/*
@@ -113,12 +113,12 @@ jobs:
         run: security delete-keychain "$SIGNING_KEYCHAIN"
   release:
     needs: [prepare, mobd]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     environment: release
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: mobd-release
           path: release-assets
