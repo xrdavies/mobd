@@ -39,7 +39,7 @@ func testServer(t *testing.T, secret string) *Server {
 	}
 	store := task.NewStore()
 	runner := codex.New(cfg)
-	s := New(cfg, store, runner)
+	s := newTestServer(t, cfg, store, runner)
 	t.Cleanup(s.Close)
 	return s
 }
@@ -77,7 +77,7 @@ func TestReplyArrivingDuringReplayIsNotLost(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	s.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/tasks/"+tk.ID+"/events", nil))
+	authenticatedHandler(t, s).ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/tasks/"+tk.ID+"/events", nil))
 	body := w.Body.String()
 	if !strings.Contains(body, "reply at replay boundary") || strings.Count(body, "\ndata:") != 103 {
 		t.Fatalf("lost events: %s", body)
@@ -100,13 +100,13 @@ func TestEventCursorResumesWithoutDuplicates(t *testing.T) {
 		if tc.header != "" {
 			req.Header.Set("Last-Event-ID", tc.header)
 		}
-		s.Handler().ServeHTTP(rr, req)
+		authenticatedHandler(t, s).ServeHTTP(rr, req)
 		if count := strings.Count(rr.Body.String(), "\ndata:"); count != tc.want {
 			t.Fatalf("query=%s header=%s count=%d body=%s", tc.query, tc.header, count, rr.Body.String())
 		}
 	}
 	rr := httptest.NewRecorder()
-	s.Handler().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/tasks/"+tk.ID+"/events?after=bad", nil))
+	authenticatedHandler(t, s).ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/tasks/"+tk.ID+"/events?after=bad", nil))
 	if rr.Code != http.StatusBadRequest {
 		t.Fatalf("invalid cursor: %d", rr.Code)
 	}
@@ -158,13 +158,13 @@ printf '%s\n' '{"type":"turn.completed"}'
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := New(cfg, store, codex.New(cfg))
+	s := newTestServer(t, cfg, store, codex.New(cfg))
 	t.Cleanup(s.Close)
 	post := func(server *Server, sessionID, prompt string) task.Task {
 		t.Helper()
 		body, _ := json.Marshal(task.CreateRequest{SessionID: sessionID, Prompt: prompt})
 		rr := httptest.NewRecorder()
-		server.Handler().ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/tasks", bytes.NewReader(body)))
+		authenticatedHandler(t, server).ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/tasks", bytes.NewReader(body)))
 		if rr.Code != http.StatusCreated {
 			t.Fatalf("post %d: %s", rr.Code, rr.Body.String())
 		}
@@ -195,10 +195,10 @@ printf '%s\n' '{"type":"turn.completed"}'
 	if err != nil {
 		t.Fatal(err)
 	}
-	afterRestart := New(cfg, restored, codex.New(cfg))
+	afterRestart := newTestServer(t, cfg, restored, codex.New(cfg))
 	t.Cleanup(afterRestart.Close)
 	rr := httptest.NewRecorder()
-	afterRestart.Handler().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/sessions/"+first.SessionID, nil))
+	authenticatedHandler(t, afterRestart).ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/sessions/"+first.SessionID, nil))
 	var detail struct {
 		Session task.Session `json:"session"`
 		Tasks   []task.Task  `json:"tasks"`
@@ -211,7 +211,7 @@ printf '%s\n' '{"type":"turn.completed"}'
 	}
 	post(afterRestart, first.SessionID, "continue after restart")
 	rr = httptest.NewRecorder()
-	afterRestart.Handler().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/sessions", nil))
+	authenticatedHandler(t, afterRestart).ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/sessions", nil))
 	var list struct {
 		Sessions []task.Session `json:"sessions"`
 	}
@@ -227,13 +227,13 @@ func TestCancelDoesNotReleaseSessionBeforeRunnerStops(t *testing.T) {
 	cancelled := false
 	s.cancels[tk.ID] = func() { cancelled = true }
 	rr := httptest.NewRecorder()
-	s.Handler().ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/tasks/"+tk.ID+"/cancel", nil))
+	authenticatedHandler(t, s).ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/tasks/"+tk.ID+"/cancel", nil))
 	if rr.Code != http.StatusAccepted || !cancelled {
 		t.Fatalf("cancel: %d", rr.Code)
 	}
 	body, _ := json.Marshal(task.CreateRequest{SessionID: tk.SessionID, Prompt: "next"})
 	rr = httptest.NewRecorder()
-	s.Handler().ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/tasks", bytes.NewReader(body)))
+	authenticatedHandler(t, s).ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/tasks", bytes.NewReader(body)))
 	if rr.Code != http.StatusConflict {
 		t.Fatalf("overlapping turn accepted: %d %s", rr.Code, rr.Body.String())
 	}
@@ -247,7 +247,7 @@ func TestHealth(t *testing.T) {
 	s := testServer(t, "")
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/health", nil)
-	s.Handler().ServeHTTP(rr, req)
+	authenticatedHandler(t, s).ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status %d", rr.Code)
 	}
@@ -276,7 +276,7 @@ func TestCORSResponses(t *testing.T) {
 			rr := httptest.NewRecorder()
 			req := httptest.NewRequest(http.MethodGet, tc.path, nil)
 			req.Header.Set("Origin", tc.origin)
-			s.Handler().ServeHTTP(rr, req)
+			authenticatedHandler(t, s).ServeHTTP(rr, req)
 			if rr.Code != tc.status || rr.Header().Get("Access-Control-Allow-Origin") != tc.allowOrigin {
 				t.Fatalf("status=%d headers=%v", rr.Code, rr.Header())
 			}
@@ -293,7 +293,7 @@ func TestCORSPreflight(t *testing.T) {
 	req := httptest.NewRequest(http.MethodOptions, "/tasks", nil)
 	req.Header.Set("Origin", "http://localhost:1420")
 	req.Header.Set("Access-Control-Request-Method", http.MethodPost)
-	req.Header.Set("Access-Control-Request-Headers", "content-type, authorization, x-mob-token")
+	req.Header.Set("Access-Control-Request-Headers", "content-type, authorization")
 	s.Handler().ServeHTTP(rr, req)
 	if rr.Code != http.StatusNoContent {
 		t.Fatalf("status %d", rr.Code)
@@ -302,7 +302,7 @@ func TestCORSPreflight(t *testing.T) {
 		!strings.Contains(rr.Header().Get("Access-Control-Allow-Methods"), "POST") {
 		t.Fatalf("preflight headers %v", rr.Header())
 	}
-	for _, header := range []string{"Content-Type", "Authorization", "X-Mob-Token"} {
+	for _, header := range []string{"Content-Type", "Authorization"} {
 		if !strings.Contains(rr.Header().Get("Access-Control-Allow-Headers"), header) {
 			t.Fatalf("missing allowed header %s", header)
 		}
@@ -325,7 +325,7 @@ func TestCORSRejectsUnknownPreflightOrigin(t *testing.T) {
 
 func TestCreateListGetTask(t *testing.T) {
 	s := testServer(t, "")
-	h := s.Handler()
+	h := authenticatedHandler(t, s)
 
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/tasks", bytes.NewBufferString(`{"prompt":"open Safari"}`))
@@ -378,35 +378,27 @@ func TestCreateRequiresPrompt(t *testing.T) {
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/tasks", bytes.NewBufferString(`{"prompt":""}`))
 	req.Header.Set("Content-Type", "application/json")
-	s.Handler().ServeHTTP(rr, req)
+	authenticatedHandler(t, s).ServeHTTP(rr, req)
 	if rr.Code != http.StatusBadRequest {
 		t.Fatalf("status %d", rr.Code)
 	}
 }
 
-func TestAuthSharedSecret(t *testing.T) {
-	s := testServer(t, "secret")
-	h := s.Handler()
-
-	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/tasks", bytes.NewBufferString(`{"prompt":"x"}`))
-	req.Header.Set("Content-Type", "application/json")
+func TestAuthRequiresPairedCredential(t *testing.T) {
+	s := testServer(t, "legacy-secret")
+	req := httptest.NewRequest(http.MethodGet, "/health", nil)
 	req.Header.Set("Origin", "http://localhost:1420")
-	h.ServeHTTP(rr, req)
-	if rr.Code != http.StatusUnauthorized {
-		t.Fatalf("want 401, got %d", rr.Code)
+	req.Header.Set("Authorization", "Bearer legacy-secret")
+	rr := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusUnauthorized || rr.Header().Get("Access-Control-Allow-Origin") != "http://localhost:1420" {
+		t.Fatalf("legacy auth: %d %s", rr.Code, rr.Body.String())
 	}
-	if rr.Header().Get("Access-Control-Allow-Origin") != "http://localhost:1420" {
-		t.Fatal("auth error missing CORS headers")
-	}
-
 	rr = httptest.NewRecorder()
-	req = httptest.NewRequest(http.MethodPost, "/tasks", bytes.NewBufferString(`{"prompt":"x"}`))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer secret")
-	h.ServeHTTP(rr, req)
-	if rr.Code != http.StatusCreated {
-		t.Fatalf("want 201, got %d %s", rr.Code, rr.Body.String())
+	req.Header.Del("Authorization")
+	authenticatedHandler(t, s).ServeHTTP(rr, req)
+	if rr.Code != 200 {
+		t.Fatalf("paired auth: %d %s", rr.Code, rr.Body.String())
 	}
 }
 
@@ -414,7 +406,7 @@ func TestGetMissing(t *testing.T) {
 	s := testServer(t, "")
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/tasks/does-not-exist", nil)
-	s.Handler().ServeHTTP(rr, req)
+	authenticatedHandler(t, s).ServeHTTP(rr, req)
 	if rr.Code != http.StatusNotFound {
 		t.Fatalf("status %d", rr.Code)
 	}
@@ -422,7 +414,7 @@ func TestGetMissing(t *testing.T) {
 
 func TestSSEReplay(t *testing.T) {
 	s := testServer(t, "")
-	h := s.Handler()
+	h := authenticatedHandler(t, s)
 
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/tasks", bytes.NewBufferString(`{"prompt":"sse"}`))
@@ -472,7 +464,7 @@ func fakeCodexServer(t *testing.T, script string) (*Server, string) {
 		t.Fatal(err)
 	}
 	cfg := config.Config{CodexBin: bin, CodexWorkDir: dir, MobMCPCommand: "mob-mcp", MaxRunning: 1, DataDir: dir}
-	s := New(cfg, task.NewStore(), codex.New(cfg))
+	s := newTestServer(t, cfg, task.NewStore(), codex.New(cfg))
 	t.Cleanup(s.Close)
 	return s, dir
 }
@@ -486,7 +478,7 @@ printf '%s\n' '{"type":"thread.started","thread_id":"th"}' '{"type":"item.comple
 func postTask(t *testing.T, s *Server, body string) task.Task {
 	t.Helper()
 	rr := httptest.NewRecorder()
-	s.Handler().ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/tasks", bytes.NewBufferString(body)))
+	authenticatedHandler(t, s).ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/tasks", bytes.NewBufferString(body)))
 	if rr.Code != http.StatusCreated {
 		t.Fatalf("post %d: %s", rr.Code, rr.Body.String())
 	}
@@ -523,7 +515,7 @@ printf '%s\n' '{"type":"thread.started","thread_id":"th"}' '{"type":"item.comple
 		t.Fatalf("second should wait behind first: %+v", second)
 	}
 	rr := httptest.NewRecorder()
-	s.Handler().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/queue", nil))
+	authenticatedHandler(t, s).ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/queue", nil))
 	var q struct{ Running, Queued []task.Task }
 	if err := json.Unmarshal(rr.Body.Bytes(), &q); err != nil {
 		t.Fatal(err)
@@ -549,7 +541,7 @@ func TestCancelQueuedTaskNeverStartsRunner(t *testing.T) {
 	first := postTask(t, s, `{"prompt":"first"}`)
 	queued := postTask(t, s, `{"prompt":"queued"}`)
 	rr := httptest.NewRecorder()
-	s.Handler().ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/tasks/"+queued.ID+"/cancel", nil))
+	authenticatedHandler(t, s).ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/tasks/"+queued.ID+"/cancel", nil))
 	if rr.Code != http.StatusAccepted {
 		t.Fatalf("cancel %d %s", rr.Code, rr.Body.String())
 	}
@@ -569,7 +561,7 @@ func TestCancelQueuedTaskNeverStartsRunner(t *testing.T) {
 func doJSON(t *testing.T, s *Server, method, path, body string) *httptest.ResponseRecorder {
 	t.Helper()
 	rr := httptest.NewRecorder()
-	s.Handler().ServeHTTP(rr, httptest.NewRequest(method, path, bytes.NewBufferString(body)))
+	authenticatedHandler(t, s).ServeHTTP(rr, httptest.NewRequest(method, path, bytes.NewBufferString(body)))
 	return rr
 }
 
@@ -693,7 +685,7 @@ func readSSE(t *testing.T, url, lastID string, stop func([]sseEvent) bool) []sse
 
 func TestGlobalEventsStreamAndResume(t *testing.T) {
 	s := testServer(t, "")
-	srv := httptest.NewServer(s.Handler())
+	srv := httptest.NewServer(authenticatedHandler(t, s))
 	t.Cleanup(srv.Close)
 
 	got := make(chan []sseEvent, 1)
@@ -771,7 +763,7 @@ func upload(t *testing.T, s *Server, name string, data []byte) *httptest.Respons
 	req := httptest.NewRequest(http.MethodPost, "/uploads", &body)
 	req.Header.Set("Content-Type", mw.FormDataContentType())
 	rr := httptest.NewRecorder()
-	s.Handler().ServeHTTP(rr, req)
+	authenticatedHandler(t, s).ServeHTTP(rr, req)
 	return rr
 }
 
@@ -791,7 +783,7 @@ printf '%s\n' '{"type":"item.completed","item":{"id":"m","type":"agent_message",
 	if rr := upload(t, s, "x.html", []byte("<html>")); rr.Code != http.StatusUnsupportedMediaType {
 		t.Fatalf("html upload: %d", rr.Code)
 	}
-	if rr := doJSON(t, s, http.MethodGet, up.URL, ""); rr.Code != http.StatusOK || rr.Header().Get("Content-Type") != "image/png" {
+	if rr := doJSON(t, s, http.MethodGet, up.URL, ""); rr.Code != http.StatusOK || rr.Header().Get("Content-Type") != "image/png" || rr.Header().Get("Cache-Control") != "no-store" {
 		t.Fatalf("artifact: %d %v", rr.Code, rr.Header())
 	}
 
@@ -867,7 +859,7 @@ func TestHealthReadiness(t *testing.T) {
 	t.Cleanup(func() { currentPermissions = actuate.CurrentPermissions })
 	cfg := config.Config{CodexBin: bin, MobMCPCommand: "mob-mcp-missing", VNCAddr: ln.Addr().String(),
 		CodexModels: []string{"gpt-5.5"}, DataDir: dir}
-	s := New(cfg, task.NewStore(), codex.New(cfg))
+	s := newTestServer(t, cfg, task.NewStore(), codex.New(cfg))
 	t.Cleanup(s.Close)
 	var body struct {
 		APIVersion int `json:"apiVersion"`

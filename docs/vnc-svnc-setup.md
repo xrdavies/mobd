@@ -1,5 +1,12 @@
 # Office VNC + home svnc (viewOnly)
 
+mobd requires a paired `Authorization: Bearer <token>` on the `/vnc` handshake,
+in addition to Screen Sharing credentials. The client must support authenticated
+WebSockets (for example through a native transport); raw browser WebSocket/svnc
+examples cannot attach this header automatically. Client integration is follow-up
+work. Never put the long-lived token in the WebSocket URL. See [pairing](pairing.md).
+
+
 Practical setup for the live-view checks in the [office smoke checklist](office-smoke-checklist.md).
 The mob client disables human input by default and offers explicit Control mode;
 a standalone [svnc](https://github.com/xrdavies/svnc) monitor can use `viewOnly: true`.

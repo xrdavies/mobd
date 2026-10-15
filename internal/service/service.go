@@ -7,9 +7,7 @@ import (
 	"encoding/xml"
 	"errors"
 	"fmt"
-	"io"
 	"net"
-	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -19,6 +17,7 @@ import (
 	"time"
 
 	"github.com/xrdavies/mobd/internal/config"
+	"github.com/xrdavies/mobd/internal/control"
 )
 
 const label = "com.xrdavies.mobd"
@@ -61,6 +60,12 @@ func (m *Manager) Start(cfg config.Config, args []string, login bool) error {
 	if err := listener.Close(); err != nil {
 		return err
 	}
+	// Do not mistake a foreground daemon's management socket for our new service.
+	_, release, err := control.Listen(cfg.ControlSocket)
+	if err != nil {
+		return err
+	}
+	release()
 	exe, err := os.Executable()
 	if err != nil {
 		return err
@@ -97,7 +102,7 @@ func (m *Manager) Start(cfg config.Config, args []string, login bool) error {
 	args = append([]string(nil), args...)
 	for i := 0; i < len(args); i++ {
 		name, value, equal := strings.Cut(args[i], "=")
-		if name != "--config" && name != "--workdir" && name != "--state-path" {
+		if name != "--config" && name != "--workdir" && name != "--state-path" && name != "--control-socket" {
 			continue
 		}
 		if !equal {
@@ -134,7 +139,7 @@ func (m *Manager) Start(cfg config.Config, args []string, login bool) error {
 	}
 	deadline := time.Now().Add(15 * time.Second)
 	for {
-		if err := Health(cfg.ListenAddr); err == nil {
+		if err := Health(cfg.ControlSocket); err == nil {
 			return nil
 		}
 		if time.Now().After(deadline) {
@@ -219,7 +224,7 @@ func (m *Manager) Status() error {
 		return err
 	}
 	fmt.Printf("mobd: loaded; listen=%s; health=%s/health; login=%t\n", cfg.ListenAddr, LocalURL(cfg.ListenAddr), m.LoginEnabled())
-	return Health(cfg.ListenAddr)
+	return Health(cfg.ControlSocket)
 }
 
 func (m *Manager) Logs() error {
@@ -239,22 +244,15 @@ func LocalURL(addr string) string {
 	return "http://" + net.JoinHostPort(host, port)
 }
 
-func Health(addr string) error {
-	client := http.Client{Timeout: 4 * time.Second, Transport: &http.Transport{Proxy: nil}, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
-	defer client.CloseIdleConnections()
-	res, err := client.Get(LocalURL(addr) + "/health")
-	if err != nil {
-		return err
-	}
-	defer res.Body.Close()
+func Health(socket string) error {
 	var health struct {
 		OK      bool   `json:"ok"`
 		Service string `json:"service"`
 	}
-	if err := json.NewDecoder(io.LimitReader(res.Body, 1<<20)).Decode(&health); err != nil {
+	if err := control.Call(socket, "GET", "/health", nil, &health); err != nil {
 		return err
 	}
-	if res.StatusCode != 200 || !health.OK || health.Service != "mobd" {
+	if !health.OK || health.Service != "mobd" {
 		return errors.New("mobd health check failed")
 	}
 	return nil

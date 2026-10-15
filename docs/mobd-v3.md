@@ -21,8 +21,11 @@ See [architecture](architecture.md), [runners](runners.md),
 ## Current scope
 
 Codex and Claude Code runners, questions/approvals and Codex app-server steering
-are implemented. Shared-secret authentication is optional on mutating routes;
-there is no multi-user login or dedicated security audit log. Storage uses an
+are implemented. Every business route requires a paired device credential in
+`Authorization: Bearer <token>`, including `/health` and `/vnc`. See the
+[pairing protocol](pairing.md) for invitations, CLI management and client migration.
+The `pairing` feature is advertised after authentication. There is no multi-user
+login or dedicated security audit log. Storage uses an
 atomic JSON snapshot with separate image files. Tasks share one desktop; human
 Control mode does not automatically pause an agent.
 
@@ -131,8 +134,9 @@ The App builds the conversation timeline by merging `messages` and `activities` 
 
 ## Endpoints
 
-When a shared secret is configured, mutating public routes require it. Reads, SSE and
-`/vnc` are outside that token check; see [security](security.md).
+Every business endpoint below requires a paired bearer credential. The internal
+MCP endpoint instead checks its per-task token; see [security](security.md).
+Invitation redemption and preview are documented in [pairing](pairing.md).
 
 | Method | Path | Notes |
 | --- | --- | --- |
@@ -150,7 +154,7 @@ When a shared secret is configured, mutating public routes require it. Reads, SS
 | GET | `/events` | Global SSE (see below) |
 | GET | `/screen` | Current desktop snapshot. `?format=png\|jpeg` (default jpeg), `?maxWidth=` (default full size), `?quality=1..100` (default 80) |
 | POST | `/uploads` | `multipart/form-data` field `file`; PNG/JPEG/GIF/WebP up to 20 MiB → `{id, name, mime, size, url}` |
-| GET | `/artifacts/{id}` | Stored image (screenshots from tool results, uploads). Immutable, `Cache-Control: max-age=31536000` |
+| GET | `/artifacts/{id}` | Stored image (screenshots from tool results, uploads). Authenticated, `Cache-Control: no-store` |
 | POST | `/tasks/{id}/questions/{qid}/answer` | Answer a pending question: `{answer}` (questions) or `{approved, answer?}` (approvals) → question; 409 if already settled ([runners.md](runners.md#asking-the-user-ask_user-request_approval)) |
 | POST | `/tasks/{id}/steer` | `{prompt}`: add a message to the running turn (runners with `steer`; Codex app-server). 409 when the turn cannot take input |
 | POST | `/internal/tasks/{id}/ask` | Used by `mobd mcp` only (per-turn token); blocks until the question is settled |

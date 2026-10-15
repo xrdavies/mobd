@@ -13,16 +13,19 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/xrdavies/mobd/internal/control"
 )
 
 // Config is shared by foreground and launchd-managed servers.
 type Config struct {
+	ControlSocket        string        `json:"controlSocket"`
 	ListenAddr           string        `json:"listen"`
 	CodexBin             string        `json:"codexBin"`
 	CodexWorkDir         string        `json:"workdir"`
 	MobMCPCommand        string        `json:"mcpCommand"`
 	MobMCPArgs           []string      `json:"mcpArgs"`
-	SharedSecret         string        `json:"sharedSecret"`
+	SharedSecret         string        `json:"sharedSecret,omitempty"`
 	VNCViewURL           string        `json:"vncViewUrl"`
 	StatePath            string        `json:"statePath"`
 	CORSOrigins          []string      `json:"corsOrigins"`
@@ -88,6 +91,7 @@ func Load(args []string) (Config, string, error) {
 	fs := flag.NewFlagSet("mobd", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	fs.StringVar(&path, "config", "", "JSON config path")
+	fs.StringVar(&cli.ControlSocket, "control-socket", "", "Local management socket")
 	fs.StringVar(&cli.ListenAddr, "listen", "", "HTTP listen address")
 	fs.StringVar(&cli.CodexBin, "codex-bin", "", "Codex executable")
 	fs.StringVar(&cli.CodexWorkDir, "workdir", "", "Codex working directory")
@@ -148,7 +152,8 @@ func Load(args []string) (Config, string, error) {
 		return cfg, path, fmt.Errorf("config %s: %w", path, err)
 	}
 	for key, dest := range map[string]*string{
-		"MOBD_LISTEN": &cfg.ListenAddr, "MOBD_CODEX_BIN": &cfg.CodexBin,
+		"MOBD_CONTROL_SOCKET": &cfg.ControlSocket,
+		"MOBD_LISTEN":         &cfg.ListenAddr, "MOBD_CODEX_BIN": &cfg.CodexBin,
 		"MOBD_CODEX_WORKDIR": &cfg.CodexWorkDir, "MOBD_MOB_MCP_COMMAND": &cfg.MobMCPCommand,
 		"MOBD_SHARED_SECRET": &cfg.SharedSecret, "MOBD_VNC_VIEW_URL": &cfg.VNCViewURL,
 		"MOBD_STATE_PATH": &cfg.StatePath, "MOBD_DATA_DIR": &cfg.DataDir, "MOBD_VNC_ADDR": &cfg.VNCAddr,
@@ -195,6 +200,8 @@ func Load(args []string) (Config, string, error) {
 	}
 	fs.Visit(func(f *flag.Flag) {
 		switch f.Name {
+		case "control-socket":
+			cfg.ControlSocket = cli.ControlSocket
 		case "listen":
 			cfg.ListenAddr = cli.ListenAddr
 		case "codex-bin":
@@ -207,6 +214,19 @@ func Load(args []string) (Config, string, error) {
 			cfg.MaxRunning = cli.MaxRunning
 		}
 	})
+	if cfg.SharedSecret != "" {
+		return cfg, path, errors.New("sharedSecret/MOBD_SHARED_SECRET is no longer supported; remove it and pair clients with mobd link (history is preserved)")
+	}
+	if cfg.ControlSocket == "" {
+		cfg.ControlSocket, err = control.DefaultPath()
+		if err != nil {
+			return cfg, path, err
+		}
+	}
+	cfg.ControlSocket, err = filepath.Abs(cfg.ControlSocket)
+	if err != nil {
+		return cfg, path, err
+	}
 	if cfg.MaxRunning < 1 {
 		return cfg, path, errors.New("maxRunning must be positive")
 	}

@@ -63,7 +63,7 @@ func (s *Server) handleVNC(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ws.SetReadLimit(8 << 20)
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
 	conn := websocket.NetConn(ctx, ws, websocket.MessageBinary)
 	defer conn.Close()
@@ -81,6 +81,7 @@ func (s *Server) handleVNC(w http.ResponseWriter, r *http.Request) {
 	select {
 	case <-done:
 	case <-s.done:
+	case <-r.Context().Done():
 	}
 	stop()
 }

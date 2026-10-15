@@ -69,15 +69,15 @@ The default command is this mobd binary with the `mcp` argument.
 - Humans connect with **[svnc](https://github.com/xrdavies/svnc)** through mobd's WebSocket relay at `/vnc`; view-only by default, with an explicit Control mode in the App's full-size view.
 - The relay connects to `vncAddr` (default `127.0.0.1:5900`) and copies RFB bytes without interpreting them. Screen Sharing handles VNC authentication, including Apple Remote Desktop sign-in.
 - The client derives the WebSocket URL from the mobd URL. `/health` reports VNC reachability and the number of open relays in `vncSessions`.
-- Browser origins must match the relay host or `corsOrigins`; clients without an Origin header are accepted. Relays close when mobd shuts down.
+- Browser origins must match the relay host or `corsOrigins`; authenticated clients without an Origin header are accepted. Relays close on credential revocation or daemon shutdown.
 - Transport: use the intranet / VPN or an SSH tunnel. For home-to-office access,
   [Tailscale Serve](remote-access.md) provides a private HTTPS/WSS entry point to
   a loopback mobd listener; a public reverse proxy needs authentication on all routes.
 - The [connection design](remote-access.md) offers private networking, user-managed
-  Funnel and our managed relay using the same API. The target requires individual
-  client authentication in every mode, with no anonymous access. Pairing/selection
-  and complete authentication remain to be implemented; the managed relay also
-  needs device enrollment and isolation between users.
+  Funnel and our managed relay using the same API. mobd enforces individual
+  client authentication in every mode, with no anonymous access. The [pairing protocol](pairing.md)
+  and local management are implemented; desktop/mobile integration is pending.
+  The managed relay still needs device enrollment and isolation between users.
 
 See [VNC setup](vnc-svnc-setup.md) and [security](security.md).
 
@@ -88,8 +88,8 @@ See [VNC setup](vnc-svnc-setup.md) and [security](security.md).
 - Human Control mode does not automatically pause an active agent.
 - Run one daemon per state path. Storage is an atomic JSON snapshot with separate
   image files; interrupted turns fail on restart and are not rerun automatically.
-- Shared-secret checks cover mutating API routes. Reads and `/vnc` require trusted
-  network access; mobd has no multi-user login or dedicated security audit log.
+- Per-device bearer credentials protect all business routes. All paired clients
+  share one office; mobd has no multi-user isolation or dedicated security audit log.
 
 ## Trust and network sketch
 

@@ -113,7 +113,7 @@ func (s *Server) handleArtifact(w http.ResponseWriter, r *http.Request) {
 	defer f.Close()
 	info, _ := f.Stat()
 	w.Header().Set("Content-Type", mime)
-	w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+	w.Header().Set("Cache-Control", "no-store")
 	http.ServeContent(w, r, "", info.ModTime(), f)
 }
 

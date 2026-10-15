@@ -10,18 +10,19 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/xrdavies/mobd/internal/artifact"
 	"github.com/xrdavies/mobd/internal/config"
+	"github.com/xrdavies/mobd/internal/pairing"
 	"github.com/xrdavies/mobd/internal/runner"
 	"github.com/xrdavies/mobd/internal/task"
 )
 
 type Server struct {
+	pairing *pairing.Store
 	cfg     config.Config
 	store   *task.Store
 	runners *runner.Registry
@@ -50,7 +51,10 @@ type Server struct {
 
 // New serves the given runners; cfg.DefaultRunner (or the first runner) starts
 // new conversations. Callers validate DefaultRunner before calling New.
-func New(cfg config.Config, store *task.Store, runners ...runner.Runner) *Server {
+func New(cfg config.Config, store *task.Store, auth *pairing.Store, runners ...runner.Runner) *Server {
+	if auth == nil {
+		panic("pairing store is required")
+	}
 	def := cfg.DefaultRunner
 	known := false
 	for _, r := range runners {
@@ -64,7 +68,7 @@ func New(cfg config.Config, store *task.Store, runners ...runner.Runner) *Server
 		panic(err)
 	}
 	s := &Server{
-		cfg: cfg, store: store, runners: reg, hub: newHub(),
+		cfg: cfg, store: store, pairing: auth, runners: reg, hub: newHub(),
 		artifacts: artifact.New(filepath.Join(dataDir(cfg), "artifacts")),
 		cancels:   make(map[string]context.CancelFunc), done: make(chan struct{}),
 		tokens: make(map[string]string), waiters: make(map[string]chan struct{}),
@@ -101,23 +105,31 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /healthz", s.handleHealth)
 	mux.HandleFunc("GET /sessions", s.handleListSessions)
 	mux.HandleFunc("GET /sessions/{id}", s.handleGetSession)
-	mux.HandleFunc("PATCH /sessions/{id}", s.withAuth(s.handlePatchSession))
-	mux.HandleFunc("DELETE /sessions/{id}", s.withAuth(s.handleDeleteSession))
-	mux.HandleFunc("POST /tasks", s.withAuth(s.handleCreateTask))
+	mux.HandleFunc("PATCH /sessions/{id}", s.handlePatchSession)
+	mux.HandleFunc("DELETE /sessions/{id}", s.handleDeleteSession)
+	mux.HandleFunc("POST /tasks", s.handleCreateTask)
 	mux.HandleFunc("GET /tasks", s.handleListTasks)
 	mux.HandleFunc("GET /tasks/{id}", s.handleGetTask)
 	mux.HandleFunc("GET /tasks/{id}/events", s.handleTaskEvents)
-	mux.HandleFunc("POST /tasks/{id}/cancel", s.withAuth(s.handleCancelTask))
+	mux.HandleFunc("POST /tasks/{id}/cancel", s.handleCancelTask)
 	mux.HandleFunc("GET /queue", s.handleQueue)
 	mux.HandleFunc("GET /events", s.handleEvents)
 	mux.HandleFunc("GET /screen", s.handleScreen)
-	mux.HandleFunc("POST /uploads", s.withAuth(s.handleUpload))
+	mux.HandleFunc("POST /uploads", s.handleUpload)
 	mux.HandleFunc("GET /artifacts/{id}", s.handleArtifact)
 	mux.HandleFunc("GET /vnc", s.handleVNC)
-	mux.HandleFunc("POST /tasks/{id}/questions/{qid}/answer", s.withAuth(s.handleAnswer))
-	mux.HandleFunc("POST /internal/tasks/{id}/ask", s.handleAsk)
-	mux.HandleFunc("POST /tasks/{id}/steer", s.withAuth(s.handleSteer))
-	return s.withCORS(mux)
+	mux.HandleFunc("POST /tasks/{id}/questions/{qid}/answer", s.handleAnswer)
+	mux.HandleFunc("POST /tasks/{id}/steer", s.handleSteer)
+	public := http.NewServeMux()
+	public.HandleFunc("POST /pair", s.handlePair)
+	public.HandleFunc("GET /pair", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Set("Referrer-Policy", "no-referrer")
+		writeJSON(w, http.StatusOK, map[string]string{"service": "mobd", "message": "Open or paste the complete invitation link in a pairing-capable mob client."})
+	})
+	public.HandleFunc("POST /internal/tasks/{id}/ask", s.handleAsk)
+	public.Handle("/", s.withAuth(mux))
+	return s.withCORS(public)
 }
 
 func (s *Server) withCORS(next http.Handler) http.Handler {
@@ -131,7 +143,7 @@ func (s *Server) withCORS(next http.Handler) http.Handler {
 		if _, ok := allowed[origin]; ok {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
 			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS")
-			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Mob-Token")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 		}
 		if r.Method == http.MethodOptions {
 			if origin == "" {
@@ -344,7 +356,7 @@ func (s *Server) handleTaskEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Accel-Buffering", "no")
 	w.WriteHeader(http.StatusOK)
 	flusher.Flush()
@@ -402,7 +414,7 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Accel-Buffering", "no")
 	w.WriteHeader(http.StatusOK)
 	flusher.Flush()
@@ -490,26 +502,6 @@ func (s *Server) Close() {
 	}
 	s.mu.Unlock()
 	s.runs.Wait()
-}
-
-func (s *Server) withAuth(next http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		secret := s.cfg.SharedSecret
-		if secret == "" {
-			next(w, r)
-			return
-		}
-		auth := r.Header.Get("Authorization")
-		got := strings.TrimPrefix(auth, "Bearer ")
-		if got == auth {
-			got = r.Header.Get("X-Mob-Token")
-		}
-		if got != secret {
-			writeErr(w, http.StatusUnauthorized, "unauthorized")
-			return
-		}
-		next(w, r)
-	}
 }
 
 func writeJSON(w http.ResponseWriter, code int, v any) {

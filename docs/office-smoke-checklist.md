@@ -33,7 +33,7 @@ Edit `~/.mobd/config.json` before starting:
   `0.0.0.0:8080` behind appropriate network controls.
 - Keep `maxRunning: 1` on a shared desktop.
 - Set `codexPermissions` / `claudePermissions` to `approve` if provider approvals
-  are required; the default is `bypass`. Shared-secret behavior is in [security](security.md).
+  are required; the default is `bypass`. Mandatory pairing behavior is in [security](security.md).
 
 ## 2. Start and check readiness
 
@@ -47,7 +47,8 @@ Edit `~/.mobd/config.json` before starting:
    ```bash
    mobd start
    mobd status
-   curl -fsS http://127.0.0.1:8080/health
+   # Pair first using mobd link and POST /pair (see docs/pairing.md).
+   curl -fsS -H "Authorization: Bearer $MOBD_TOKEN" http://127.0.0.1:8080/health
    ```
 
    Adjust the health address if listening on a different interface or port.
@@ -64,13 +65,13 @@ available runner. Ask it to use mob-mcp to open TextEdit and type a unique smoke
 marker without saving a file. Alternatively, submit a local request:
 
 ```bash
-curl -fsS http://127.0.0.1:8080/tasks \
+curl -fsS -H "Authorization: Bearer $MOBD_TOKEN" http://127.0.0.1:8080/tasks \
   -H 'Content-Type: application/json' \
   -d '{"prompt":"Use mob-mcp to open TextEdit and type MOB smoke check in a new unsaved document. Do not save it."}'
 ```
 
-If `sharedSecret` is configured, include `Authorization: Bearer <token>` on the
-request. Use the returned task ID with `GET /tasks/{id}` and
+Every request requires a paired device credential, including reads and streams.
+Desktop/mobile integration must be completed before running the client checks. Use the returned task ID with `GET /tasks/{id}` and
 `GET /tasks/{id}/events`, or watch the client's timeline.
 
 **Pass:** the real desktop changes, tool activity is visible, and the task succeeds.

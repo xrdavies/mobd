@@ -11,9 +11,8 @@ for the live-view connection.
   listener, or use a trusted **SSH** tunnel. A public HTTPS/WSS proxy also needs
   authentication on every route; TLS alone is not access control.
 - Phone access without a VPN requires a public gateway or Tailscale Funnel plus
-  authentication on every route; see the [proposed architecture](remote-access.md).
-  Until that authentication is implemented, do not publish mobd through Funnel
-  or an unauthenticated public tunnel. Funnel provides transport, not application login.
+  paired credentials on every route; see the [architecture](remote-access.md).
+  Desktop/mobile client integration is pending. Funnel provides transport, not application login.
 - The planned managed relay must authorize each user/device mapping and isolate
   customers' office machines. A gateway that terminates TLS can read proxied
   data; this topology does not provide end-to-end encryption from client to mobd.
@@ -32,28 +31,26 @@ Keeping these channels apart limits accidental remote control and makes auditing
 - `ask_user` and `request_approval` are available through `mobd mcp`. The question/answer API uses a per-task token for internal calls; pending approvals are denied when unanswered, expired or cancelled.
 - Codex and Claude permissions default to `bypass`. Set `codexPermissions` / `claudePermissions` to `approve` for the provider gates described in [runners](runners.md). Codex exec has only the instruction-based MCP gate; app-server supports provider approval requests. These controls do not make arbitrary desktop actions a sandbox.
 
-## Current task API auth
+## Mandatory device authentication
 
-`sharedSecret` / `MOBD_SHARED_SECRET` is implemented and optional (empty by default).
-When set, creating/cancelling/steering tasks, changing sessions, uploading images
-and answering questions require `Authorization: Bearer <token>` or `X-Mob-Token`.
-Read routes, SSE, screenshots, artifacts and `/vnc` are **not** covered by this
-token check. VNC uses the upstream Screen Sharing authentication; browser origins
-are checked separately. Keep the entire daemon within the intended trusted network.
-There is no multi-user login system or dedicated security audit log.
+Every business route requires `Authorization: Bearer <device credential>`, including
+health, reads, writes, SSE, images and VNC. Credentials are independent per client
+and remain valid until revoked, deleted or authentication is reset. The
+[pairing protocol](pairing.md) uses ten-minute, single-use invitations generated
+through a user-private Unix socket. Loopback and proxy headers do not bypass auth.
+Revocation disconnects the client's active SSE/VNC streams. Screen Sharing still
+performs its own upstream VNC authentication; browser origins are checked separately.
 
-## Planned mandatory client authentication
+Authentication state is private, atomically persisted and locked to one daemon.
+Only credential hashes are stored. Corrupt state fails startup; missing state
+creates an empty identity, never anonymous access. Local management stays on the
+Unix socket; agent/MCP calls retain per-task tokens. All paired clients have full
+access to the same office data; there is no multi-user isolation or security audit log.
 
-The [pairing design](pairing.md) requires authentication for every client in all
-three network modes, including private networks. It separates short-lived
-invitations from persistent, individually revocable credentials; no anonymous mode
-or authentication-disable setting is planned. Pairing redemption checks an explicit
-one-time invitation before issuing credentials. Local management and agent/MCP
-calls retain their own authentication boundaries.
-
-Migration will require existing clients to pair, preserve business data and reject
-legacy global secrets as a bypass. Pairing and client-management commands are not
-yet implemented; the current binary still behaves as described above.
+Remove nonempty `sharedSecret` / `MOBD_SHARED_SECRET` before upgrading and pair each
+client. The old global secret and `X-Mob-Token` are no longer accepted. Business data
+is preserved. The mob desktop/mobile implementations must be updated separately,
+including secure storage and credentials on streaming/image/WebSocket requests.
 
 ## Distributed binaries
 

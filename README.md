@@ -93,14 +93,24 @@ The proposed connection setup offers three choices per office device:
 - **Our relay:** clients sign in and select a bound device through our managed
   gateway; device enrollment, authorization and relay infrastructure are still to be built.
 
-All three reuse the same task API, SSE and VNC relay. The target design requires
-client authentication in every mode: pair once, then authenticate automatically.
-There will be no anonymous mode or authentication-disable setting. The selection UI
-and complete authentication are planned; the current binary does not enforce this design.
-Public modes are not ready to deploy.
-The [pairing design](docs/pairing.md) covers QR/link onboarding, short-lived
-invitations, persistent client credentials and local list/revoke/delete commands.
-These commands are proposed, not available in the current binary.
+All three reuse mandatory per-device authentication: pair once, then authenticate
+with a persistent credential until revoked, deleted or authentication is reset.
+There is no anonymous mode. mobd implements [pairing](docs/pairing.md); desktop and
+mobile client integration and the mode-selection UI are follow-up work. Existing
+clients need upgrading before they can connect to this version.
+
+```bash
+mobd link --url https://office.example.com  # QR + one-use link, expires in 10 minutes
+mobd clients list
+mobd connections
+mobd clients revoke CLIENT_ID
+mobd clients delete CLIENT_ID
+mobd link --close                         # close unused invitations only
+mobd auth reset --yes                     # invalidate all credentials; retain history
+```
+
+Commands use a private local management socket. Invitations are temporary;
+paired credentials survive invitation expiry and daemon/client restarts.
 
 For separate home and office networks, use **Tailscale + Tailscale Serve** when
 both devices can install Tailscale. Keep mobd on `127.0.0.1:8080`; Serve provides
@@ -110,10 +120,9 @@ forward is needed. Reuse an existing company VPN when available.
 
 Follow the [remote-access guide](docs/remote-access.md) for the three-mode design,
 private deployment steps, verification and an SSH alternative.
-Until full authentication is implemented, do not publish mobd directly or through
-Tailscale Funnel: the optional `sharedSecret` protects writes, while reads,
-screenshots, SSE and `/vnc` still require trusted network access.
-HTTPS alone does not provide authentication.
+Public deployments require HTTPS/WSS and clients that send their paired credential
+on every request, including SSE and VNC. Validate real client and tunnel behavior
+before deployment; the managed relay is not implemented.
 
 ### Configuration
 
@@ -126,7 +135,7 @@ JSON, invalid addresses and invalid concurrency values fail with an error.
 `init` creates a private directory/file (0700/0600). No `.env` is read or executed.
 
 Supported flags: `--config`, `--listen`, `--codex-bin`, `--workdir`,
-`--state-path`, `--max-running`. Put other options in JSON or exported variables.
+`--state-path`, `--max-running`, `--control-socket`. Put other options in JSON or exported variables.
 Relative filesystem paths resolve from the invoking directory. Use absolute paths
 in long-lived configs; JSON does not expand `~`, `$HOME`, or shell expressions.
 
@@ -234,38 +243,43 @@ is ignored by Git; commit only the example.
 
 ## curl examples
 
+First generate an invitation with `mobd link`, then redeem it with `POST /pair`
+as described in the [pairing protocol](docs/pairing.md). Set `MOBD_TOKEN` to the
+returned device credential. Every example below requires it, including reads.
+Do not put the credential in URLs or share it between devices.
+
 ```bash
 # health
-curl -s localhost:8080/health | jq .
+curl -H "Authorization: Bearer $MOBD_TOKEN" -s localhost:8080/health | jq .
 
 # first turn: creates a conversation and returns its sessionId
-curl -s -X POST localhost:8080/tasks \
+curl -H "Authorization: Bearer $MOBD_TOKEN" -s -X POST localhost:8080/tasks \
   -H 'Content-Type: application/json' \
   -d '{"prompt":"Use mob-mcp to open Safari"}' | jq .
 
 # follow-up: reuse the returned sessionId
-curl -s -X POST localhost:8080/tasks \
+curl -H "Authorization: Bearer $MOBD_TOKEN" -s -X POST localhost:8080/tasks \
   -H 'Content-Type: application/json' \
   -d '{"sessionId":"SESSION_ID","prompt":"Now open example.com in that window"}' | jq .
 
 # list conversations, then read the full user/assistant transcript and turns
-curl -s localhost:8080/sessions | jq .
-curl -s localhost:8080/sessions/SESSION_ID | jq .
+curl -H "Authorization: Bearer $MOBD_TOKEN" -s localhost:8080/sessions | jq .
+curl -H "Authorization: Bearer $MOBD_TOKEN" -s localhost:8080/sessions/SESSION_ID | jq .
 
 # list (filters: sessionId, status, limit 1-500)
-curl -s 'localhost:8080/tasks?status=running' | jq .
+curl -H "Authorization: Bearer $MOBD_TOKEN" -s 'localhost:8080/tasks?status=running' | jq .
 
 # get one (replace ID)
-curl -s localhost:8080/tasks/TASK_ID | jq .
+curl -H "Authorization: Bearer $MOBD_TOKEN" -s localhost:8080/tasks/TASK_ID | jq .
 
 # SSE events
-curl -N localhost:8080/tasks/TASK_ID/events
+curl -H "Authorization: Bearer $MOBD_TOKEN" -N localhost:8080/tasks/TASK_ID/events
 
 # resume delivery after event 12 (Last-Event-ID takes precedence over ?after=)
-curl -N -H 'Last-Event-ID: 12' localhost:8080/tasks/TASK_ID/events
+curl -H "Authorization: Bearer $MOBD_TOKEN" -N -H 'Last-Event-ID: 12' localhost:8080/tasks/TASK_ID/events
 
 # cancel
-curl -s -X POST localhost:8080/tasks/TASK_ID/cancel | jq .
+curl -H "Authorization: Bearer $MOBD_TOKEN" -s -X POST localhost:8080/tasks/TASK_ID/cancel | jq .
 ```
 
 Task options, attachments, session management and live updates
@@ -273,40 +287,31 @@ Task options, attachments, session management and live updates
 
 ```bash
 # per-turn model / reasoning effort / image attachments
-curl -s -X POST localhost:8080/uploads -F file=@shot.png | jq .      # → {id, url, …}
-curl -s -X POST localhost:8080/tasks -H 'Content-Type: application/json' \
+curl -H "Authorization: Bearer $MOBD_TOKEN" -s -X POST localhost:8080/uploads -F file=@shot.png | jq .      # → {id, url, …}
+curl -H "Authorization: Bearer $MOBD_TOKEN" -s -X POST localhost:8080/tasks -H 'Content-Type: application/json' \
   -d '{"prompt":"What is in this image?","effort":"high","attachments":["UPLOAD_ID"]}' | jq .
 
 # desktop queue (one running task by default)
-curl -s localhost:8080/queue | jq .
+curl -H "Authorization: Bearer $MOBD_TOKEN" -s localhost:8080/queue | jq .
 
 # session admin
-curl -s -X PATCH localhost:8080/sessions/SESSION_ID -d '{"title":"Weekly report","pinned":true}' | jq .
-curl -s -X PATCH localhost:8080/sessions/SESSION_ID -d '{"archived":true}' | jq .
-curl -s 'localhost:8080/sessions?archived=all' | jq .
-curl -s -X DELETE localhost:8080/sessions/SESSION_ID -o /dev/null -w '%{http_code}\n'   # 204, 409 while active
+curl -H "Authorization: Bearer $MOBD_TOKEN" -s -X PATCH localhost:8080/sessions/SESSION_ID -d '{"title":"Weekly report","pinned":true}' | jq .
+curl -H "Authorization: Bearer $MOBD_TOKEN" -s -X PATCH localhost:8080/sessions/SESSION_ID -d '{"archived":true}' | jq .
+curl -H "Authorization: Bearer $MOBD_TOKEN" -s 'localhost:8080/sessions?archived=all' | jq .
+curl -H "Authorization: Bearer $MOBD_TOKEN" -s -X DELETE localhost:8080/sessions/SESSION_ID -o /dev/null -w '%{http_code}\n'   # 204, 409 while active
 
 # timeline: messages + activities (tool calls, commands, plans…) + task usage
-curl -s localhost:8080/sessions/SESSION_ID | jq '.activities'
+curl -H "Authorization: Bearer $MOBD_TOKEN" -s localhost:8080/sessions/SESSION_ID | jq '.activities'
 
 # live view: WebSocket relay to Screen Sharing
 # ws://localhost:8080/vnc   ← svnc / the App connect here
 
 # global live stream (session / session.deleted / task / queue / reset)
-curl -N localhost:8080/events
+curl -H "Authorization: Bearer $MOBD_TOKEN" -N localhost:8080/events
 
 # desktop snapshot without VNC; tool screenshots and uploads
-curl -s 'localhost:8080/screen?maxWidth=720' -o screen.jpg
-curl -s localhost:8080/artifacts/ARTIFACT_ID -o artifact.png
-```
-
-With shared secret:
-
-```bash
-curl -s -X POST localhost:8080/tasks \
-  -H "Authorization: Bearer $MOBD_SHARED_SECRET" \
-  -H 'Content-Type: application/json' \
-  -d '{"prompt":"…"}'
+curl -H "Authorization: Bearer $MOBD_TOKEN" -s 'localhost:8080/screen?maxWidth=720' -o screen.jpg
+curl -H "Authorization: Bearer $MOBD_TOKEN" -s localhost:8080/artifacts/ARTIFACT_ID -o artifact.png
 ```
 
 ## Configuration reference
@@ -318,11 +323,12 @@ curl -s -X POST localhost:8080/tasks \
 | `workdir` | `MOBD_CODEX_WORKDIR` | process cwd | Codex working directory |
 | `mcpCommand` | `MOBD_MOB_MCP_COMMAND` | this `mobd` binary | MCP server command for Codex `-c` injection; empty = built-in `mobd mcp` |
 | `mcpArgs` | `MOBD_MOB_MCP_ARGS` | `["mcp"]` when built-in, else `[]` | JSON array of args (external command only) |
-| `sharedSecret` | `MOBD_SHARED_SECRET` | empty | Optional token for mutating API routes; reads and `/vnc` are not covered ([security](docs/security.md)) |
+| `sharedSecret` | `MOBD_SHARED_SECRET` | empty | Removed; nonempty values fail startup with migration instructions. Pair each client instead. |
+| `controlSocket` | `MOBD_CONTROL_SOCKET` | `~/.mobd/run/control.sock` | Private local management; parent directory must be owned by this user with mode 0700 |
 | `vncViewUrl` | `MOBD_VNC_VIEW_URL` | empty | Returned on tasks / health for svnc viewOnly |
 | `statePath` | `MOBD_STATE_PATH` | user config directory + `mob/state.json` | Private conversation snapshot; on macOS: `~/Library/Application Support/mob/state.json` |
 | `maxRunning` | `MOBD_MAX_RUNNING` | `1` | Tasks running at once across all sessions; others wait in the FIFO desktop queue |
-| `dataDir` | `MOBD_DATA_DIR` | directory of `MOBD_STATE_PATH` | Root of `artifacts/` (tool screenshots, uploads) |
+| `dataDir` | `MOBD_DATA_DIR` | directory of `MOBD_STATE_PATH` | Root of `artifacts/` (tool screenshots, uploads) and private `auth.json` |
 | `codexModels` | `MOBD_CODEX_MODELS` | empty | Comma-separated model IDs advertised on `/health` for client pickers; `MOBD_MODELS` is also accepted, with lower priority |
 | `vncAddr` | `MOBD_VNC_ADDR` | `127.0.0.1:5900` | VNC server (macOS Screen Sharing) relayed by `GET /vnc` and checked by `/health` |
 | `corsOrigins` | `MOBD_CORS_ORIGINS` | `http://localhost:1420,http://127.0.0.1:1420,tauri://localhost,http://tauri.localhost` | Comma-separated exact origins; a nonempty value replaces the defaults |
@@ -354,7 +360,7 @@ mobd and the desktop client are released independently. `/health` advertises `ap
 
 Runner protocol details, approval behavior and the shared contract tests are documented in [runners](docs/runners.md).
 
-CORS covers API responses and SSE, plus `OPTIONS` preflight for `GET`/`POST`/`PATCH`/`DELETE` with `Content-Type`, `Authorization`, or `X-Mob-Token`. Use the client's origin (scheme, host, and port, without a trailing slash), not the office API address. CORS does not replace authentication or LAN/VPN access controls.
+CORS covers API responses and SSE, plus `OPTIONS` preflight for `GET`/`POST`/`PATCH`/`DELETE` with `Content-Type` or `Authorization`. Use the client's origin (scheme, host, and port, without a trailing slash), not the office API address. CORS does not replace authentication or LAN/VPN access controls.
 
 ## Documentation
 

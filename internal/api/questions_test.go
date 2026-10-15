@@ -152,7 +152,7 @@ func TestCancelSettlesPendingQuestion(t *testing.T) {
 // The agent's MCP request going away (agent killed) cancels the question.
 func TestDroppedAskCancelsQuestion(t *testing.T) {
 	s, tk, token := runningTurn(t, time.Minute)
-	srv := httptest.NewServer(s.Handler())
+	srv := httptest.NewServer(authenticatedHandler(t, s))
 	defer srv.Close()
 	ctx, cancel := context.WithCancel(context.Background())
 	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, srv.URL+"/internal/tasks/"+tk.ID+"/ask",
@@ -173,7 +173,7 @@ func TestDroppedAskCancelsQuestion(t *testing.T) {
 
 func TestRunOptionsCarryAskSettings(t *testing.T) {
 	cfg := config.Config{QuestionTimeout: 10 * time.Minute, DataDir: t.TempDir(), ListenAddr: "0.0.0.0:9090"}
-	s := New(cfg, task.NewStore(), codex.New(cfg))
+	s := newTestServer(t, cfg, task.NewStore(), codex.New(cfg))
 	t.Cleanup(s.Close)
 	s.tokens["t1"] = "tok"
 	opts := s.runOptions(&task.Task{ID: "t1"})

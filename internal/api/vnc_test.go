@@ -45,8 +45,8 @@ func fakeVNC(t *testing.T) string {
 func vncServer(t *testing.T, addr string) (*Server, *httptest.Server) {
 	t.Helper()
 	cfg := config.Config{VNCAddr: addr, CORSOrigins: []string{"http://localhost:1420"}, DataDir: t.TempDir()}
-	s := New(cfg, task.NewStore(), codex.New(cfg))
-	srv := httptest.NewServer(s.Handler())
+	s := newTestServer(t, cfg, task.NewStore(), codex.New(cfg))
+	srv := httptest.NewServer(authenticatedHandler(t, s))
 	t.Cleanup(srv.Close)
 	t.Cleanup(s.Close)
 	return s, srv

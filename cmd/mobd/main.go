@@ -17,7 +17,9 @@ import (
 
 	"github.com/xrdavies/mobd/internal/api"
 	"github.com/xrdavies/mobd/internal/config"
+	"github.com/xrdavies/mobd/internal/control"
 	"github.com/xrdavies/mobd/internal/mcpserver"
+	"github.com/xrdavies/mobd/internal/pairing"
 	"github.com/xrdavies/mobd/internal/runner"
 	"github.com/xrdavies/mobd/internal/runner/claude"
 	"github.com/xrdavies/mobd/internal/runner/codex"
@@ -36,6 +38,10 @@ const usage = `Usage: mobd <command> [options]
   restart    Reload configuration and restart; preserve login setting
   status     Show background service address and health
   logs       Follow background service logs
+  link       --url HTTPS_ORIGIN: print a one-use pairing link and QR; --close: close invitations
+  clients    list | revoke CLIENT_ID | delete CLIENT_ID (local management)
+  connections  List authenticated active requests and streams
+  auth       reset --yes: invalidate all clients and invitations
   mcp        Run the built-in MCP server over stdio
   --version  Print version
   --help     Show help
@@ -46,8 +52,10 @@ serve/start/restart options:
   --codex-bin PATH    Codex executable
   --workdir PATH      Codex working directory
   --state-path PATH   Conversation snapshot
+  --control-socket PATH  Local management socket (default ~/.mobd/run/control.sock)
   --max-running N    Concurrent tasks (default 1)
 Configuration: flags > exported MOBD_* environment > JSON > defaults.
+Management commands accept --socket PATH or MOBD_CONTROL_SOCKET.
 No .env file is read. Background commands operate on one service per user.
 `
 
@@ -70,6 +78,9 @@ func run(args []string) error {
 	if len(args) == 1 && args[0] == "--version" || command == "version" {
 		fmt.Println("mobd", version)
 		return nil
+	}
+	if command == "link" || command == "clients" || command == "connections" || command == "auth" {
+		return manage(command, args)
 	}
 	if command == "mcp" {
 		if len(args) != 0 {
@@ -177,6 +188,17 @@ func serve(cfg config.Config) error {
 	}
 	defer listener.Close()
 
+	management, release, err := control.Listen(cfg.ControlSocket)
+	if err != nil {
+		return err
+	}
+	defer release()
+	auth, err := pairing.Open(filepath.Join(cfg.DataDir, "auth.json"))
+	if err != nil {
+		return err
+	}
+	defer auth.Close()
+
 	store, err := task.OpenStore(cfg.StatePath)
 	if err != nil {
 		return fmt.Errorf("open conversation state: %w", err)
@@ -193,7 +215,7 @@ func serve(cfg config.Config) error {
 	if _, err := runner.NewRegistry(cfg.DefaultRunner, runners...); err != nil {
 		return fmt.Errorf("defaultRunner: %w", err)
 	}
-	srv := api.New(cfg, store, runners...)
+	srv := api.New(cfg, store, auth, runners...)
 
 	httpSrv := &http.Server{
 		Addr:              cfg.ListenAddr,
@@ -201,7 +223,12 @@ func serve(cfg config.Config) error {
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
-	serveErr := make(chan error, 1)
+	defer httpSrv.Close()
+
+	adminSrv := &http.Server{Handler: control.Handler(auth), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 10 * time.Second}
+	defer adminSrv.Close()
+	serveErr := make(chan error, 2)
+	go func() { serveErr <- adminSrv.Serve(management) }()
 	go func() {
 		log.Printf("mobd listening on %s; health=%s/health (runners=%s default=%s)", cfg.ListenAddr, cfg.SelfURL(), strings.Join(cfg.Runners, ","), cfg.DefaultRunner)
 		serveErr <- httpSrv.Serve(listener)

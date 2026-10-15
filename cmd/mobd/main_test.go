@@ -10,7 +10,7 @@ import (
 )
 
 func TestCLIRejectsBadArguments(t *testing.T) {
-	for _, args := range [][]string{{"wat"}, {"mcp", "extra"}, {"status", "--listen", ":9000"}, {"serve", "--unknown"}, {"serve", "unexpected"}} {
+	for _, args := range [][]string{{"wat"}, {"mcp", "extra"}, {"status", "--listen", ":9000"}, {"serve", "--unknown"}, {"serve", "unexpected"}, {"link"}, {"link", "--close", "--url", "https://office.example"}, {"clients"}, {"clients", "revoke"}, {"clients", "delete"}, {"clients", "unknown"}, {"auth", "reset"}, {"auth", "reset", "--yes", "extra"}, {"connections", "extra"}} {
 		if err := run(args); err == nil {
 			t.Errorf("accepted %v", args)
 		}

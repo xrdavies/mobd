@@ -3,15 +3,15 @@
 目标是让用户为每台办公室机器选择 **私有网络、用户自管 Funnel、我们的中继** 三种连接方式。
 三种方式复用同一套 mobd API、SSE 和 VNC 中继；手机不想安装 VPN 时选择后两种。
 **三种模式都要求客户端认证；首次配对，后续自动认证，不提供无认证模式。**
-这是连接模式设计，尚未实现选择界面、完整认证或托管中继。
-**当前 mobd 仅适合受信任的私有网络，不能直接开放到公网。**
+mobd 已实现配对和完整业务认证；客户端选择界面、凭据适配和托管中继仍待实施。
+**公网启用前需完成客户端适配并验证 HTTPS、SSE 和 VNC。**
 
 ## 三种连接模式
 
 | 模式 | 用户准备什么 | 手机/桌面 mob 如何连接 | 当前状态 |
 | --- | --- | --- | --- |
-| **私有网络** | 办公室 Mac 和所有远端客户端设备安装 Tailscale，加入用户自己的 tailnet；已有公司 VPN 也可复用 | 通过邀请添加并配对，保持 VPN 连接 | 网络通道当前可部署；统一配对认证待实现 |
-| **自管 Funnel** | 用户在办公室 Mac 安装 Tailscale，用自己的账号启用 Funnel | 填公网 HTTPS 地址，配对后连接；无需安装 Tailscale | 完整认证和 mob 凭据适配后才可开放 |
+| **私有网络** | 办公室 Mac 和所有远端客户端设备安装 Tailscale，加入用户自己的 tailnet；已有公司 VPN 也可复用 | 通过邀请添加并配对，保持 VPN 连接 | mobd 配对已实现；客户端待适配 |
+| **自管 Funnel** | 用户在办公室 Mac 安装 Tailscale，用自己的账号启用 Funnel | 填公网 HTTPS 地址，配对后连接；无需安装 Tailscale | mobd 认证已实现，待 mob 凭据适配和跨网联调 |
 | **我们的中继** | 用户绑定办公室设备；我们维护公网域名、网关和中继连接 | 登录并选择获授权设备；无需安装 Tailscale | 需建设中继服务、设备注册和访问授权 |
 
 Tailscale 安装在运行 mobd 的操作系统上，不是在 mobd 进程里另装一份。
@@ -23,7 +23,7 @@ Tailscale 安装在运行 mobd 的操作系统上，不是在 mobd 进程里另�
 因此支持用户自带 Tailscale 账号，不承诺所有办公用途或我们的商业中继可使用免费套餐；
 Funnel 的带宽限制也不会因接入 mob 而消失。
 
-### 选择流程与共同接口（待实现）
+### 选择流程与共同接口（mobd 已实现配对，客户端待适配）
 
 1. 在 mob 添加办公室设备时展示这三种模式。私有网络和自管 Funnel 输入各自的 URL；
    我们的中继通过账号绑定设备后取得地址。支持链接/二维码添加，始终包含短期邀请，
@@ -33,15 +33,15 @@ Funnel 的带宽限制也不会因接入 mob 而消失。
 3. 三种方式连接成功后都进入同一个聊天、任务和画面界面。客户端网络层复用服务器地址与凭据，
    模式选择只负责引导和取得连接信息，不为每种通道各写一套业务 API。
 4. 切换连接方式保留办公室设备身份和会话，仅替换入口；先核验新入口属于同一设备。
-   设备身份验证属于待实现的配对能力，不能仅凭用户输入的地址推断。
+   serverId 只是设备标识，不能仅凭它或用户输入的地址证明新入口可信。
    不自动从私有网络切到公网。关闭公网方式时必须撤销旧入口/中继绑定，
    仅在手机上修改地址不会关闭办公室的 Funnel。
 
 第一版每个设备连接记录使用一个明确的入口，暂不做并行探测和自动故障切换。
 Serve 与 Funnel 不能同时占用同一设备的同一端口，切换前需检查已有服务。
 三种模式共享同一套强制应用认证，不增加认证开关，也不因私有网络而跳过配对。
-现有可选 `sharedSecret` 只是当前实现，不能作为目标方案的兼容绕过；升级时需要
-客户端配对，并保留已有业务数据。迁移边界见 [配对设计](pairing.md)。
+mobd 已强制执行配对认证，非空的旧 `sharedSecret` 配置会提示迁移并阻止启动；
+升级保留已有业务数据。客户端需要适配后重新配对，见 [配对协议](pairing.md)。
 
 ### 其他部署条件
 
@@ -55,10 +55,9 @@ mobd 已将 HTTP API、SSE 事件流和 `/vnc` WebSocket 中继放在同一个�
 只需连接这一个入口，`5900` 不需要经过公网转发。远端地址不写入 `vncAddr`
 或 `vncViewUrl`；它是家庭 mob 客户端的服务器地址。本地 agent/MCP 继续访问本机 mobd。
 
-当前 `sharedSecret` 只保护写接口，**不保护读取、SSE、截图、附件和 `/vnc`**。
+mobd 的读取、写入、SSE、截图、附件和 `/vnc` 均要求独立设备凭据。
 HTTPS 仅加密传输，CORS 仅约束浏览器来源，两者均不能代替身份认证。
-在完整认证实施前，不要直接将 mobd 端口发布到公网，也不要用 Tailscale Funnel 发布它。
-完整边界见 [security](security.md)。
+客户端凭据适配和真实跨网验证仍待完成。完整边界见 [security](security.md)。
 
 ## 手机免 VPN：Funnel 或自有公网网关
 
@@ -68,7 +67,7 @@ HTTPS 仅加密传输，CORS 仅约束浏览器来源，两者均不能代替身
 flowchart LR
     P[手机 mob，无 VPN] -->|HTTPS / SSE / WSS| F[Tailscale Funnel 公网 relay]
     F -->|加密转发| O[办公室 Tailscale]
-    O --> G[应用认证：需补齐]
+    O --> G[mobd 设备认证]
     G --> M[mobd 127.0.0.1:8080]
 ```
 
@@ -83,7 +82,8 @@ flowchart LR
 
 Funnel 有不可配置的带宽限制、域名限制，官方当前标为 beta。因此先在完整认证下
 验证 API、SSE、WebSocket 和实际 VNC 画面性能，再决定是否长期采用；不能只凭
-`/health` 可达就认为满足远程桌面需求。本文不提供将当前未完整认证的 mobd 直接发布的命令。
+`/health` 可达就认为满足远程桌面需求。当前发布指引仍以私有 Serve 为主，
+客户端完成配对和所有通道认证后再验收公网 Funnel。
 
 ### 需要自有 relay 时：公网 HTTPS 网关
 
@@ -136,14 +136,14 @@ Tailscale 是可选的底层通道，不是手机端协议。若以后要求办�
    不将长期密钥放进 URL。凭据需要可撤销，并保存在系统安全存储中。
 3. 联调未登录拒绝访问、凭据撤销、SSE 实时推送、画面更新，以及手机网络切换后的恢复。
 
-这些是实施要求，尚未修改认证代码或验证手机端。落地顺序是：**保留可用的私有连接，
-先完成统一认证、配对及 mob 模式选择，启用自管 Funnel，再接入我们的中继服务**。
+mobd 统一认证、配对、本机管理和撤销断连已实现；手机端尚未适配或验证。
+后续顺序是：**完成 mob 配对及模式选择，验证自管 Funnel，再接入我们的中继服务**。
 中继完成前不展示为可用服务。隧道负责网络可达性，应用负责识别和授权用户。
 
 ## 双端可以安装 VPN 时：Tailscale + Serve
 
-以下步骤描述当前版本的网络部署与检查，不表示已经实现上述强制配对。
-配对版本上线后，网络步骤不变，但业务与详细健康检查必须使用已配对凭据。
+以下网络步骤适用于配对版本，业务与详细健康检查必须使用已配对凭据。
+桌面和手机客户端需要后续升级；旧匿名客户端无法连接。
 
 ```mermaid
 flowchart LR
@@ -178,8 +178,8 @@ tailscale status
 ### 2. 先限制访问范围
 
 Serve 也受 tailnet 访问策略约束。将访问限定到需要使用 mobd 的可信家庭设备和办公室
-Mac 的 TCP 443；能访问此入口的设备可读取所有会话，并在未设置 `sharedSecret`
-时提交 agent 任务。mobd 不根据 Tailscale 身份头隔离用户数据。
+Mac 的 TCP 443；获配对授权的客户端可访问同一办公室的所有业务数据。
+mobd 不根据 Tailscale 身份头自动配对或隔离用户数据。
 
 以下是**专用两机 tailnet 的完整最小策略示例**，在 Tailscale 管理控制台的访问控制中配置。
 将示例 IP 替换为两台设备的真实 Tailscale IPv4 地址（分别运行 `tailscale ip -4` 获取）：
@@ -220,7 +220,8 @@ Mac 的 TCP 443；能访问此入口的设备可读取所有会话，并在未�
 
 ```bash
 mobd status
-curl -fsS http://127.0.0.1:8080/health
+# 先通过 mobd link 和 POST /pair 取得本机测试凭据，见配对协议
+curl -fsS -H "Authorization: Bearer $MOBD_TOKEN" http://127.0.0.1:8080/health
 ```
 
 `status` 应显示 `listen=127.0.0.1:8080`；`/health` 的 `ok: true` 只说明 API 可用，
@@ -251,12 +252,13 @@ Tailscale 也必须保持连接。参见官方 [Serve 命令](https://tailscale.
 
 ### 5. 家庭端连接和验收
 
-在家庭网络中保持 Tailscale 已连接，使用步骤 4 的实际 URL：
+在办公室执行 `mobd link --url https://实际入口域名`，在家庭端使用配对协议兑换凭据。
+以下 `MOBD_TOKEN` 为返回的设备凭据。在家庭网络中保持 Tailscale 已连接，使用步骤 4 的实际 URL：
 
 ```bash
 MOBD_REMOTE_URL='https://office-mac.example-tailnet.ts.net'
-curl -fsS --connect-timeout 10 "$MOBD_REMOTE_URL/health"
-curl -iN --max-time 20 "$MOBD_REMOTE_URL/events"
+curl -fsS -H "Authorization: Bearer $MOBD_TOKEN" --connect-timeout 10 "$MOBD_REMOTE_URL/health"
+curl -iN -H "Authorization: Bearer $MOBD_TOKEN" --max-time 20 "$MOBD_REMOTE_URL/events"
 ```
 
 事件流应返回 `200`、`Content-Type: text/event-stream`，空闲约 15 秒出现 `: ping`。
@@ -270,7 +272,7 @@ Origin（协议、主机、端口），并保留仍在使用的其他来源。�
 实际验收必须覆盖：
 
 - 在家庭网络提交一个无破坏性任务，事件实时到达，审批/回答（若启用）可以继续任务。
-- 读取会话、上传图片、打开截图或附件；有 `sharedSecret` 时写请求仍需携带密钥。
+- 读取会话、上传图片、打开截图或附件；所有请求和 VNC 握手均需携带设备凭据。
 - 打开 VNC 预览，确认画面持续更新且默认不发送键鼠输入。
 - 关闭家庭端 Tailscale 后，新请求无法到达；另一个没有获准的 tailnet 设备也不能访问。
 - 在无任务运行时重启 mobd、断开并重连 Tailscale，确认重新连接后可继续读取会话和查看画面。
@@ -287,6 +289,7 @@ Origin（协议、主机、端口），并保留仍在使用的其他来源。�
 | 本机正常，家庭端超时 | 两端 `tailscale status`、办公室在线状态、DNS、TCP 443 访问规则及公司出站限制 |
 | HTTPS 证书失败 | 使用 Serve 输出的完整域名，检查 HTTPS 是否启用和系统时间；不要跳过证书验证 |
 | HTTP 502 | 检查 Serve 的本机目标、mobd 是否运行及端口是否一致 |
+| HTTP 401 | 尚未配对或凭据已撤销；先完成配对并检查所有通道的 Authorization |
 | API 正常，VNC 403/502 | 403 检查客户端 Origin；502 检查办公室 Screen Sharing 和 `vncAddr` |
 | 画面延迟大 | 从家庭端 `tailscale ping office-mac` 并查看 `tailscale status`；`relay` 表示 DERP 中继，测实际带宽后再决定是否部署更近的中继 |
 | SSE 没有心跳或更新 | 确认请求到达 mobd；额外代理必须关闭流缓冲和缓存，允许长连接 |
