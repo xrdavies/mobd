@@ -134,10 +134,11 @@ Content-Type: application/json
 {"offer": "<SDP>", "maxWidth": 1600, "maxHeight": 1000, "quality": "auto"}
 ```
 
-`201 {"session": "ID", "answer": "<SDP>", "display": {...}, "wsTicket": "…"}`. ICE is gathered
-before answering (no trickle) to keep signaling one request. Host candidates only by default, so
-Tailscale and LAN addresses work without STUN and the public IP is not exposed. Optional
-`stream.iceServers` config for a TURN server (for example on a self-hosted gateway).
+`201 {"session": "ID", "answer": "<SDP>", "display": {...}, "wsTicket": "…", "iceServers": [...]}`.
+ICE is gathered before answering (no trickle) to keep signaling one request. Host candidates only by
+default, so Tailscale and LAN addresses work without STUN and the public IP is not exposed.
+`iceServers` is present only when a relay is configured (see "Self-hosted relay"); clients use it as
+given and never configure TURN themselves.
 `DELETE /stream/{session}` ends it. One live session per client; a new one replaces the old.
 
 **Media**: one H.264 video track (constrained baseline, no B-frames, keyframe on PLI or request,
@@ -181,8 +182,25 @@ connects within about 3 s, otherwise keeps the WebSocket. No user setting.
 | LAN | no | WebRTC (UDP) |
 | Tailscale private network / Serve | yes | WebRTC (UDP) |
 | Tailscale Funnel | no | WebSocket (TCP) |
-| Self-hosted HTTPS gateway | no | WebSocket, or WebRTC if a TURN server runs on the gateway |
-| Our relay (future) | no | WebRTC through our TURN |
+| Self-hosted HTTPS gateway | no | WebSocket; WebRTC through `mob-relay` once that ships |
+| Our relay (future) | no | WebRTC through the hosted `mob-relay` |
+
+### Self-hosted relay (later step)
+
+`mob-relay` is a small Go program built on [Pion TURN](https://github.com/pion/turn) (MIT), running on
+the public gateway server next to the HTTPS entry. It listens on a public UDP port and on TURN over TLS
+(443) for networks that block UDP, and reaches the office Mac over Tailscale as the gateway already does.
+
+mobd's config names the relay and a shared secret only:
+
+```json
+{"relay": {"url": "turns:relay.example.com:443", "secret": "…"}}
+```
+
+For each stream session mobd issues a short-lived TURN credential (username `expiry:clientId`,
+password = HMAC-SHA1 of the username with the shared secret, valid for minutes) and returns it in
+`iceServers`. Users configure nothing on clients; a leaked credential expires on its own; revoking a
+client stops new credentials. The same program later runs our hosted relay.
 
 ### Snapshots
 
@@ -242,6 +260,7 @@ All repos use branch `feat/webrtc-stream`; they merge to `main` together at rele
 | M7 | WebSocket fallback with ticket and acks | test client over Funnel |
 | M8 | Remove VNC (`/vnc` → 410), setup checks, config | `go test ./...` |
 | M9 | Docs: this file, pairing, security, remote access, connection setup, README | review |
+| later | `mob-relay` (Pion TURN) and per-session TURN credentials in `POST /stream` | gateway with a phone off Wi-Fi |
 
 ### Clients (each in its own repo, after mobd M7)
 
