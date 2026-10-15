@@ -14,6 +14,9 @@ for the live-view connection.
   authentication on every route; see the [proposed architecture](remote-access.md).
   Until that authentication is implemented, do not publish mobd through Funnel
   or an unauthenticated public tunnel. Funnel provides transport, not application login.
+- The planned managed relay must authorize each user/device mapping and isolate
+  customers' office machines. A gateway that terminates TLS can read proxied
+  data; this topology does not provide end-to-end encryption from client to mobd.
 - `mobd init` writes a loopback listen address. Without a config override, the runtime default is `:8080`; choose the bind address explicitly for deployment.
 
 ## View vs actuation

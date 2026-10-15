@@ -84,11 +84,17 @@ make serve ARGS='--config ./config.dev.json'
 
 ### Connect from home
 
-For a phone that should not install a VPN, the proposed architecture is a public
-HTTPS endpoint with an office-side tunnel and authentication on every route.
-**Tailscale Funnel** provides a hosted relay and only requires Tailscale at the
-office; a self-hosted HTTPS gateway is an alternative when more control is needed.
-This requires authentication and mob client work before deployment.
+The proposed connection setup offers three choices per office device:
+
+- **Private network:** the office machine and remote clients use the user's
+  Tailscale network or existing VPN.
+- **User-managed Funnel:** the user enables Tailscale Funnel at the office;
+  remote clients connect over public HTTPS without installing Tailscale.
+- **Our relay:** clients sign in and select a bound device through our managed
+  gateway; device enrollment, authorization and relay infrastructure are still to be built.
+
+All three reuse the same task API, SSE and VNC relay. The selection UI and complete
+application authentication are planned; public modes are not ready to deploy.
 
 For separate home and office networks, use **Tailscale + Tailscale Serve** when
 both devices can install Tailscale. Keep mobd on `127.0.0.1:8080`; Serve provides
@@ -96,12 +102,12 @@ a private HTTPS URL for the home mob client, carrying API requests, SSE and the
 `/vnc` WebSocket relay through one endpoint. No office public IP or router port
 forward is needed. Reuse an existing company VPN when available.
 
-Follow the [remote-access guide](docs/remote-access.md) for the proposed phone
-access without a VPN, private deployment steps, verification and an SSH alternative.
+Follow the [remote-access guide](docs/remote-access.md) for the three-mode design,
+private deployment steps, verification and an SSH alternative.
 Until full authentication is implemented, do not publish mobd directly or through
 Tailscale Funnel: the optional `sharedSecret` protects writes, while reads,
-screenshots, SSE and `/vnc` still
-require trusted network access. HTTPS alone does not provide authentication.
+screenshots, SSE and `/vnc` still require trusted network access.
+HTTPS alone does not provide authentication.
 
 ### Configuration
 
