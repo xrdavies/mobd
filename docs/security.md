@@ -42,6 +42,11 @@ token check. VNC uses the upstream Screen Sharing authentication; browser origin
 are checked separately. Keep the entire daemon within the intended trusted network.
 There is no multi-user login system or dedicated security audit log.
 
+The proposed [pairing lifecycle](pairing.md) separates short-lived invitations
+from persistent, individually revocable client credentials. When authentication
+is disabled, connection observations cannot support reliable per-client revocation.
+Pairing and client-management commands are not yet implemented.
+
 ## Distributed binaries
 
 The [installer](https://mob-releases.0xd.app/mobd/install.sh) downloads over HTTPS,

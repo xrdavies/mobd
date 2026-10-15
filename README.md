@@ -95,6 +95,9 @@ The proposed connection setup offers three choices per office device:
 
 All three reuse the same task API, SSE and VNC relay. The selection UI and complete
 application authentication are planned; public modes are not ready to deploy.
+The [pairing design](docs/pairing.md) covers QR/link onboarding, short-lived
+invitations, persistent client credentials and local list/revoke/delete commands.
+These commands are proposed, not available in the current binary.
 
 For separate home and office networks, use **Tailscale + Tailscale Serve** when
 both devices can install Tailscale. Keep mobd on `127.0.0.1:8080`; Serve provides
