@@ -48,8 +48,10 @@ mobd serve                      # foreground; Ctrl-C to stop
 ```
 
 Install and authenticate the agent CLI you plan to use (Codex or Claude Code).
-Grant Accessibility and Screen Recording to the responsible app or mobd process,
-and enable macOS Screen Sharing for live viewing. For direct LAN/VPN access,
+On macOS, mobd requests Accessibility and Screen Recording when it starts if
+they are missing; approve the system prompts for the app that launches mobd.
+You can also grant them in System Settings → Privacy & Security. Enable macOS
+Screen Sharing for live viewing. For direct LAN/VPN access,
 configure `listen` for that interface; use loopback when using the remote-access
 proxy below. `mobd init` sets `listen` to `0.0.0.0:8080` (all IPv4 interfaces).
 The download domain serves files; clients connect to your office Mac's mobd URL.

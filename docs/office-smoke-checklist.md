@@ -37,9 +37,11 @@ Edit `~/.mobd/config.json` before starting:
 
 ## 2. Start and check readiness
 
-1. In macOS System Settings → Privacy & Security, grant Accessibility and Screen
-   Recording to the responsible process or launching app (Terminal/iTerm for a
-   shell launch, or mobd under launchd). Restart after changing permissions.
+1. Start mobd once. If Accessibility or Screen Recording is missing, mobd asks
+   macOS to show the corresponding authorization prompt. Approve it for the
+   app that launches mobd (Terminal/iTerm for a shell launch, or mobd under
+   launchd). You can review the grants in System Settings → Privacy & Security;
+   restart mobd after changing them.
 2. Enable System Settings → General → Sharing → Screen Sharing. Confirm its
    host, port and credentials, then set `vncAddr` if it differs from `127.0.0.1:5900`.
 3. Start the daemon and inspect readiness:

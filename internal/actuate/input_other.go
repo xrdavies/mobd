@@ -7,6 +7,9 @@ func requireDarwin() error { return ErrUnsupported }
 // CurrentPermissions is unavailable off macOS.
 func CurrentPermissions() (Permissions, error) { return Permissions{}, ErrUnsupported }
 
+// RequestPermissions is a no-op off macOS.
+func RequestPermissions() {}
+
 func click(x, y float64, right bool, count int) error { return ErrUnsupported }
 
 func pressKey(code int, modifiers []string) error { return ErrUnsupported }

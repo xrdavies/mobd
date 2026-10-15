@@ -9,6 +9,18 @@ package actuate
 static int mob_post_access(void) { return CGPreflightPostEventAccess(); }
 static int mob_screen_access(void) { return CGPreflightScreenCaptureAccess(); }
 
+static int mob_request_post_access(void) {
+	const void *keys[] = {kAXTrustedCheckOptionPrompt};
+	const void *values[] = {kCFBooleanTrue};
+	CFDictionaryRef options = CFDictionaryCreate(NULL, keys, values, 1,
+		&kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+	int trusted = AXIsProcessTrustedWithOptions(options);
+	CFRelease(options);
+	return trusted;
+}
+
+static int mob_request_screen_access(void) { return CGRequestScreenCaptureAccess() != 0; }
+
 static void mob_click(double x, double y, int right, int count) {
 	CGPoint p = CGPointMake(x, y);
 	CGEventType down = right ? kCGEventRightMouseDown : kCGEventLeftMouseDown;
@@ -116,6 +128,16 @@ func requireDarwin() error { return nil }
 // CurrentPermissions reports the TCC grants of this process (inherited by `mobd mcp`).
 func CurrentPermissions() (Permissions, error) {
 	return Permissions{Accessibility: postAccess(), ScreenRecording: C.mob_screen_access() != 0}, nil
+}
+
+// RequestPermissions asks macOS to show any missing TCC prompts before the API starts.
+func RequestPermissions() {
+	if !postAccess() {
+		C.mob_request_post_access()
+	}
+	if C.mob_screen_access() == 0 {
+		C.mob_request_screen_access()
+	}
 }
 
 func click(x, y float64, right bool, count int) error {
