@@ -93,8 +93,11 @@ The proposed connection setup offers three choices per office device:
 - **Our relay:** clients sign in and select a bound device through our managed
   gateway; device enrollment, authorization and relay infrastructure are still to be built.
 
-All three reuse the same task API, SSE and VNC relay. The selection UI and complete
-application authentication are planned; public modes are not ready to deploy.
+All three reuse the same task API, SSE and VNC relay. The target design requires
+client authentication in every mode: pair once, then authenticate automatically.
+There will be no anonymous mode or authentication-disable setting. The selection UI
+and complete authentication are planned; the current binary does not enforce this design.
+Public modes are not ready to deploy.
 The [pairing design](docs/pairing.md) covers QR/link onboarding, short-lived
 invitations, persistent client credentials and local list/revoke/delete commands.
 These commands are proposed, not available in the current binary.

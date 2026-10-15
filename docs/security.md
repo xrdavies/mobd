@@ -32,7 +32,7 @@ Keeping these channels apart limits accidental remote control and makes auditing
 - `ask_user` and `request_approval` are available through `mobd mcp`. The question/answer API uses a per-task token for internal calls; pending approvals are denied when unanswered, expired or cancelled.
 - Codex and Claude permissions default to `bypass`. Set `codexPermissions` / `claudePermissions` to `approve` for the provider gates described in [runners](runners.md). Codex exec has only the instruction-based MCP gate; app-server supports provider approval requests. These controls do not make arbitrary desktop actions a sandbox.
 
-## Task API auth
+## Current task API auth
 
 `sharedSecret` / `MOBD_SHARED_SECRET` is implemented and optional (empty by default).
 When set, creating/cancelling/steering tasks, changing sessions, uploading images
@@ -42,10 +42,18 @@ token check. VNC uses the upstream Screen Sharing authentication; browser origin
 are checked separately. Keep the entire daemon within the intended trusted network.
 There is no multi-user login system or dedicated security audit log.
 
-The proposed [pairing lifecycle](pairing.md) separates short-lived invitations
-from persistent, individually revocable client credentials. When authentication
-is disabled, connection observations cannot support reliable per-client revocation.
-Pairing and client-management commands are not yet implemented.
+## Planned mandatory client authentication
+
+The [pairing design](pairing.md) requires authentication for every client in all
+three network modes, including private networks. It separates short-lived
+invitations from persistent, individually revocable credentials; no anonymous mode
+or authentication-disable setting is planned. Pairing redemption checks an explicit
+one-time invitation before issuing credentials. Local management and agent/MCP
+calls retain their own authentication boundaries.
+
+Migration will require existing clients to pair, preserve business data and reject
+legacy global secrets as a bypass. Pairing and client-management commands are not
+yet implemented; the current binary still behaves as described above.
 
 ## Distributed binaries
 

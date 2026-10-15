@@ -74,9 +74,10 @@ The default command is this mobd binary with the `mcp` argument.
   [Tailscale Serve](remote-access.md) provides a private HTTPS/WSS entry point to
   a loopback mobd listener; a public reverse proxy needs authentication on all routes.
 - The [connection design](remote-access.md) offers private networking, user-managed
-  Funnel and our managed relay using the same API. Complete authentication and
-  client pairing/selection are prerequisites for public modes; the managed relay
-  also needs device enrollment and isolation between users. These are not yet implemented.
+  Funnel and our managed relay using the same API. The target requires individual
+  client authentication in every mode, with no anonymous access. Pairing/selection
+  and complete authentication remain to be implemented; the managed relay also
+  needs device enrollment and isolation between users.
 
 See [VNC setup](vnc-svnc-setup.md) and [security](security.md).
 
