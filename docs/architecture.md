@@ -70,7 +70,9 @@ The default command is this mobd binary with the `mcp` argument.
 - The relay connects to `vncAddr` (default `127.0.0.1:5900`) and copies RFB bytes without interpreting them. Screen Sharing handles VNC authentication, including Apple Remote Desktop sign-in.
 - The client derives the WebSocket URL from the mobd URL. `/health` reports VNC reachability and the number of open relays in `vncSessions`.
 - Browser origins must match the relay host or `corsOrigins`; clients without an Origin header are accepted. Relays close when mobd shuts down.
-- Transport: use the intranet / VPN, a WSS reverse proxy or an SSH tunnel.
+- Transport: use the intranet / VPN or an SSH tunnel. For home-to-office access,
+  [Tailscale Serve](remote-access.md) provides a private HTTPS/WSS entry point to
+  a loopback mobd listener; a public reverse proxy needs authentication on all routes.
 
 See [VNC setup](vnc-svnc-setup.md) and [security](security.md).
 

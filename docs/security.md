@@ -6,7 +6,11 @@ for the live-view connection.
 ## Deployment posture
 
 - Prefer **office intranet** or **VPN**. Do not expose raw VNC to the public internet.
-- For remote access, terminate TLS at a **WSS reverse proxy** or use **SSH** tunneling.
+- For home-to-office access, follow the [remote-access guide](remote-access.md):
+  prefer **Tailscale Serve** with restricted tailnet access and a loopback mobd
+  listener, or use a trusted **SSH** tunnel. A public HTTPS/WSS proxy also needs
+  authentication on every route; TLS alone is not access control.
+- Do not publish mobd through Tailscale Funnel or an unauthenticated public tunnel.
 - `mobd init` writes a loopback listen address. Without a config override, the runtime default is `:8080`; choose the bind address explicitly for deployment.
 
 ## View vs actuation

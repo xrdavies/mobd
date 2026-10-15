@@ -3,7 +3,8 @@
 Verify the installed mobd, one configured agent runner, and the home client's live
 view on the real office desktop.
 
-Use an office LAN or VPN. The release download domain distributes files; it is
+For separate home/office networks, complete the [remote-access setup](remote-access.md)
+and test from the actual home network. The release download domain distributes files; it is
 not the task API address. See [security](security.md) for the current access controls.
 
 ## 1. Install and configure mobd
@@ -27,8 +28,9 @@ Edit `~/.mobd/config.json` before starting:
 - Install and authenticate Codex or Claude Code as this user; set its executable
   path if it will not be found on the service's PATH. Enable the intended runners
   and choose `defaultRunner` ([runner configuration](runners.md)).
-- `mobd init` sets `listen` to `127.0.0.1:8080`. For remote clients, select a
-  LAN/VPN bind address or `0.0.0.0:8080` behind appropriate network controls.
+- `mobd init` sets `listen` to `127.0.0.1:8080`; retain it for Tailscale Serve or SSH
+  tunnels. For direct LAN/VPN clients, select a private bind address or
+  `0.0.0.0:8080` behind appropriate network controls.
 - Keep `maxRunning: 1` on a shared desktop.
 - Set `codexPermissions` / `claudePermissions` to `approve` if provider approvals
   are required; the default is `bypass`. Shared-secret behavior is in [security](security.md).

@@ -49,8 +49,9 @@ mobd serve                      # foreground; Ctrl-C to stop
 
 Install and authenticate the agent CLI you plan to use (Codex or Claude Code).
 Grant Accessibility and Screen Recording to the responsible app or mobd process,
-and enable macOS Screen Sharing for live viewing. Configure `listen` for your
-LAN/VPN interface when connecting from another device; `mobd init` binds to loopback.
+and enable macOS Screen Sharing for live viewing. For direct LAN/VPN access,
+configure `listen` for that interface; keep loopback when using the remote-access
+proxy below. `mobd init` binds to loopback.
 The download domain serves files; clients connect to your office Mac's mobd URL.
 Follow the [office smoke checklist](docs/office-smoke-checklist.md) to verify the setup.
 
@@ -80,6 +81,20 @@ make logs
 make stop
 make serve ARGS='--config ./config.dev.json'
 ```
+
+### Connect from home
+
+For separate home and office networks, use **Tailscale + Tailscale Serve** when
+both devices can install Tailscale. Keep mobd on `127.0.0.1:8080`; Serve provides
+a private HTTPS URL for the home mob client, carrying API requests, SSE and the
+`/vnc` WebSocket relay through one endpoint. No office public IP or router port
+forward is needed. Reuse an existing company VPN when available.
+
+Follow the [remote-access guide](docs/remote-access.md) for access restrictions,
+setup commands, verification, troubleshooting and an SSH relay alternative.
+Do not publish mobd directly or through Tailscale Funnel: the optional
+`sharedSecret` protects writes, while reads, screenshots, SSE and `/vnc` still
+require trusted network access. HTTPS alone does not provide authentication.
 
 ### Configuration
 
@@ -138,8 +153,10 @@ To enable only Codex, set `runners` to `["codex"]` and keep `defaultRunner` as
 `"codex"`. Permissions use `"bypass"` (the current default, skips approval prompts);
 choose `"approve"` to request approval for supported actions.
 
-The example listens on `127.0.0.1:8080`; change `listen` to `"0.0.0.0:8080"`
-for LAN/VPN clients. Optional fields omitted from the example use their defaults,
+The example listens on `127.0.0.1:8080`; keep it for Tailscale Serve or SSH tunnels.
+For direct LAN/VPN clients, bind to the intended private interface (or
+`"0.0.0.0:8080"` behind appropriate network controls).
+Optional fields omitted from the example use their defaults,
 including the conversation and artifact locations. JSON must not contain
 comments or trailing commas, and paths do not expand `~` or `$HOME`.
 
@@ -157,8 +174,9 @@ cp -n .env.example .env   # preserves an existing .env
 # Edit .env: listen address, runner executables and working directories.
 ```
 
-This developer example listens on `127.0.0.1:8080`; use `0.0.0.0:8080` for LAN/VPN
-clients. Its working directory is the directory where you source the file
+This developer example listens on `127.0.0.1:8080`; keep it for proxy/tunnel access,
+or choose a private interface for direct LAN/VPN clients.
+Its working directory is the directory where you source the file
 (`$PWD`); use a fixed absolute path if needed. This file configures **mobd**;
 [the desktop environment example](https://github.com/xrdavies/mob/blob/main/.env.example) configures the frontend.
 

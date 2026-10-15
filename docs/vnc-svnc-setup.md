@@ -31,6 +31,8 @@ Office: mobd /vnc relay       ──TCP──►  macOS Screen Sharing / VNC
 - **Human path:** WebSocket → mobd relay → VNC framebuffer. Input is disabled by default in the client.
 - **Agent path:** Codex or Claude + `mobd mcp` on the office Mac (separate from this VNC session).
 
+For separate home/office networks, follow the [remote-access guide](remote-access.md)
+to carry the API and VNC relay through one private endpoint.
 Prefer **office intranet or VPN**. Do not expose raw VNC (`5900`-style TCP) to the public internet.
 
 ## 1. Office Mac — enable Screen Sharing (VNC)
@@ -79,12 +81,13 @@ Leave mobd running while you test (the CLI manages a user LaunchAgent). Restart 
 
 ## 3. TLS / WSS (when the path leaves a trusted LAN)
 
-Terminate TLS at a reverse proxy or carry the connection through a VPN/SSH tunnel.
+Carry the connection through a VPN/SSH tunnel, or terminate TLS at a reverse
+proxy that authenticates every route. TLS alone does not restrict access.
 
 | Situation | Suggestion |
 | --- | --- |
 | Viewer and office on same trusted LAN / VPN | `ws://` to the bridge may be enough |
-| Over the public internet or untrusted segments | Terminate **WSS** at nginx / Caddy / Traefik (or websockify `--cert`), or use **SSH** / WireGuard / Tailscale and keep WS inside the tunnel |
+| Over the public internet or untrusted segments | Use **SSH** / WireGuard / Tailscale, or an authenticated **WSS** reverse proxy; protect the whole mobd API as well as VNC |
 
 Example mental model (ports/hostnames are yours to choose):
 
