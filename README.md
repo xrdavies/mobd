@@ -84,16 +84,23 @@ make serve ARGS='--config ./config.dev.json'
 
 ### Connect from home
 
+For a phone that should not install a VPN, the proposed architecture is a public
+HTTPS endpoint with an office-side tunnel and authentication on every route.
+**Tailscale Funnel** provides a hosted relay and only requires Tailscale at the
+office; a self-hosted HTTPS gateway is an alternative when more control is needed.
+This requires authentication and mob client work before deployment.
+
 For separate home and office networks, use **Tailscale + Tailscale Serve** when
 both devices can install Tailscale. Keep mobd on `127.0.0.1:8080`; Serve provides
 a private HTTPS URL for the home mob client, carrying API requests, SSE and the
 `/vnc` WebSocket relay through one endpoint. No office public IP or router port
 forward is needed. Reuse an existing company VPN when available.
 
-Follow the [remote-access guide](docs/remote-access.md) for access restrictions,
-setup commands, verification, troubleshooting and an SSH relay alternative.
-Do not publish mobd directly or through Tailscale Funnel: the optional
-`sharedSecret` protects writes, while reads, screenshots, SSE and `/vnc` still
+Follow the [remote-access guide](docs/remote-access.md) for the proposed phone
+access without a VPN, private deployment steps, verification and an SSH alternative.
+Until full authentication is implemented, do not publish mobd directly or through
+Tailscale Funnel: the optional `sharedSecret` protects writes, while reads,
+screenshots, SSE and `/vnc` still
 require trusted network access. HTTPS alone does not provide authentication.
 
 ### Configuration

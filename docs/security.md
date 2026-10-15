@@ -10,7 +10,10 @@ for the live-view connection.
   prefer **Tailscale Serve** with restricted tailnet access and a loopback mobd
   listener, or use a trusted **SSH** tunnel. A public HTTPS/WSS proxy also needs
   authentication on every route; TLS alone is not access control.
-- Do not publish mobd through Tailscale Funnel or an unauthenticated public tunnel.
+- Phone access without a VPN requires a public gateway or Tailscale Funnel plus
+  authentication on every route; see the [proposed architecture](remote-access.md).
+  Until that authentication is implemented, do not publish mobd through Funnel
+  or an unauthenticated public tunnel. Funnel provides transport, not application login.
 - `mobd init` writes a loopback listen address. Without a config override, the runtime default is `:8080`; choose the bind address explicitly for deployment.
 
 ## View vs actuation

@@ -1,21 +1,22 @@
 # 从家庭网络连接办公室 mobd
 
-推荐先使用 **Tailscale 私有组网 + Tailscale Serve**。家庭设备和办公室 Mac
-加入同一个 tailnet（私有网络），办公室 mobd 保持监听 `127.0.0.1:8080`，
-家庭 mob 客户端填写 Serve 提供的 HTTPS 地址。无需办公室公网 IP、路由器端口映射、
-自建服务器或修改 mobd 协议。前提是两端可以安装 Tailscale，且办公室允许相关出站连接。
+手机端不额外安装 VPN 是目标约束。推荐采用 **公网 HTTPS 入口 + 办公室出站连接 +
+应用认证**：手机只使用 mob。可先评估只在办公室安装 **Tailscale Funnel**，它自带公网
+relay，无需自建中继；若桌面画面的带宽、延迟或域名要求不满足，再使用自有公网网关。
 
-本方案复用当前 mobd，属于部署方案；仓库不内置、安装或管理 Tailscale。
-如果已有可用的公司 VPN，优先复用，按现有网络权限访问办公室 mobd 即可。
+这是待实施的公网方案，**当前 mobd 尚未具备完整公网认证，不能直接开放**。
+下面同时保留双端 Tailscale Serve 和 SSH 的部署步骤，供能安装客户端的设备使用；
+它们不满足手机免 VPN/SSH 的目标。仓库目前不内置、安装或管理隧道软件。
 
 ## 选择依据
 
 | 条件 | 方案 | 需要承担的限制 |
 | --- | --- | --- |
 | 已有公司 VPN 可以访问办公室 Mac | 现有 VPN + mobd 的私有监听地址 | 由公司网络策略决定可达性 |
-| 两端能安装 Tailscale | **首选：Tailscale + Serve** | 依赖 Tailscale 登录、网络服务和访问策略；中继可能影响画面延迟 |
+| 手机不安装 VPN，办公室安装 Tailscale | **优先评估：Funnel + 完整应用认证** | Tailscale 托管公网 relay；带宽受限，认证需要先实施 |
+| 手机不安装 VPN，需要控制公网域名和带宽 | 自有 HTTPS 网关 + 办公室私有连接 + 完整认证 | 自行维护服务器、证书和网络连接 |
+| 两端能安装 Tailscale | Tailscale + Serve | 现有 mobd 可部署；不适用于手机免 VPN |
 | 不方便安装 VPN，但两端能运行 SSH，且有可信公网服务器 | 下文的 SSH 双向转发 | 自行维护服务器、SSH 密钥与断线重连 |
-| 家庭端只能填写公网 URL，不能运行 VPN/SSH | 后续：出站隧道 + 全路径认证入口 | 需要验证并适配 mob 客户端认证，当前不能直接安全上线 |
 
 mobd 已将 HTTP API、SSE 事件流和 `/vnc` WebSocket 中继放在同一个端口。
 只需连接这一个入口，`5900` 不需要经过公网转发。远端地址不写入 `vncAddr`
@@ -23,10 +24,67 @@ mobd 已将 HTTP API、SSE 事件流和 `/vnc` WebSocket 中继放在同一个�
 
 当前 `sharedSecret` 只保护写接口，**不保护读取、SSE、截图、附件和 `/vnc`**。
 HTTPS 仅加密传输，CORS 仅约束浏览器来源，两者均不能代替身份认证。
-不要直接将 mobd 端口发布到公网，也不要用 Tailscale Funnel 发布它。
+在完整认证实施前，不要直接将 mobd 端口发布到公网，也不要用 Tailscale Funnel 发布它。
 完整边界见 [security](security.md)。
 
-## 首选：Tailscale + Serve
+## 手机免 VPN：Funnel 或自有公网网关
+
+### 只在办公室安装：Tailscale Funnel
+
+```mermaid
+flowchart LR
+    P[手机 mob，无 VPN] -->|HTTPS / SSE / WSS| F[Tailscale Funnel 公网 relay]
+    F -->|加密转发| O[办公室 Tailscale]
+    O --> G[应用认证：需补齐]
+    G --> M[mobd 127.0.0.1:8080]
+```
+
+[Funnel](https://tailscale.com/docs/features/tailscale-funnel) 允许未安装 Tailscale 的设备
+通过公网域名连接办公室服务。relay 由 Tailscale 提供，TLS 在办公室终止，relay
+不解密应用内容。手机使用正常 HTTPS/WSS，不需要加入 tailnet，也不需要路由器端口映射。
+
+**Serve 是私有入口，Funnel 是公网入口。** Funnel 的启用权限控制谁能发布服务，
+并不替代手机用户的应用登录。仅增加
+[DERP 中继](https://tailscale.com/docs/reference/connection-types)
+无法把 Serve 变成普通公网 HTTP 服务：DERP 为 Tailscale 节点转发加密流量。
+
+Funnel 有不可配置的带宽限制、域名限制，官方当前标为 beta。因此先在完整认证下
+验证 API、SSE、WebSocket 和实际 VNC 画面性能，再决定是否长期采用；不能只凭
+`/health` 可达就认为满足远程桌面需求。本文不提供将当前未完整认证的 mobd 直接发布的命令。
+
+### 需要自有 relay 时：公网 HTTPS 网关
+
+```mermaid
+flowchart LR
+    P[手机 mob，无 VPN] -->|HTTPS / SSE / WSS| G[公网服务器：TLS + 认证 + 反向代理]
+    G -->|Tailscale 私有连接| O[办公室 Tailscale Serve]
+    O --> M[mobd 127.0.0.1:8080]
+```
+
+这里 Tailscale 安装在**办公室和公网服务器**，手机无需安装。公网服务器将一个固定域名
+代理到指定办公室 Serve 地址；tailnet 仅允许网关访问该办公室服务端口。
+可复用 [Caddy 反向代理](https://caddyserver.com/docs/caddyfile/directives/reverse_proxy)
+等现成组件转发 HTTP、SSE 和 WebSocket，无需自行设计 relay 协议。
+服务器带宽、区域和域名可自行选择，但需承担维护费用；公司出站限制仍会影响连接。
+
+此拓扑 TLS 在网关终止，**网关可以读取会话和画面数据**，必须使用可信服务器。
+认证可由网关或 mobd 承担，但所有外部入口都必须经过它，不能留出绕过入口。
+无需为手机开放 VNC 的 TCP 5900；所有流量仍经 mobd 的 HTTP 端口。
+
+### mobd 和 mob 必须配合的改动
+
+1. mobd 或其认证入口覆盖读取、写入、SSE、截图、附件与 VNC 握手；公网模式不能允许空密钥。
+   保留本地 agent/MCP 的按任务认证，不能因代理请求来自 loopback 就跳过认证。
+2. mob 手机端提供地址和配对/登录流程，并为 HTTP、SSE、图片和 WebSocket 使用一致的凭据。
+   WebView 的 WebSocket 不一定能设置任意请求头，需检查实际客户端，再选择会话或短期连接凭据；
+   不将长期密钥放进 URL。凭据需要可撤销，并保存在系统安全存储中。
+3. 联调未登录拒绝访问、凭据撤销、SSE 实时推送、画面更新，以及手机网络切换后的恢复。
+
+这些是实施要求，尚未修改认证代码或验证手机端。最小落地顺序是：**先完成认证和手机适配，
+再用 Funnel 验证真实跨网效果，实测不满足时再增加自有网关**。
+隧道负责网络可达性，应用负责识别和授权用户。
+
+## 双端可以安装 VPN 时：Tailscale + Serve
 
 ```mermaid
 flowchart LR

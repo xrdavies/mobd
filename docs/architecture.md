@@ -73,6 +73,9 @@ The default command is this mobd binary with the `mcp` argument.
 - Transport: use the intranet / VPN or an SSH tunnel. For home-to-office access,
   [Tailscale Serve](remote-access.md) provides a private HTTPS/WSS entry point to
   a loopback mobd listener; a public reverse proxy needs authentication on all routes.
+- Phone access without a VPN is [planned](remote-access.md) through Tailscale Funnel
+  or a public HTTPS gateway. Complete authentication and mobile client support
+  are prerequisites; the current daemon must not be published directly.
 
 See [VNC setup](vnc-svnc-setup.md) and [security](security.md).
 
