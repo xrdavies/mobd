@@ -59,3 +59,10 @@ jobs:
           set -euo pipefail
           aws configure set default.s3.preferred_transfer_client classic
           node .github/release/release.mjs "$PUBLISH_COMMAND" release-assets
+      - name: Rebuild the website
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.SITE_DISPATCH_TOKEN }}
+        run: |
+          [ -n "$GH_TOKEN" ] || { echo 'SITE_DISPATCH_TOKEN not set; the website picks up the release on its hourly build.'; exit 0; }
+          gh api repos/xrdavies/mob-site/dispatches -f event_type=release-published
