@@ -42,6 +42,9 @@ health, reads, writes, SSE, images and VNC. Credentials are independent per clie
 and remain valid until revoked, deleted or authentication is reset. The
 [pairing protocol](pairing.md) uses ten-minute, single-use invitations generated
 through a user-private Unix socket. Loopback and proxy headers do not bypass auth.
+Because browser WebSockets cannot send headers, `GET /vnc` alone also accepts a
+`?ticket=` from `POST /vnc/ticket`: 30 seconds, single use, bound to the issuing
+client and invalidated with it. The long-lived credential never appears in a URL.
 Revocation disconnects the client's active SSE/VNC streams. Screen Sharing still
 performs its own upstream VNC authentication; browser origins are checked separately.
 

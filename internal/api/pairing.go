@@ -42,6 +42,21 @@ func (s *Server) handlePair(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 201, credential)
 }
 
+// handleVNCTicket lets clients that cannot set WebSocket headers open /vnc once.
+func (s *Server) handleVNCTicket(w http.ResponseWriter, r *http.Request) {
+	ticket, expires, err := s.pairing.IssueTicket(pairing.ClientID(r.Context()))
+	if errors.Is(err, pairing.ErrUnauthorized) {
+		w.Header().Set("WWW-Authenticate", `Bearer realm="mobd"`)
+		writeErr(w, 401, err.Error())
+		return
+	}
+	if err != nil {
+		writeErr(w, 429, err.Error())
+		return
+	}
+	writeJSON(w, 201, map[string]any{"ticket": ticket, "expiresAt": expires})
+}
+
 func (s *Server) withAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
@@ -50,7 +65,15 @@ func (s *Server) withAuth(next http.Handler) http.Handler {
 		if scheme, value, ok := strings.Cut(auth, " "); ok && strings.EqualFold(scheme, "Bearer") {
 			token = value
 		}
-		ctx, finish, err := s.pairing.Begin(r.Context(), token, r.Method, r.URL.Path)
+		var ctx context.Context
+		var finish func()
+		var err error
+		// Only the live desktop accepts a ticket; every other route needs the header.
+		if ticket := r.URL.Query().Get("ticket"); token == "" && ticket != "" && r.Method == http.MethodGet && r.URL.Path == "/vnc" {
+			ctx, finish, err = s.pairing.BeginTicket(r.Context(), ticket, r.Method, r.URL.Path)
+		} else {
+			ctx, finish, err = s.pairing.Begin(r.Context(), token, r.Method, r.URL.Path)
+		}
 		if errors.Is(err, pairing.ErrUnauthorized) {
 			w.Header().Set("WWW-Authenticate", `Bearer realm="mobd"`)
 			writeErr(w, 401, err.Error())

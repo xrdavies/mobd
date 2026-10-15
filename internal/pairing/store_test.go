@@ -231,3 +231,53 @@ func TestInviteAndClientValidation(t *testing.T) {
 	assertAuthorized(t, s, "", false)
 	assertAuthorized(t, s, strings.Repeat("x", 64), false)
 }
+
+func TestVNCTicketsExpireAreCappedAndClearedByReset(t *testing.T) {
+	s := openTest(t, filepath.Join(t.TempDir(), "auth.json"))
+	c, err := s.Redeem(invitation(t, s), "desk")
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	s.now = func() time.Time { return now }
+	old, _, err := s.IssueTicket(c.ClientID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now = now.Add(TicketTTL)
+	if _, _, err := s.BeginTicket(context.Background(), old, "GET", "/vnc"); !errors.Is(err, ErrUnauthorized) {
+		t.Fatalf("expired ticket: %v", err)
+	}
+	for range maxTicketsPerClient {
+		if _, _, err := s.IssueTicket(c.ClientID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, _, err := s.IssueTicket(c.ClientID); err == nil {
+		t.Fatal("ticket cap not enforced")
+	}
+	ticket := func() string {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		for k := range s.tickets {
+			return k
+		}
+		return ""
+	}
+	if ticket() == "" {
+		t.Fatal("tickets missing")
+	}
+	if err := s.Reset(); err != nil {
+		t.Fatal(err)
+	}
+	if ticket() != "" {
+		t.Fatal("reset kept tickets")
+	}
+	assertAuthorized(t, s, c.Token, false)
+	c2, _ := s.Redeem(invitation(t, s), "desk")
+	ctx, finish, err := s.Begin(context.Background(), c2.Token, "GET", "/events")
+	if err != nil || ClientID(ctx) != c2.ClientID {
+		t.Fatalf("client id in context: %q %v", ClientID(ctx), err)
+	}
+	finish()
+}

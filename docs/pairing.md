@@ -105,6 +105,28 @@ Authorization: Bearer RANDOM_DEVICE_CREDENTIAL
 401 响应带 `WWW-Authenticate: Bearer realm="mobd"`；认证存储不可用返回 503。
 收到 401 后保留办公室列表项并显示“需要重新配对”，停止使用旧凭据重试。
 
+### 实时桌面票据
+
+浏览器 / WebView 的 WebSocket 无法设置请求头，因此 `/vnc` 额外接受短期票据。
+原生客户端（iOS、Android）继续在握手中发送 `Authorization`，无需票据。
+
+```http
+POST /vnc/ticket
+Authorization: Bearer RANDOM_DEVICE_CREDENTIAL
+```
+
+成功返回 **201**，`Cache-Control: no-store`：
+
+```json
+{"ticket": "RANDOM_TICKET", "expiresAt": "2026-10-15T10:00:30Z"}
+```
+
+随后打开 `ws(s)://HOST/vnc?ticket=RANDOM_TICKET`。票据 30 秒内有效、只能使用一次、
+只对 `GET /vnc` 生效，其他路由带票据仍返回 401；同时提供 `Authorization` 时以请求头为准。
+票据绑定签发它的客户端：撤销、删除或认证重置会作废未使用的票据，并中断已打开的连接。
+每个客户端最多同时保留 8 个未使用票据（超出返回 429），只在内存中保存哈希，重启后失效。
+`/health` 的 `features` 包含 `vncTicket` 时可用。Origin 校验对两种方式相同。
+
 协议不增加 refresh token、JWT、账号系统或凭据到期刷新流程。
 业务 `/health` 仍使用 API v3，`features` 新增 `pairing`；它必须在配对成功之后调用。
 
@@ -113,8 +135,7 @@ Authorization: Bearer RANDOM_DEVICE_CREDENTIAL
 - 添加办公室：粘贴链接；手机另支持扫描二维码；确认目标后 POST 兑换。
 - 安全存储凭据；HTTP、上传、图片、SSE、WebSocket 都携带 Authorization。
 - WebView 原生 EventSource / WebSocket 无法设置该请求头时，使用原生网络桥接或 fetch 流。
-  当前 mobd **未提供连接票据接口**，不能把长期凭据放 URL 来绕过客户端限制。
-  如果实际客户端必须使用票据，再共同设计短期、单次、限用途的票据协议。
+  不能把长期凭据放 URL 来绕过客户端限制；`/vnc` 使用上面的[实时桌面票据](#实时桌面票据)。
 - 断线和网络切换后使用已保存凭据重连；401 进入重新配对流程，不循环重试。
 - 支持用户指定的 HTTP 入口并展示传输风险；HTTPS 连接不跳过证书校验。
   不跨 origin 重定向发送邀请或凭据。地址变化需重新核验入口，
@@ -136,12 +157,13 @@ Authorization: Bearer RANDOM_DEVICE_CREDENTIAL
 管理路由只注册在 Unix socket，公开 HTTP 端口不提供客户端管理或邀请创建。
 
 仅 HTTP OPTIONS 预检、固定的 GET /pair 提示、受邀请保护的 POST /pair 和按任务认证的
-MCP 请求在业务认证中间件之外。CORS 和 VNC Origin 校验仍保留，不能代替认证。
+MCP 请求在业务认证中间件之外。`GET /vnc?ticket=` 在认证中间件内兑换票据。CORS 和 VNC Origin 校验仍保留，不能代替认证。
 凭据代表对同一办公室的完整业务访问权，不提供不同设备的数据隔离或只读角色。
 
 ## 验证边界
 
 自动测试覆盖邀请过期、预览不消费邀请、并发单次兑换、持久化失败、重启后的凭据与撤销、
 认证状态损坏、旧密钥与匿名访问拒绝、本机/代理头不能绕过、SSE/VNC 撤销断连、
-设备之间的撤销隔离、认证重置和本机管理权限。已有任务/MCP 回归测试也保留。
+设备之间的撤销隔离、认证重置和本机管理权限，以及 VNC 票据的单次使用、过期、
+路由限制和随撤销失效。已有任务/MCP 回归测试也保留。
 真实桌面和手机扫码、安全存储、WebView 凭据传递、跨网 SSE/VNC 性能仍需客户端适配后联调。

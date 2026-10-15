@@ -16,7 +16,7 @@ import (
 // APIVersion is advertised on /health; clients gate features on it.
 const APIVersion = 3
 
-var features = []string{"queue", "activities", "sessionAdmin", "events", "screen", "uploads", "taskOptions", "vncProxy", "runners", "questions", "steer", "pairing"}
+var features = []string{"queue", "activities", "sessionAdmin", "events", "screen", "uploads", "taskOptions", "vncProxy", "runners", "questions", "steer", "pairing", "vncTicket"}
 
 // check is one readiness item; Unknown means mobd cannot tell yet.
 type check struct {

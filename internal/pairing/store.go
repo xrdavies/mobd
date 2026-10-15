@@ -29,6 +29,11 @@ var (
 
 const InvitationTTL = 10 * time.Minute
 
+// TicketTTL bounds a VNC ticket: long enough to open one WebSocket, too short to reuse from logs.
+const TicketTTL = 30 * time.Second
+
+const maxTicketsPerClient = 8
+
 type Client struct {
 	ID         string     `json:"id"`
 	Name       string     `json:"name"`
@@ -68,6 +73,19 @@ type Connection struct {
 	StartedAt time.Time `json:"startedAt"`
 }
 
+type ticket struct {
+	clientID string
+	expires  time.Time
+}
+
+type clientKey struct{}
+
+// ClientID reports the client authenticated for a request context from Begin or BeginTicket.
+func ClientID(ctx context.Context) string {
+	id, _ := ctx.Value(clientKey{}).(string)
+	return id
+}
+
 type active struct {
 	Connection
 	cancel context.CancelFunc
@@ -79,6 +97,7 @@ type Store struct {
 	lock    *os.File
 	state   state
 	invites map[string]time.Time
+	tickets map[string]ticket
 	active  map[string]active
 	now     func() time.Time
 	closed  bool
@@ -108,7 +127,7 @@ func Open(path string) (*Store, error) {
 		lock.Close()
 		return nil, fmt.Errorf("authentication state already in use: %w", err)
 	}
-	s := &Store{path: path, lock: lock, invites: make(map[string]time.Time), active: make(map[string]active), now: time.Now}
+	s := &Store{path: path, lock: lock, invites: make(map[string]time.Time), tickets: make(map[string]ticket), active: make(map[string]active), now: time.Now}
 	data, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
 		s.state = state{Version: 1, ServerID: random(), Clients: make(map[string]record)}
@@ -254,6 +273,53 @@ func (s *Store) Begin(parent context.Context, token, method, path string) (conte
 	if found.ID == "" {
 		return nil, nil, ErrUnauthorized
 	}
+	return s.begin(parent, found, method, path)
+}
+
+// IssueTicket returns a single-use secret that authenticates one GET /vnc for clientID.
+// Browser WebSockets cannot send Authorization, so the long-lived token never goes in a URL.
+func (s *Store) IssueTicket(clientID string) (string, time.Time, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	c, ok := s.state.Clients[clientID]
+	if s.closed || !ok || c.RevokedAt != nil {
+		return "", time.Time{}, ErrUnauthorized
+	}
+	now, pending := s.now().UTC(), 0
+	for key, t := range s.tickets {
+		if !now.Before(t.expires) {
+			delete(s.tickets, key)
+		} else if t.clientID == clientID {
+			pending++
+		}
+	}
+	if pending >= maxTicketsPerClient {
+		return "", time.Time{}, errors.New("too many pending VNC tickets")
+	}
+	secret, expires := random(), now.Add(TicketTTL)
+	s.tickets[hash(secret)] = ticket{clientID: clientID, expires: expires}
+	return secret, expires, nil
+}
+
+// BeginTicket consumes a VNC ticket and registers the request like Begin, so revocation still interrupts it.
+func (s *Store) BeginTicket(parent context.Context, secret, method, path string) (context.Context, func(), error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	key := hash(secret)
+	t, ok := s.tickets[key]
+	delete(s.tickets, key)
+	if s.closed || !ok || !s.now().UTC().Before(t.expires) {
+		return nil, nil, ErrUnauthorized
+	}
+	found, ok := s.state.Clients[t.clientID]
+	if !ok || found.RevokedAt != nil {
+		return nil, nil, ErrUnauthorized
+	}
+	return s.begin(parent, found, method, path)
+}
+
+// begin records activity and registers a live request; the caller holds s.mu.
+func (s *Store) begin(parent context.Context, found record, method, path string) (context.Context, func(), error) {
 	now := s.now().UTC()
 	// Checkpoint recent activity at most once per minute per client.
 	if found.LastSeenAt == nil || now.Sub(*found.LastSeenAt) >= time.Minute {
@@ -265,7 +331,7 @@ func (s *Store) Begin(parent context.Context, token, method, path string) (conte
 		}
 		s.state = next
 	}
-	ctx, cancel := context.WithCancel(parent)
+	ctx, cancel := context.WithCancel(context.WithValue(parent, clientKey{}, found.ID))
 	id := random()
 	s.active[id] = active{Connection: Connection{ID: id, ClientID: found.ID, Method: method, Path: path, StartedAt: now}, cancel: cancel}
 	return ctx, func() {
@@ -322,6 +388,11 @@ func (s *Store) Revoke(id string, remove bool) error {
 		return err
 	}
 	s.state = next
+	for key, t := range s.tickets {
+		if t.clientID == id {
+			delete(s.tickets, key)
+		}
+	}
 	for _, c := range s.active {
 		if c.ClientID == id {
 			c.cancel()
@@ -342,6 +413,7 @@ func (s *Store) Reset() error {
 	}
 	s.state = next
 	clear(s.invites)
+	clear(s.tickets)
 	for _, c := range s.active {
 		c.cancel()
 	}
@@ -356,6 +428,7 @@ func (s *Store) Close() {
 	}
 	s.closed = true
 	clear(s.invites)
+	clear(s.tickets)
 	for _, c := range s.active {
 		c.cancel()
 	}
