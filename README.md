@@ -124,10 +124,13 @@ a private HTTPS URL for the home mob client, carrying API requests, SSE and the
 `/vnc` WebSocket relay through one endpoint. No office public IP or router port
 forward is needed. Reuse an existing company VPN when available.
 
-Follow the [remote-access guide](docs/remote-access.md) for the three-mode design,
-private deployment steps, verification and an SSH alternative.
-Public deployments require HTTPS/WSS and clients that send their paired credential
-on every request, including SSE and VNC. Validate real client and tunnel behavior
+Follow the [connection setup guide](docs/connection-setup.md) for step-by-step LAN,
+Tailscale Funnel and self-hosted HTTPS relay setup, pairing tests and shutdown.
+The [remote-access guide](docs/remote-access.md) covers the mode design, private
+Tailscale Serve deployment and an SSH alternative.
+Public deployments require HTTPS/WSS and authenticated requests, including SSE and
+VNC. WebView clients can use the [short-lived VNC ticket](docs/pairing.md#实时桌面票据)
+when they cannot set WebSocket headers. Validate real client and tunnel behavior
 before deployment; the managed relay is not implemented.
 
 ### Configuration
