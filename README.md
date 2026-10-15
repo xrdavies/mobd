@@ -36,7 +36,7 @@ The standalone binary needs no source checkout, Go, Makefile or service scripts:
 ```bash
 mobd --version
 mobd init                       # creates ~/.mobd/config.json; never overwrites
-# Edit listen to "0.0.0.0:8080" for LAN clients; init defaults to loopback.
+# init defaults to "0.0.0.0:8080" for LAN clients.
 # Set workdir and codexBin explicitly for a stable background environment.
 mobd start                      # background service until stopped/logout
 mobd status                     # address and /health check
@@ -50,8 +50,8 @@ mobd serve                      # foreground; Ctrl-C to stop
 Install and authenticate the agent CLI you plan to use (Codex or Claude Code).
 Grant Accessibility and Screen Recording to the responsible app or mobd process,
 and enable macOS Screen Sharing for live viewing. For direct LAN/VPN access,
-configure `listen` for that interface; keep loopback when using the remote-access
-proxy below. `mobd init` binds to loopback.
+configure `listen` for that interface; use loopback when using the remote-access
+proxy below. `mobd init` sets `listen` to `0.0.0.0:8080` (all IPv4 interfaces).
 The download domain serves files; clients connect to your office Mac's mobd URL.
 Follow the [office smoke checklist](docs/office-smoke-checklist.md) to verify the setup.
 

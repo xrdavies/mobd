@@ -295,7 +295,7 @@ func Init(path string) error {
 	if err != nil {
 		return err
 	}
-	_, writeErr := file.WriteString("{\n  \"listen\": \"127.0.0.1:8080\",\n  \"maxRunning\": 1,\n  \"vncAddr\": \"127.0.0.1:5900\"\n}\n")
+	_, writeErr := file.WriteString("{\n  \"listen\": \"0.0.0.0:8080\",\n  \"maxRunning\": 1,\n  \"vncAddr\": \"127.0.0.1:5900\"\n}\n")
 	closeErr := file.Close()
 	return errors.Join(writeErr, closeErr)
 }

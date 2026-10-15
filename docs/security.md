@@ -16,7 +16,7 @@ for the live-view connection.
 - The planned managed relay must authorize each user/device mapping and isolate
   customers' office machines. A gateway that terminates TLS can read proxied
   data; this topology does not provide end-to-end encryption from client to mobd.
-- `mobd init` writes a loopback listen address. Without a config override, the runtime default is `:8080`; choose the bind address explicitly for deployment.
+- `mobd init` writes `0.0.0.0:8080` (all IPv4 interfaces). Without a config override, the runtime default is `:8080`; use `127.0.0.1:8080` when access should only go through a local proxy or tunnel.
 
 ## View vs actuation
 

@@ -242,8 +242,9 @@ mobd status
 ```
 
 把 `export PATH="$HOME/.local/bin:$PATH"` 加入 `~/.zshrc`，使新终端也能找到 mobd。
-`mobd init` 默认仅监听 `127.0.0.1:8080`；从其他设备连接时，按内网/VPN部署设置
-`listen` 和 agent 可执行路径、工作目录。客户端填写办公室 Mac 的 mobd 地址，下载域名只分发文件。
+`mobd init` 默认监听 `0.0.0.0:8080`（所有 IPv4 接口）；按内网/VPN部署设置
+agent 可执行路径、工作目录。仅通过本机代理或隧道访问时，将 `listen` 改为 `127.0.0.1:8080`。
+客户端填写办公室 Mac 的 mobd 地址，下载域名只分发文件。
 
 升级：`mobd stop` → 重新运行安装脚本 → `mobd start`。
 `stop` 会关闭登录启动，原先希望登录启动的用户在升级后使用 `mobd start --login`。
