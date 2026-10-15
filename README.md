@@ -112,6 +112,12 @@ mobd auth reset --yes                     # invalidate all credentials; retain h
 Commands use a private local management socket. Invitations are temporary;
 paired credentials survive invitation expiry and daemon/client restarts.
 
+For direct LAN access, `mobd link --url http://192.168.1.20:8080` prints an HTTP
+risk warning to stderr and still generates the link and QR. HTTP does not encrypt
+invitations, credentials or data; an encrypted tunnel can protect the network path.
+Pairing remains mandatory. Use the actual client-accessible address; link generation
+does not test connectivity or change the listener.
+
 For separate home and office networks, use **Tailscale + Tailscale Serve** when
 both devices can install Tailscale. Keep mobd on `127.0.0.1:8080`; Serve provides
 a private HTTPS URL for the home mob client, carrying API requests, SSE and the

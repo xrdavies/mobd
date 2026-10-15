@@ -19,6 +19,8 @@ mobd 已实现强制设备认证，私有网络、Funnel 和中继共用相同�
 
 ```bash
 mobd link --url https://office.example.com
+# 局域网直连：提示 HTTP 风险，仍正常生成二维码和链接
+mobd link --url http://192.168.1.20:8080
 mobd clients list
 mobd connections
 mobd clients revoke CLIENT_ID
@@ -27,10 +29,13 @@ mobd link --close
 mobd auth reset --yes
 ```
 
-`link` 在终端输出同一邀请的二维码、完整链接和过期时间。URL 必须为 HTTPS 根入口，
-没有用户名、密码、路径前缀、query 或 fragment；本机调试和 SSH 转发允许
-`http://127.0.0.1:8080`、`http://[::1]:8080` 或 `http://localhost:8080`。
-直接 LAN/Tailscale IP 的 HTTP 不作为分享入口，请用 HTTPS（例如 Tailscale Serve）。
+`link` 在终端输出同一邀请的二维码、完整链接和过期时间。URL 必须为 HTTP 或 HTTPS 根入口，
+没有用户名、密码、路径前缀、query 或 fragment。支持局域网 IP、Tailscale IP、主机名和 IPv6。
+使用 HTTP 时向 stderr 输出风险提示，stdout 照常输出二维码、链接和过期时间，不要求额外确认。
+HTTP 本身不加密邀请兑换、长期凭据或业务数据；没有 Tailscale/SSH 等加密通道时，
+能监听网络流量的人可能取得这些信息。所有连接仍然要求配对认证。
+mobd 不通过 IP 范围或域名推断连接是否安全，不自动探测地址、转换协议或启用 HTTPS。
+公网部署应使用 HTTPS 入口，本机 mobd 可以继续通过 HTTP 接收代理转发。
 最多同时保留 32 个未过期邀请，`link --close` 清除所有未兑换邀请。
 
 这些命令只通过 Unix socket 操作正在运行的 mobd，不离线修改认证文件。
@@ -53,10 +58,11 @@ mobd auth reset --yes
 
 ## 客户端协议 v1
 
-链接使用客户端可达的 HTTPS URL，只有 fragment 携带邀请：
+链接保留用户指定的 HTTP/HTTPS 协议、主机和端口，只有 fragment 携带邀请：
 
 ```text
 https://office.example.com/pair#invite=INVITATION&serverId=SERVER_ID&v=1
+http://192.168.1.20:8080/pair#invite=INVITATION&serverId=SERVER_ID&v=1
 ```
 
 二维码编码完整链接。客户端读取 fragment 并展示目标地址，用户确认后向同一 origin
@@ -110,7 +116,8 @@ Authorization: Bearer RANDOM_DEVICE_CREDENTIAL
   当前 mobd **未提供连接票据接口**，不能把长期凭据放 URL 来绕过客户端限制。
   如果实际客户端必须使用票据，再共同设计短期、单次、限用途的票据协议。
 - 断线和网络切换后使用已保存凭据重连；401 进入重新配对流程，不循环重试。
-- 不跳过 TLS 证书校验，不跨 origin 重定向发送邀请或凭据。地址变化需重新核验入口，
+- 支持用户指定的 HTTP 入口并展示传输风险；HTTPS 连接不跳过证书校验。
+  不跨 origin 重定向发送邀请或凭据。地址变化需重新核验入口，
   不自动把旧凭据发送到新链接的地址。
 - 私有网络 / 自管 Funnel / 中继模式仅负责网络引导，复用此协议。
   我们的中继尚未实现，不能在客户端显示为已可用。

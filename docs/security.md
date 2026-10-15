@@ -6,6 +6,10 @@ for the live-view connection.
 ## Deployment posture
 
 - Prefer **office intranet** or **VPN**. Do not expose raw VNC to the public internet.
+- HTTP pairing links are allowed with a CLI warning, including LAN and Tailscale
+  addresses. Without an encrypted tunnel, observers can capture invitations,
+  long-lived credentials and business data. Authentication does not encrypt HTTP;
+  the CLI does not infer transport security from an IP range or hostname.
 - For home-to-office access, follow the [remote-access guide](remote-access.md):
   prefer **Tailscale Serve** with restricted tailnet access and a loopback mobd
   listener, or use a trusted **SSH** tunnel. A public HTTPS/WSS proxy also needs

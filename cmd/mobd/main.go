@@ -38,7 +38,7 @@ const usage = `Usage: mobd <command> [options]
   restart    Reload configuration and restart; preserve login setting
   status     Show background service address and health
   logs       Follow background service logs
-  link       --url HTTPS_ORIGIN: print a one-use pairing link and QR; --close: close invitations
+  link       --url HTTP(S)_ORIGIN: print a one-use pairing link and QR; --close: close invitations
   clients    list | revoke CLIENT_ID | delete CLIENT_ID (local management)
   connections  List authenticated active requests and streams
   auth       reset --yes: invalidate all clients and invitations

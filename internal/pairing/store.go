@@ -9,7 +9,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -176,16 +175,14 @@ func (s *Store) copyState() state {
 	return next
 }
 
-// Invite accepts a root HTTPS origin, or loopback HTTP for local SSH tunnels.
+// Invite accepts a root HTTP or HTTPS origin reachable by the client.
 func (s *Store) Invite(address string) (Invitation, error) {
 	u, err := url.Parse(address)
 	if err != nil {
 		return Invitation{}, errors.New("invalid server URL")
 	}
-	ip := net.ParseIP(u.Hostname())
-	local := u.Hostname() == "localhost" || ip != nil && ip.IsLoopback()
-	if len(address) > 1024 || u.Hostname() == "" || u.User != nil || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || (u.Path != "" && u.Path != "/") || (u.Scheme != "https" && !(u.Scheme == "http" && local)) {
-		return Invitation{}, errors.New("URL must be an HTTPS origin without credentials, path, query or fragment (HTTP is allowed only on loopback)")
+	if len(address) > 1024 || u.Hostname() == "" || u.User != nil || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || (u.Path != "" && u.Path != "/") || (u.Scheme != "https" && u.Scheme != "http") {
+		return Invitation{}, errors.New("URL must be an HTTP or HTTPS origin without credentials, path, query or fragment")
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()

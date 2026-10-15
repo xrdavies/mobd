@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"strings"
 	"time"
 
 	qrcode "github.com/skip2/go-qrcode"
@@ -27,7 +28,7 @@ func manage(command string, args []string) error {
 	var address string
 	var closeInvites, confirm bool
 	if command == "link" {
-		fs.StringVar(&address, "url", "", "Client-accessible HTTPS origin")
+		fs.StringVar(&address, "url", "", "Client-accessible HTTP or HTTPS origin")
 		fs.BoolVar(&closeInvites, "close", false, "Invalidate all unused invitations")
 	}
 	if command == "auth" {
@@ -75,6 +76,9 @@ func manage(command string, args []string) error {
 		code, err := qrcode.New(invite.URL, qrcode.Medium)
 		if err != nil {
 			return err
+		}
+		if strings.HasPrefix(invite.URL, "http://") {
+			fmt.Fprintln(os.Stderr, "Warning: HTTP does not encrypt pairing invitations, device credentials or session data. Without an encrypted tunnel such as Tailscale or SSH, network observers may capture them. Pairing authentication is still required.")
 		}
 		fmt.Printf("%s\n%s\nExpires: %s (one use)\n", code.ToSmallString(false), invite.URL, invite.ExpiresAt.Format(time.RFC3339))
 		return nil

@@ -59,6 +59,29 @@ mobd 的读取、写入、SSE、截图、附件和 `/vnc` 均要求独立设备�
 HTTPS 仅加密传输，CORS 仅约束浏览器来源，两者均不能代替身份认证。
 客户端凭据适配和真实跨网验证仍待完成。完整边界见 [security](security.md)。
 
+### `mobd link --url` 应填写哪个地址
+
+填写客户端实际访问的入口，不能把 Serve/Funnel 的本机转发目标当成远端入口。
+`mobd link` 保留输入的协议、主机和端口，并附加 `/pair#...` 配对信息。
+
+| 接入方式 | `--url` 示例 | 客户端网络条件 |
+| --- | --- | --- |
+| 办公室局域网直连 | `http://192.168.1.20:8080` | 客户端能访问该局域网 IP；mobd 监听内网接口 |
+| Tailscale 节点直连 | `http://100.101.102.103:8080` 或 `http://office-mac:8080` | 两端已加入 Tailscale，允许访问端口；mobd 监听可达接口 |
+| Tailscale Serve 默认 / `--https=443` | `https://office-mac.example.ts.net` | 客户端需要 Tailscale 访问权限 |
+| Tailscale Serve 显式 `--http=80` | `http://office-mac` | 客户端需要 Tailscale 访问权限 |
+| Tailscale Funnel 网页入口 | `https://office-mac.example.ts.net` | 普通公网客户端，无需安装 Tailscale |
+
+Serve 默认 HTTPS，也支持显式 HTTP，见 [Serve CLI](https://tailscale.com/docs/reference/tailscale-cli/serve)。
+Funnel 只支持 TLS 加密连接，其网页入口使用 HTTPS，见 [Funnel](https://tailscale.com/docs/features/tailscale-funnel)。
+Tailscale 节点之间的连接本身已加密，因此 HTTP URL 不代表该节点间链路明文传输，
+见 [Tailscale HTTPS 说明](https://tailscale.com/docs/how-to/set-up-https-certificates)。
+若经过子网路由器，其后到普通局域网机器的一段还需单独考虑传输保护。
+
+`mobd link` 对所有 HTTP URL 输出风险提示，但正常生成邀请，不增加确认步骤。
+它不检查连接是否实际经过 Tailscale；普通局域网 HTTP 仍可能暴露凭据和业务数据。
+链接生成也不检查网络可达性或修改监听地址；公网入口应使用 HTTPS。
+
 ## 手机免 VPN：Funnel 或自有公网网关
 
 ### 只在办公室安装：Tailscale Funnel

@@ -209,12 +209,12 @@ func TestOpenFailsClosedAndLocksState(t *testing.T) {
 
 func TestInviteAndClientValidation(t *testing.T) {
 	s := openTest(t, filepath.Join(t.TempDir(), "auth.json"))
-	for _, address := range []string{"", "http://office.example", "https://x/a", "https://x/?token=x", "https://x/#secret", "https://user:pass@x", "javascript:foo", "https://"} {
+	for _, address := range []string{"", "https://x/a", "http://x/a", "https://x/?token=x", "http://x/?token=x", "https://x/#secret", "http://x/#secret", "https://user:pass@x", "http://user:pass@x", "javascript:foo", "ftp://office.example", "https://", "http://"} {
 		if _, err := s.Invite(address); err == nil {
 			t.Errorf("accepted URL %s", address)
 		}
 	}
-	for _, address := range []string{"https://office.example", "http://127.0.0.1:8080", "http://[::1]:8080", "http://localhost:8080"} {
+	for _, address := range []string{"https://office.example", "http://office.example", "http://192.168.1.20:8080", "http://10.0.0.20:8080", "http://172.16.0.20:8080", "http://100.101.102.103:8080", "http://office-mac:8080", "http://[fd00::20]:8080", "http://127.0.0.1:8080", "http://[::1]:8080", "http://localhost:8080"} {
 		if _, err := s.Invite(address); err != nil {
 			t.Error(err)
 		}
