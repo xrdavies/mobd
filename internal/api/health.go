@@ -57,7 +57,8 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		"maxRunning": max(s.cfg.MaxRunning, 1), "features": features,
 		// models/efforts describe the default runner (API v3 clients read these).
 		"models": def.Info().Models, "efforts": def.Info().Efforts, "checks": checks,
-		"vncSessions": s.vncSessions.Load(),
+		"vncSessions":    s.vncSessions.Load(),
+		"streamSessions": s.streams.Count(),
 	})
 }
 

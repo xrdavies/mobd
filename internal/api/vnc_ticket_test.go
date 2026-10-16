@@ -137,3 +137,26 @@ func TestVNCTicketExpiresAndDiesWithClient(t *testing.T) {
 		t.Fatalf("revoked client issued ticket: %d", code)
 	}
 }
+
+func TestStreamRoutesValidateAndScopeToTheClient(t *testing.T) {
+	_, srv, credential := ticketServer(t)
+	do := func(method, path, body string) int {
+		req, _ := http.NewRequest(method, srv.URL+path, strings.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+credential.Token)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		return resp.StatusCode
+	}
+	if code := do("POST", "/stream", "not json"); code != 400 {
+		t.Fatalf("bad JSON: %d", code)
+	}
+	if code := do("POST", "/stream", `{"offer":"v=0","quality":"ultra"}`); code != 400 {
+		t.Fatalf("bad quality: %d", code)
+	}
+	if code := do("DELETE", "/stream/nope", ""); code != 404 {
+		t.Fatalf("unknown session: %d", code)
+	}
+}

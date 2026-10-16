@@ -22,6 +22,9 @@ type Backend interface {
 	State() (DisplayState, error)
 	// StartStream captures the main display continuously and encodes it as H.264.
 	StartStream(ctx context.Context, opts StreamOptions) (Stream, error)
+	// KeepAwake wakes the display and keeps it from sleeping until release is called, so a
+	// watching client keeps a picture (capture sees nothing while the display sleeps or locks).
+	KeepAwake(reason string) (release func(), err error)
 	// Click presses a mouse button count times at point coordinates on the main display.
 	Click(x, y float64, right bool, count int) error
 	// Key presses a key named as in ParseHotkey with the given normalized modifiers.
@@ -121,3 +124,4 @@ func (unsupported) Key(string, []string) error                      { return Err
 func (unsupported) Paste(context.Context, string) error             { return ErrUnsupported }
 func (unsupported) ListWindows(bool) ([]Window, error)              { return nil, ErrUnsupported }
 func (unsupported) OpenApp(context.Context, string) (string, error) { return "", ErrUnsupported }
+func (unsupported) KeepAwake(string) (func(), error)                { return nil, ErrUnsupported }

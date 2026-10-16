@@ -1,6 +1,7 @@
 package api
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -16,8 +17,10 @@ import (
 
 	"github.com/xrdavies/mobd/internal/artifact"
 	"github.com/xrdavies/mobd/internal/config"
+	"github.com/xrdavies/mobd/internal/desktop"
 	"github.com/xrdavies/mobd/internal/pairing"
 	"github.com/xrdavies/mobd/internal/runner"
+	"github.com/xrdavies/mobd/internal/stream"
 	"github.com/xrdavies/mobd/internal/task"
 )
 
@@ -32,6 +35,7 @@ type Server struct {
 	health    healthCache
 
 	vncSessions atomic.Int64
+	streams     *stream.Manager
 
 	// self is how `mobd mcp` reaches this server; empty uses cfg.SelfURL().
 	self string
@@ -73,6 +77,23 @@ func New(cfg config.Config, store *task.Store, auth *pairing.Store, runners ...r
 		cancels:   make(map[string]context.CancelFunc), done: make(chan struct{}),
 		tokens: make(map[string]string), waiters: make(map[string]chan struct{}),
 	}
+	streams, err := stream.NewManager(stream.Config{
+		Start: desktop.StartStream, KeepAwake: desktop.KeepAwake,
+		Display: func() (desktop.Display, error) {
+			d, err := desktop.Current().Displays()
+			if err != nil || len(d) == 0 {
+				return desktop.Display{}, cmp.Or(err, errors.New("no display"))
+			}
+			return d[0], nil
+		},
+		Attach: func(parent context.Context, client string) (context.Context, func(), error) {
+			return auth.Attach(parent, client, http.MethodPost, "/stream")
+		},
+	})
+	if err != nil {
+		panic(err)
+	}
+	s.streams = streams
 	store.SetNotifier(s.onChange)
 	return s
 }
@@ -119,6 +140,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /artifacts/{id}", s.handleArtifact)
 	mux.HandleFunc("GET /vnc", s.handleVNC)
 	mux.HandleFunc("POST /vnc/ticket", s.handleVNCTicket)
+	mux.HandleFunc("POST /stream", s.handleStreamOpen)
+	mux.HandleFunc("DELETE /stream/{id}", s.handleStreamClose)
 	mux.HandleFunc("POST /tasks/{id}/questions/{qid}/answer", s.handleAnswer)
 	mux.HandleFunc("POST /tasks/{id}/steer", s.handleSteer)
 	public := http.NewServeMux()
@@ -503,6 +526,7 @@ func (s *Server) Close() {
 		cancel()
 	}
 	s.mu.Unlock()
+	s.streams.Shutdown()
 	s.runs.Wait()
 }
 

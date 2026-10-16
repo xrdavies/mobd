@@ -137,7 +137,8 @@ Content-Type: application/json
 {"offer": "<SDP>", "maxWidth": 1600, "maxHeight": 1000, "quality": "auto"}
 ```
 
-`201 {"session": "ID", "answer": "<SDP>", "display": {...}, "wsTicket": "…", "iceServers": [...]}`.
+`201 {"session": "ID", "answer": "<SDP>", "width": 1280, "height": 720, "display": {...}}` (M4);
+`wsTicket` arrives with the fallback (M7) and `iceServers` with the relay.
 ICE is gathered before answering (no trickle) to keep signaling one request. Host candidates only by
 default, so Tailscale and LAN addresses work without STUN and the public IP is not exposed.
 `iceServers` is present only when a relay is configured (see "Self-hosted relay"); clients use it as
@@ -204,6 +205,20 @@ For each stream session mobd issues a short-lived TURN credential (username `exp
 password = HMAC-SHA1 of the username with the shared secret, valid for minutes) and returns it in
 `iceServers`. Users configure nothing on clients; a leaked credential expires on its own; revoking a
 client stops new credentials. The same program later runs our hosted relay.
+
+### Sessions (M4)
+
+`POST /stream` scales the display to the client's `maxWidth`/`maxHeight` and the profile (High and
+Auto ≤ 1920×1080 at 30 fps and 4000 kbps, Low ≤ 1280×720 at 15 fps and 1000 kbps; never upscaled;
+even sizes) and answers once ICE gathering finishes. Errors: 400 bad offer or quality, 401, 501 no
+backend, 503 with the reason (locked screen, Screen Recording). `DELETE /stream/{id}` answers 204,
+or 404 for another client's or an unknown session. A session is a pairing connection (`mobd
+connections` lists it as `/stream`), so revoke, delete and auth reset close it. It wakes the display
+and holds a display-sleep assertion until it ends, and closes after 30 s if the peer never connects.
+`/health` reports `streamSessions`. `cmd/stream-probe -url … -token …` is a development viewer.
+
+Measured with a dev mobd and the probe on one Mac: answer 0.34 s, connected 0.54 s, first frame
+0.55 s; each PLI produced a keyframe; a revoke stopped the video within a second.
 
 ### Encoder (M3)
 
@@ -293,7 +308,7 @@ All repos use branch `feat/webrtc-stream`; they merge to `main` together at rele
 | M1 | **Done.** `internal/desktop` with a `Backend` per OS; macOS screenshot and CGEvent input moved onto it, no behaviour change; Linux/other placeholders | existing tests; Linux build |
 | M2 | **Done.** ScreenCaptureKit snapshots at the requested size, encoded natively (`SCScreenshotManager` + ImageIO; `screencapture` on macOS 13); `/screen` with `ETag`/`304`; locked/asleep detection in `/health` (`display`) and `/screen` (503) | real capture test; macOS 13 build |
 | M3 | **Done.** `desktop.StartStream`: one `SCStream` feeding a VideoToolbox session on a serial queue in native code (frames never cross into Go); Go receives Annex B access units and adjusts bitrate, size and keyframes while it runs; no periodic keyframes, unchanged screens encode nothing | real-stream test with SPS check; race detector; macOS 13 build |
-| M4 | `POST /stream` / `DELETE`, Pion video track, session per client, closed on revoke; display kept awake per session; Go test client | test client receives video |
+| M4 | **Done.** `internal/stream`: `POST /stream` / `DELETE /stream/{id}`, Pion H.264 track fed by `desktop.StartStream`, keyframe on PLI/FIR, one session per client (a new one replaces it), closed on revoke/delete/reset/shutdown and when the peer never connects; display woken and kept awake per session; `cmd/stream-probe` | fake-source and real-pipeline tests; dev mobd + probe: pair, stream, PLI, DELETE, revoke |
 | M5 | Data channels and input; cursor position and shape | test client clicks; agent actions unchanged |
 | M6 | Rate control (see M0 result 4 and the M3 measurements): start low and ramp, resolution ladder, no leaky-bucket pacer, tuned GCC or own loss/RTT controller; profiles; `stream` health feature | in-process link shaper; real device off the office network |
 | M7 | WebSocket fallback with ticket and acks; keyframe at connect, start at 720p | test client over Funnel; first picture < 2 s |

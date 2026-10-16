@@ -6,6 +6,8 @@ import (
 	"errors"
 	"image/jpeg"
 	"image/png"
+	"os/exec"
+	"strings"
 	"testing"
 	"time"
 )
@@ -68,4 +70,26 @@ func TestMacOSSnapshotScalesAndEncodes(t *testing.T) {
 		t.Fatalf("png %+v meta %+v err %v", cfg, meta, err)
 	}
 	t.Logf("full PNG %dx%d: %d KB in %s", cfg.Width, cfg.Height, len(full)/1024, time.Since(start).Round(time.Millisecond))
+}
+
+func TestKeepAwakeReleasesItsAssertions(t *testing.T) {
+	count := func() int {
+		out, err := exec.Command("pmset", "-g", "assertions").Output()
+		if err != nil {
+			t.Skip("pmset unavailable")
+		}
+		return strings.Count(string(out), "mobd keep-awake test")
+	}
+	release, err := KeepAwake("mobd keep-awake test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := count(); n != 1 {
+		t.Fatalf("%d assertions while held, want 1", n)
+	}
+	release()
+	release() // idempotent
+	if n := count(); n != 0 {
+		t.Fatalf("%d assertions after release", n)
+	}
 }

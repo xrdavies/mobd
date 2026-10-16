@@ -61,7 +61,7 @@ func authenticatedHandler(t *testing.T, s *Server) http.Handler {
 
 func TestEveryBusinessRouteRequiresAuthentication(t *testing.T) {
 	s := testServer(t, "old-secret")
-	paths := []string{"/health", "/healthz", "/sessions", "/sessions/id", "/tasks", "/tasks/id", "/tasks/id/events", "/queue", "/events", "/screen", "/uploads", "/artifacts/id", "/vnc", "/tasks/id/cancel", "/tasks/id/steer", "/tasks/id/questions/q/answer", "/clients", "/invitations", "/reset"}
+	paths := []string{"/health", "/healthz", "/sessions", "/sessions/id", "/tasks", "/tasks/id", "/tasks/id/events", "/queue", "/events", "/screen", "/uploads", "/artifacts/id", "/vnc", "/stream", "/stream/id", "/tasks/id/cancel", "/tasks/id/steer", "/tasks/id/questions/q/answer", "/clients", "/invitations", "/reset"}
 	for _, path := range paths {
 		for _, method := range []string{"GET", "POST", "PATCH", "DELETE"} {
 			for _, token := range []string{"", "Bearer ", "Bearer old-secret"} {

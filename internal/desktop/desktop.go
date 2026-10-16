@@ -28,6 +28,9 @@ func StartStream(ctx context.Context, opts StreamOptions) (Stream, error) {
 	return current.StartStream(ctx, opts)
 }
 
+// KeepAwake wakes the display and keeps it awake until release is called.
+func KeepAwake(reason string) (func(), error) { return current.KeepAwake(reason) }
+
 // State reports whether the screen is locked or the display asleep.
 func State() (DisplayState, error) { return current.State() }
 

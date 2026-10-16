@@ -281,3 +281,33 @@ func TestVNCTicketsExpireAreCappedAndClearedByReset(t *testing.T) {
 	}
 	finish()
 }
+
+func TestAttachEndsWithTheClient(t *testing.T) {
+	s := openTest(t, filepath.Join(t.TempDir(), "auth.json"))
+	c, err := s.Redeem(invitation(t, s), "desk")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := s.Attach(context.Background(), "nobody", "POST", "/stream"); !errors.Is(err, ErrUnauthorized) {
+		t.Fatalf("unknown client: %v", err)
+	}
+	ctx, finish, err := s.Attach(context.Background(), c.ClientID, "POST", "/stream")
+	if err != nil || ClientID(ctx) != c.ClientID {
+		t.Fatalf("attach: %v", err)
+	}
+	defer finish()
+	if conns := s.Connections(); len(conns) != 1 || conns[0].Path != "/stream" {
+		t.Fatalf("connections %+v", conns)
+	}
+	if err := s.Revoke(c.ClientID, false); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-ctx.Done():
+	case <-time.After(time.Second):
+		t.Fatal("revoke did not end the attached connection")
+	}
+	if _, _, err := s.Attach(context.Background(), c.ClientID, "POST", "/stream"); !errors.Is(err, ErrUnauthorized) {
+		t.Fatalf("revoked client attached: %v", err)
+	}
+}

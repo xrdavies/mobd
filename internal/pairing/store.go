@@ -318,6 +318,19 @@ func (s *Store) BeginTicket(parent context.Context, secret, method, path string)
 	return s.begin(parent, found, method, path)
 }
 
+// Attach registers a long-lived connection for an already authenticated client, such as a stream
+// session that outlives the request that opened it. The context is cancelled on revoke, delete,
+// reset or Close, like a request from Begin.
+func (s *Store) Attach(parent context.Context, clientID, method, path string) (context.Context, func(), error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	found, ok := s.state.Clients[clientID]
+	if s.closed || !ok || found.RevokedAt != nil {
+		return nil, nil, ErrUnauthorized
+	}
+	return s.begin(parent, found, method, path)
+}
+
 // begin records activity and registers a live request; the caller holds s.mu.
 func (s *Store) begin(parent context.Context, found record, method, path string) (context.Context, func(), error) {
 	now := s.now().UTC()
