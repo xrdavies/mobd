@@ -42,6 +42,19 @@ func main() {
 	if _, err := pc.AddTransceiverFromKind(webrtc.RTPCodecTypeVideo, webrtc.RTPTransceiverInit{Direction: webrtc.RTPTransceiverDirectionRecvonly}); err != nil {
 		log.Fatal(err)
 	}
+	// The control channel carries cursor positions and error reports; the probe sends no input.
+	control, err := pc.CreateDataChannel("control", nil)
+	if err != nil {
+		log.Fatal(err)
+	}
+	var cursors atomic.Int64
+	control.OnMessage(func(msg webrtc.DataChannelMessage) {
+		if strings.Contains(string(msg.Data), `"t":"cursor"`) {
+			cursors.Add(1)
+		} else {
+			log.Printf("control: %s", msg.Data)
+		}
+	})
 	var packets, bytesIn, frames atomic.Int64
 	var ssrc atomic.Uint32
 	start := time.Now()
@@ -115,7 +128,7 @@ func main() {
 				path = fmt.Sprintf("rtt %.0fms", p.CurrentRoundTripTime*1000)
 			}
 		}
-		fmt.Printf("t=%2ds %5d kbps %3d fps  packets %d  %s\n", i+1, (b-lastBytes)*8/1000, f-lastFrames, packets.Load(), path)
+		fmt.Printf("t=%2ds %5d kbps %3d fps  packets %d  cursor updates %d  %s\n", i+1, (b-lastBytes)*8/1000, f-lastFrames, packets.Load(), cursors.Load(), path)
 		lastBytes, lastFrames = b, f
 		if *pliEvery > 0 && time.Now().After(nextPLI) {
 			_ = pc.WriteRTCP([]rtcp.Packet{&rtcp.PictureLossIndication{MediaSSRC: ssrc.Load()}})

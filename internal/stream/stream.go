@@ -62,6 +62,8 @@ type Config struct {
 	KeepAwake func(reason string) (func(), error)
 	// Attach ties a session to its client: the context ends when the client is revoked.
 	Attach func(parent context.Context, clientID string) (context.Context, func(), error)
+	// NewInput gives a session control of the desktop; nil makes sessions view-only.
+	NewInput func() Input
 	// Loopback adds 127.0.0.1 candidates; only for tests on one machine.
 	Loopback bool
 }
@@ -195,6 +197,7 @@ type session struct {
 	src            desktop.Stream
 	release        func()
 	once           sync.Once
+	ctl            *controller
 	connected      chan struct{}
 	connectedOnce  sync.Once
 	lastKeyRequest time.Time
@@ -237,6 +240,10 @@ func (s *session) start(offer string, opts desktop.StreamOptions) (string, error
 	sender, err := pc.AddTrack(track)
 	if err != nil {
 		return "", err
+	}
+	if s.m.cfg.NewInput != nil {
+		s.ctl = &controller{s: s, input: s.m.cfg.NewInput()}
+		pc.OnDataChannel(s.ctl.attach)
 	}
 	s.connected = make(chan struct{})
 	pc.OnConnectionStateChange(func(st webrtc.PeerConnectionState) {
@@ -331,6 +338,9 @@ func (s *session) close() {
 		}
 		if s.src != nil {
 			s.src.Close()
+		}
+		if s.ctl != nil {
+			s.ctl.input.Release() // no key or button stays down after the client leaves
 		}
 		if s.release != nil {
 			s.release()

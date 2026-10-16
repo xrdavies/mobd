@@ -6,6 +6,8 @@ import (
 	"errors"
 	"image/jpeg"
 	"image/png"
+	"math"
+	"os"
 	"os/exec"
 	"strings"
 	"testing"
@@ -92,4 +94,43 @@ func TestKeepAwakeReleasesItsAssertions(t *testing.T) {
 	if n := count(); n != 0 {
 		t.Fatalf("%d assertions after release", n)
 	}
+}
+
+func TestWebKeyCodesCoverCommonKeys(t *testing.T) {
+	for code, vk := range map[string]int{"KeyA": 0, "KeyZ": 6, "Digit1": 18, "Enter": 36, "F5": 96, "ArrowUp": 126, "MetaLeft": 55} {
+		if webKeyCodes[code] != vk {
+			t.Fatalf("%s = %d, want %d", code, webKeyCodes[code], vk)
+		}
+	}
+	if len(webKeyCodes) < 85 {
+		t.Fatalf("only %d codes", len(webKeyCodes))
+	}
+	x, y, err := macRemote{}.Cursor()
+	if d, _ := Current().Displays(); err != nil || x < -1 || y < -1 || len(d) == 0 {
+		t.Fatalf("cursor %v,%v err %v", x, y, err)
+	}
+}
+
+// Posts a real pointer event (to where the pointer already is). Opt in with MOBD_LIVE_INPUT=1.
+func TestMacOSPointerMoveRoundTrip(t *testing.T) {
+	if os.Getenv("MOBD_LIVE_INPUT") != "1" {
+		t.Skip("set MOBD_LIVE_INPUT=1 to post a real pointer event")
+	}
+	if !postAccess() {
+		t.Skip("no Accessibility permission")
+	}
+	in := NewInput()
+	x, y, err := in.Cursor()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := in.Move(x, y); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(50 * time.Millisecond)
+	x2, y2, _ := in.Cursor()
+	if d, _ := Current().Displays(); math.Abs(x2-x)*float64(d[0].Width) > 1.5 || math.Abs(y2-y)*float64(d[0].Height) > 1.5 {
+		t.Fatalf("pointer moved from %.4f,%.4f to %.4f,%.4f", x, y, x2, y2)
+	}
+	t.Logf("pointer at %.3f,%.3f round-tripped", x2, y2)
 }

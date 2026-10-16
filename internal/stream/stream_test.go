@@ -60,6 +60,7 @@ type harness struct {
 	streams []*fakeStream
 	awake   atomic.Int32
 	cancels map[string]context.CancelFunc
+	input   *fakeInput
 }
 
 func newHarness(t *testing.T) *harness {
@@ -95,6 +96,12 @@ func newHarness(t *testing.T) *harness {
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+	m.cfg.NewInput = func() Input {
+		h.mu.Lock()
+		defer h.mu.Unlock()
+		h.input = &fakeInput{}
+		return h.input
 	}
 	h.m = m
 	t.Cleanup(m.Shutdown)

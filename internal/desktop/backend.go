@@ -25,6 +25,8 @@ type Backend interface {
 	// KeepAwake wakes the display and keeps it from sleeping until release is called, so a
 	// watching client keeps a picture (capture sees nothing while the display sleeps or locks).
 	KeepAwake(reason string) (release func(), err error)
+	// Remote posts input for a person controlling the desktop (see Input).
+	Remote() RemoteInput
 	// Click presses a mouse button count times at point coordinates on the main display.
 	Click(x, y float64, right bool, count int) error
 	// Key presses a key named as in ParseHotkey with the given normalized modifiers.
@@ -125,3 +127,16 @@ func (unsupported) Paste(context.Context, string) error             { return Err
 func (unsupported) ListWindows(bool) ([]Window, error)              { return nil, ErrUnsupported }
 func (unsupported) OpenApp(context.Context, string) (string, error) { return "", ErrUnsupported }
 func (unsupported) KeepAwake(string) (func(), error)                { return nil, ErrUnsupported }
+func (unsupported) Remote() RemoteInput                             { return unsupportedRemote{} }
+
+type unsupportedRemote struct{}
+
+func (unsupportedRemote) Mouse(MouseKind, float64, float64, Button, [3]bool, int, Modifiers) error {
+	return ErrUnsupported
+}
+func (unsupportedRemote) KeyCode(string, bool, Modifiers) error { return ErrUnsupported }
+func (unsupportedRemote) Unicode(string, Modifiers) error       { return ErrUnsupported }
+func (unsupportedRemote) Scroll(float64, float64, float64, float64, Modifiers) error {
+	return ErrUnsupported
+}
+func (unsupportedRemote) Cursor() (float64, float64, error) { return 0, 0, ErrUnsupported }

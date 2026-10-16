@@ -156,8 +156,23 @@ no periodic keyframes while idle).
 | `input` | reliable, ordered | button down/up, keys, text, scroll, modifiers |
 | `pointer` | unreliable (`maxRetransmits: 0`) | pointer moves, latest wins |
 
-Messages are small JSON objects with a `t` field in v1 (`{"t":"key","code":"KeyA","down":true}`);
-coordinates are display points with the display id. Binary encoding only if M0 shows it matters.
+Messages are small JSON objects with a `t` field. Coordinates are **normalized to the display**
+(`0,0` top left, `1,1` bottom right), so they survive resizes and differ from no encoded size.
+
+| `t` | Channel | Fields |
+| --- | --- | --- |
+| `move` | `pointer` | `x`, `y` (a drag while a button is held) |
+| `button` | `input` | `x`, `y`, `button` (`left`/`right`/`middle`), `down`; repeated presses within 500 ms and 4 pt count as double/triple clicks |
+| `key` | `input` | `code` (web `KeyboardEvent.code`, e.g. `KeyA`, `ShiftLeft`, `Enter`), `down`; modifiers follow the held modifier keys |
+| `text` | `input` | `text` (≤ 4096 characters, typed as Unicode without the clipboard; newlines press Return) |
+| `scroll` | `input` | `x`, `y`, `dx`, `dy` in pixels (positive = down/right, like `WheelEvent`) |
+| `keyframe` | `control` | — |
+| `cursor` | `control`, from mobd | `x`, `y` when the pointer moves (≤ 30/s) |
+| `error` | `control`, from mobd | `about` (message type), `message`; at most once a second per type |
+
+Everything held is released when the session ends, so a dropped client leaves no key or button
+down. Input needs Accessibility, like the agent's actions. The cursor *shape* stays in the video
+for now: macOS has no public API for another application's current cursor image.
 
 **Adaptation**: Pion NACK, TWCC and the GCC bandwidth estimator. The estimate sets the encoder bitrate;
 when it falls below the profile's floor, lower frame rate first, then resolution.
@@ -309,7 +324,7 @@ All repos use branch `feat/webrtc-stream`; they merge to `main` together at rele
 | M2 | **Done.** ScreenCaptureKit snapshots at the requested size, encoded natively (`SCScreenshotManager` + ImageIO; `screencapture` on macOS 13); `/screen` with `ETag`/`304`; locked/asleep detection in `/health` (`display`) and `/screen` (503) | real capture test; macOS 13 build |
 | M3 | **Done.** `desktop.StartStream`: one `SCStream` feeding a VideoToolbox session on a serial queue in native code (frames never cross into Go); Go receives Annex B access units and adjusts bitrate, size and keyframes while it runs; no periodic keyframes, unchanged screens encode nothing | real-stream test with SPS check; race detector; macOS 13 build |
 | M4 | **Done.** `internal/stream`: `POST /stream` / `DELETE /stream/{id}`, Pion H.264 track fed by `desktop.StartStream`, keyframe on PLI/FIR, one session per client (a new one replaces it), closed on revoke/delete/reset/shutdown and when the peer never connects; display woken and kept awake per session; `cmd/stream-probe` | fake-source and real-pipeline tests; dev mobd + probe: pair, stream, PLI, DELETE, revoke |
-| M5 | Data channels and input; cursor position and shape | test client clicks; agent actions unchanged |
+| M5 | **Done.** `desktop.Input` (held state, drags, multi-clicks, release) over a per-OS `RemoteInput`; macOS CGEvent mouse/key/Unicode/pixel scroll with web key codes; `input`/`pointer`/`control` channels; cursor position on `control` (shape stays in the video) | recorded-event tests; data-channel test; opt-in real pointer test |
 | M6 | Rate control (see M0 result 4 and the M3 measurements): start low and ramp, resolution ladder, no leaky-bucket pacer, tuned GCC or own loss/RTT controller; profiles; `stream` health feature | in-process link shaper; real device off the office network |
 | M7 | WebSocket fallback with ticket and acks; keyframe at connect, start at 720p | test client over Funnel; first picture < 2 s |
 | M8 | Remove VNC (`/vnc` → 410), setup checks, config | `go test ./...` |
