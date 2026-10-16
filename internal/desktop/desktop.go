@@ -17,6 +17,17 @@ func Snapshot(ctx context.Context, opts SnapshotOptions) (Image, error) {
 	return current.Snapshot(ctx, opts)
 }
 
+// StartStream starts a live H.264 stream of the main display; see Stream.
+func StartStream(ctx context.Context, opts StreamOptions) (Stream, error) {
+	if opts.Width < 16 || opts.Height < 16 || opts.Width%2 != 0 || opts.Height%2 != 0 || opts.Width > 7680 || opts.Height > 4320 {
+		return nil, fmt.Errorf("stream size %dx%d must be even and 16-7680 x 16-4320", opts.Width, opts.Height)
+	}
+	if opts.FPS < 1 || opts.FPS > 60 || opts.Kbps < 50 {
+		return nil, fmt.Errorf("stream needs 1-60 fps and at least 50 kbps")
+	}
+	return current.StartStream(ctx, opts)
+}
+
 // State reports whether the screen is locked or the display asleep.
 func State() (DisplayState, error) { return current.State() }
 

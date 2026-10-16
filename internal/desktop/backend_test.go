@@ -52,3 +52,22 @@ func TestUnsupportedBackend(t *testing.T) {
 		t.Fatal("unknown scale should default to 1")
 	}
 }
+
+func TestStartStreamValidatesBeforeTheBackend(t *testing.T) {
+	saved := current
+	current = unsupported{name: "test"}
+	t.Cleanup(func() { current = saved })
+	for _, opts := range []StreamOptions{
+		{Width: 1281, Height: 720, FPS: 30, Kbps: 1000},
+		{Width: 8, Height: 8, FPS: 30, Kbps: 1000},
+		{Width: 1280, Height: 720, FPS: 0, Kbps: 1000},
+		{Width: 1280, Height: 720, FPS: 30, Kbps: 10},
+	} {
+		if _, err := StartStream(context.Background(), opts); err == nil || errors.Is(err, ErrUnsupported) {
+			t.Fatalf("%+v: %v", opts, err)
+		}
+	}
+	if _, err := StartStream(context.Background(), StreamOptions{Width: 1280, Height: 720, FPS: 30, Kbps: 1000}); !errors.Is(err, ErrUnsupported) {
+		t.Fatalf("unsupported: %v", err)
+	}
+}

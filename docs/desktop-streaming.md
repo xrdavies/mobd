@@ -205,6 +205,25 @@ password = HMAC-SHA1 of the username with the shared secret, valid for minutes) 
 `iceServers`. Users configure nothing on clients; a leaked credential expires on its own; revoking a
 client stops new credentials. The same program later runs our hosted relay.
 
+### Encoder (M3)
+
+Measured on a Mac Studio (1080p display, M3 test):
+
+| | Result |
+| --- | --- |
+| Start → first keyframe | 0.37 s |
+| Resize → keyframe at the new size | ~0.1 s (1280×720, 960×540, 1920×1080; size verified from the SPS) |
+| Keyframe on request, idle screen | 7 ms |
+| Keyframe size at 4000 kbps | 1080p 200 KB, 720p 135 KB, 540p 115 KB |
+| Keyframe size at 500 kbps | 1080p 113 KB |
+
+Notes for M6: low-latency rate control spends about bitrate ÷ fps on each changed frame (a
+spinner animating at ~28 fps cost ~2.3 Mbps at a 4000 kbps target), so the target bitrate, not the
+amount of change, sets the cost of an active screen; and the 1.5× per-second byte cap does not stop a
+single keyframe from exceeding it, so the size ladder must step down before keyframes outgrow the
+link. A consumer that falls behind loses frames, not latency: after a dropped unit the stream
+discards deltas and asks for a keyframe.
+
 ### Snapshots
 
 `/screen` captures with ScreenCaptureKit at the requested width and encodes natively (ImageIO), so a
@@ -273,10 +292,10 @@ All repos use branch `feat/webrtc-stream`; they merge to `main` together at rele
 | M0 | Validation spike above | Report with numbers |
 | M1 | **Done.** `internal/desktop` with a `Backend` per OS; macOS screenshot and CGEvent input moved onto it, no behaviour change; Linux/other placeholders | existing tests; Linux build |
 | M2 | **Done.** ScreenCaptureKit snapshots at the requested size, encoded natively (`SCScreenshotManager` + ImageIO; `screencapture` on macOS 13); `/screen` with `ETag`/`304`; locked/asleep detection in `/health` (`display`) and `/screen` (503) | real capture test; macOS 13 build |
-| M3 | Long-lived `SCStream` feeding a VideoToolbox encoder in native code (frames never cross into Go); adjusted while running (bitrate, byte cap, size ladder, keyframe), never restarted; nothing sent while idle | encode benchmark (540p–1080p) |
+| M3 | **Done.** `desktop.StartStream`: one `SCStream` feeding a VideoToolbox session on a serial queue in native code (frames never cross into Go); Go receives Annex B access units and adjusts bitrate, size and keyframes while it runs; no periodic keyframes, unchanged screens encode nothing | real-stream test with SPS check; race detector; macOS 13 build |
 | M4 | `POST /stream` / `DELETE`, Pion video track, session per client, closed on revoke; display kept awake per session; Go test client | test client receives video |
 | M5 | Data channels and input; cursor position and shape | test client clicks; agent actions unchanged |
-| M6 | Rate control (see M0 result 4): start low and ramp, resolution ladder, no leaky-bucket pacer, tuned GCC or own loss/RTT controller; profiles; `stream` health feature | in-process link shaper; real device off the office network |
+| M6 | Rate control (see M0 result 4 and the M3 measurements): start low and ramp, resolution ladder, no leaky-bucket pacer, tuned GCC or own loss/RTT controller; profiles; `stream` health feature | in-process link shaper; real device off the office network |
 | M7 | WebSocket fallback with ticket and acks; keyframe at connect, start at 720p | test client over Funnel; first picture < 2 s |
 | M8 | Remove VNC (`/vnc` → 410), setup checks, config | `go test ./...` |
 | M9 | Docs: this file, pairing, security, remote access, connection setup, README | review |

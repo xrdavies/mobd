@@ -1,6 +1,9 @@
 package desktop
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
 // Backend is one operating system's way of seeing and driving the desktop. The package-level
 // functions validate their arguments and delegate to the backend for the OS mobd runs on, so
@@ -17,6 +20,8 @@ type Backend interface {
 	Snapshot(ctx context.Context, opts SnapshotOptions) (Image, error)
 	// State reports whether the screen can be captured right now.
 	State() (DisplayState, error)
+	// StartStream captures the main display continuously and encodes it as H.264.
+	StartStream(ctx context.Context, opts StreamOptions) (Stream, error)
 	// Click presses a mouse button count times at point coordinates on the main display.
 	Click(x, y float64, right bool, count int) error
 	// Key presses a key named as in ParseHotkey with the given normalized modifiers.
@@ -59,6 +64,37 @@ type DisplayState struct {
 	Asleep bool `json:"asleep"`
 }
 
+// StreamOptions start a live stream. Width and Height are the encoded size in pixels (even).
+type StreamOptions struct {
+	Width, Height int
+	FPS           int  // upper bound; an unchanged screen produces no frames
+	Kbps          int  // average bitrate
+	ShowCursor    bool // draw the cursor into the video (the live view sends it separately later)
+}
+
+// AccessUnit is one encoded frame: H.264 Annex B starting with an AUD; keyframes carry SPS/PPS.
+type AccessUnit struct {
+	Data          []byte
+	Key           bool
+	PTS           time.Duration // capture time on the host clock
+	Width, Height int
+}
+
+// Stream is a running capture + encoder. It is adjusted while it runs and never restarted:
+// restarting on every bitrate change froze the picture in the M0 spike.
+type Stream interface {
+	// Units delivers access units; it is closed when the stream ends (see Err).
+	Units() <-chan AccessUnit
+	SetBitrate(kbps int)
+	// SetSize changes the encoded size; the next unit is a keyframe at the new size.
+	SetSize(width, height int)
+	// Keyframe asks for a keyframe now, even when the screen is idle.
+	Keyframe()
+	// Err reports why the stream ended on its own, for example a locked screen.
+	Err() error
+	Close()
+}
+
 // current is the backend for this OS; tests swap it.
 var current = newBackend()
 
@@ -76,7 +112,10 @@ func (unsupported) Displays() ([]Display, error)      { return nil, ErrUnsupport
 func (unsupported) Snapshot(context.Context, SnapshotOptions) (Image, error) {
 	return Image{}, ErrUnsupported
 }
-func (unsupported) State() (DisplayState, error)                    { return DisplayState{}, ErrUnsupported }
+func (unsupported) State() (DisplayState, error) { return DisplayState{}, ErrUnsupported }
+func (unsupported) StartStream(context.Context, StreamOptions) (Stream, error) {
+	return nil, ErrUnsupported
+}
 func (unsupported) Click(float64, float64, bool, int) error         { return ErrUnsupported }
 func (unsupported) Key(string, []string) error                      { return ErrUnsupported }
 func (unsupported) Paste(context.Context, string) error             { return ErrUnsupported }
