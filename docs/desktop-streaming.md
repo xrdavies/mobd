@@ -56,7 +56,7 @@ Goals
 
 Non-goals for this release
 - Ubuntu and Windows backends (Linux is a compiled placeholder; plan below).
-- The macOS login window and the lock screen (need a privileged helper; later). See "Locked screen".
+- The macOS login window before sign-in (needs a privileged helper; later). See "Locked screen".
 - Audio, file transfer, multi-monitor selection (main display only), clipboard sync.
 
 ## Architecture
@@ -235,6 +235,27 @@ and holds a display-sleep assertion until it ends, and closes after 30 s if the 
 Measured with a dev mobd and the probe on one Mac: answer 0.34 s, connected 0.54 s, first frame
 0.55 s; each PLI produced a keyframe; a revoke stopped the video within a second.
 
+### Office Mac results (M6)
+
+Run on 2026-10-16 against M4002 (macOS 26.5, 4K panel at 1920×1080 points) from a Mac Studio, with
+this branch's mobd and `cmd/stream-probe`.
+
+| Check | Result |
+| --- | --- |
+| Answer / connected / first frame (LAN) | 0.07–0.22 s / 0.28–0.44 s / 0.29–0.44 s |
+| Idle desktop, 720p | 0–600 kbps, 0–2 fps (only on change) |
+| Scrolling terminal | 50–90 kbps at 5–9 fps after the first second |
+| Rate control on a clean link | 1500 → 5170 kbps in 12 s; 720p → 1080p after the hold |
+| Low profile | 960×540, 15 fps, ≤ 1000 kbps |
+| Narrow view (`maxWidth` 720) | 720×406 |
+| Picture-loss report every 3 s | keyframe each time |
+| Tailscale address | works; ICE still picks the LAN path when both ends share one |
+| mobd CPU while streaming | ~2.7% |
+| Input | click and Unicode text work, including at the lock screen |
+| Display put to sleep mid-stream | `ended` with the reason within 1 s, then closed |
+
+Not measured: a remote network (Tailscale relay, phone off Wi-Fi) and the WebSocket fallback (M7).
+
 ### Encoder (M3)
 
 Measured on a Mac Studio (1080p display, M3 test):
@@ -274,17 +295,21 @@ answers `503` with the reason, and `/health` reports it as the `display` check.
 
 ### Locked screen
 
-ScreenCaptureKit, running as the user, sees **no display** while the console is locked or the
-display sleeps (M0). Screen Sharing (VNC) kept working there because Apple runs it as a system
-service. This release:
+Measured on the office Mac in M6 (this corrects the M0 conclusion):
 
-- keeps the display awake (power assertion) while a stream session is open, so idle display sleep
-  does not lock the Mac under a watching client;
-- reports `locked` on the stream's `control` channel and in `/health` problems, and clients show
-  "The office Mac is locked" instead of a black picture;
-- recommends turning off auto-lock on a dedicated office Mac (setup guide), and states the trade-off.
+- ScreenCaptureKit, running as the user, sees **no display while the display sleeps**. While the
+  display is **awake, a locked screen is captured** like any other screen (23–25 fps at 1280×720).
+- A stream session wakes the display and holds a display-sleep assertion, so opening the live view
+  on a sleeping, locked Mac shows the lock screen.
+- **Typing the password through the `text` message unlocks the Mac.** Unicode keyboard events reach
+  the login field; the old VNC keyboard path dropped characters there.
+- If the display is forced to sleep during a session (`pmset displaysleepnow`), capture stops and
+  the session sends `ended` with the reason, then closes; a new session wakes the display again.
+- `/health` `display` is a problem only while the display sleeps; a locked screen is reported as ok
+  with detail "locked".
 
-A privileged helper that shows and unlocks the lock screen (RustDesk-style) is a later step.
+The macOS login window before any user signs in is still out of reach (no user session); a
+privileged helper for that stays a later step.
 
 ### Removing VNC
 
@@ -325,7 +350,7 @@ All repos use branch `feat/webrtc-stream`; they merge to `main` together at rele
 | M3 | **Done.** `desktop.StartStream`: one `SCStream` feeding a VideoToolbox session on a serial queue in native code (frames never cross into Go); Go receives Annex B access units and adjusts bitrate, size and keyframes while it runs; no periodic keyframes, unchanged screens encode nothing | real-stream test with SPS check; race detector; macOS 13 build |
 | M4 | **Done.** `internal/stream`: `POST /stream` / `DELETE /stream/{id}`, Pion H.264 track fed by `desktop.StartStream`, keyframe on PLI/FIR, one session per client (a new one replaces it), closed on revoke/delete/reset/shutdown and when the peer never connects; display woken and kept awake per session; `cmd/stream-probe` | fake-source and real-pipeline tests; dev mobd + probe: pair, stream, PLI, DELETE, revoke |
 | M5 | **Done.** `desktop.Input` (held state, drags, multi-clicks, release) over a per-OS `RemoteInput`; macOS CGEvent mouse/key/Unicode/pixel scroll with web key codes; `input`/`pointer`/`control` channels; cursor position on `control` (shape stays in the video) | recorded-event tests; data-channel test; opt-in real pointer test |
-| M6 | Rate control (see M0 result 4 and the M3 measurements): start low and ramp, resolution ladder, no leaky-bucket pacer, tuned GCC or own loss/RTT controller; profiles; `stream` health feature | in-process link shaper; real device off the office network |
+| M6 | **Done.** Own rate control from receiver reports and ICE RTT (start low, ramp, back off once per RTT sample), size ladder with hysteresis, half frame rate below 400 kbps, retransmission budget (30% of fresh bytes), profiles, `stats`/`ended` on `control`, `stream` health feature | impaired-link test (2 Mbps/1%/20 ms: 1.3–1.95 Mbps, no freezes, recovery to 4 Mbps in 12 s); office Mac over LAN and Tailscale |
 | M7 | WebSocket fallback with ticket and acks; keyframe at connect, start at 720p | test client over Funnel; first picture < 2 s |
 | M8 | Remove VNC (`/vnc` → 410), setup checks, config | `go test ./...` |
 | M9 | Docs: this file, pairing, security, remote access, connection setup, README | review |

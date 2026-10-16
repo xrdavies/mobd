@@ -113,10 +113,11 @@ func displayCheck() check {
 	switch {
 	case err != nil:
 		return check{Unknown: true, Detail: err.Error()}
-	case st.Locked:
-		return check{Detail: "the screen is locked; screenshots and the live view need it unlocked (turn off automatic locking on a dedicated office Mac)"}
 	case st.Asleep:
-		return check{Detail: "the display is asleep; screenshots and the live view need it awake"}
+		return check{Detail: "the display is asleep; snapshots need it awake (the live view wakes it)"}
+	case st.Locked:
+		// Capture shows the lock screen while the display is awake, and the live view can unlock it.
+		return check{OK: true, Detail: "locked; the live view shows the lock screen"}
 	}
 	return check{OK: true, Detail: "unlocked and awake"}
 }

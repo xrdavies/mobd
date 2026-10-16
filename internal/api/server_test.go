@@ -904,7 +904,7 @@ func TestHealthReadiness(t *testing.T) {
 	}
 	if !c["codex"].OK || !strings.Contains(c["codex"].Detail, "codex-cli 9.9.9") || c["actuation"].OK ||
 		!c["vnc"].OK || c["accessibility"].OK != perms.Accessibility || c["screenRecording"].OK || c["screenRecording"].Detail == "" ||
-		c["display"].OK || !strings.Contains(c["display"].Detail, "locked") {
+		!c["display"].OK || !strings.Contains(c["display"].Detail, "locked") {
 		t.Fatalf("checks %+v", c)
 	}
 	if body.Runner != "codex" || len(body.Runners) != 1 || !body.Runners[0].Available || !body.Runners[0].Default ||

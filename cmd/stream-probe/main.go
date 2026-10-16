@@ -28,6 +28,8 @@ func main() {
 	maxWidth := flag.Int("max-width", 0, "view width in pixels (0: full)")
 	quality := flag.String("quality", "auto", "auto, high or low")
 	pliEvery := flag.Duration("pli", 0, "send a picture-loss report this often (0: never)")
+	typeText := flag.String("type", "", "type this text once connected (\\n presses Return)")
+	click := flag.String("click", "", "left-click at normalized x,y (0..1) once connected, e.g. 0.53,0.38")
 	flag.Parse()
 	if *token == "" {
 		log.Fatal("-token or MOBD_TOKEN is required")
@@ -44,6 +46,10 @@ func main() {
 	}
 	// The control channel carries cursor positions and error reports; the probe sends no input.
 	control, err := pc.CreateDataChannel("control", nil)
+	if err != nil {
+		log.Fatal(err)
+	}
+	input, err := pc.CreateDataChannel("input", nil)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -115,6 +121,28 @@ func main() {
 		log.Fatal("not connected within 15 s")
 	}
 
+	if *click != "" {
+		var x, y float64
+		if _, err := fmt.Sscanf(*click, "%g,%g", &x, &y); err != nil {
+			log.Fatalf("-click: %v", err)
+		}
+		time.Sleep(time.Second) // let the input channel open
+		for _, down := range []bool{true, false} {
+			msg, _ := json.Marshal(map[string]any{"t": "button", "button": "left", "down": down, "x": x, "y": y})
+			if err := input.SendText(string(msg)); err != nil {
+				log.Fatalf("click: %v", err)
+			}
+		}
+		log.Printf("clicked at %.3f,%.3f", x, y)
+	}
+	if *typeText != "" {
+		time.Sleep(time.Second)
+		msg, _ := json.Marshal(map[string]any{"t": "text", "text": strings.ReplaceAll(*typeText, `\n`, "\n")})
+		if err := input.SendText(string(msg)); err != nil {
+			log.Fatalf("type: %v", err)
+		}
+		log.Printf("typed %d characters", len(*typeText))
+	}
 	tick := time.NewTicker(time.Second)
 	defer tick.Stop()
 	var lastBytes, lastFrames int64
