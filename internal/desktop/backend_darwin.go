@@ -8,15 +8,17 @@ import (
 	"strings"
 )
 
-// macOS drives the desktop with CoreGraphics events (input_darwin.go) and screencapture(1).
+// macOS drives the desktop with CoreGraphics events (input_darwin.go) and ScreenCaptureKit
+// (snapshot_darwin.go).
 type macOS struct{}
 
 func newBackend() Backend { return macOS{} }
 
 func (macOS) Name() string { return "macos" }
 
-// Capture returns a PNG of the main display via screencapture(1).
-func (macOS) Capture(ctx context.Context) ([]byte, error) {
+// screencapturePNG captures the main display with screencapture(1): the macOS 13 fallback for
+// ScreenCaptureKit screenshots (snapshot_darwin.go).
+func screencapturePNG(ctx context.Context) ([]byte, error) {
 	f, err := os.CreateTemp("", "mob-screen-*.png")
 	if err != nil {
 		return nil, err

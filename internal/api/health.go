@@ -78,6 +78,7 @@ func (s *Server) readiness(ctx context.Context) map[string]check {
 		checks["actuation"] = check{OK: true, Detail: "built-in (mobd mcp)"}
 	}
 	checks["accessibility"], checks["screenRecording"] = permissionChecks()
+	checks["display"] = displayCheck()
 	checks["vnc"] = dialCheck(ctx, s.vncAddr())
 	if !checks["vnc"].OK {
 		checks["vnc"] = check{Detail: s.vncAddr() + " unreachable; turn on Screen Sharing in System Settings > General > Sharing"}
@@ -103,6 +104,24 @@ func permissionChecks() (check, check) {
 	}
 	return ax, sr
 }
+
+// displayCheck reports a locked console or sleeping display: screen capture running as the
+// user sees no display then, so snapshots and the live view have no picture.
+func displayCheck() check {
+	st, err := displayState()
+	switch {
+	case err != nil:
+		return check{Unknown: true, Detail: err.Error()}
+	case st.Locked:
+		return check{Detail: "the screen is locked; screenshots and the live view need it unlocked (turn off automatic locking on a dedicated office Mac)"}
+	case st.Asleep:
+		return check{Detail: "the display is asleep; screenshots and the live view need it awake"}
+	}
+	return check{OK: true, Detail: "unlocked and awake"}
+}
+
+// displayState is swapped in tests.
+var displayState = desktop.State
 
 // currentPermissions is swapped in tests.
 var currentPermissions = desktop.CurrentPermissions

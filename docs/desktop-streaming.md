@@ -207,9 +207,12 @@ client stops new credentials. The same program later runs our hosted relay.
 
 ### Snapshots
 
-`/screen` uses `Capturer.Snapshot` at the requested width instead of `screencapture` + PNG decode.
-Clients request their displayed width × pixel density at quality ≈ 65. An `ETag` lets clients skip
-unchanged images.
+`/screen` captures with ScreenCaptureKit at the requested width and encodes natively (ImageIO), so a
+4K display is never encoded at full size for a small view; macOS 13 falls back to `screencapture`.
+Measured on a 1080p Mac: 640 px JPEG in ~0.2 s (59 KB), full PNG in ~0.1 s. Clients request their
+displayed width × pixel density at quality ≈ 65 and send `If-None-Match` with the last `ETag`
+(exposed over CORS); an unchanged screen answers `304` with no body. A locked or sleeping display
+answers `503` with the reason, and `/health` reports it as the `display` check.
 
 ### Security
 
@@ -269,8 +272,8 @@ All repos use branch `feat/webrtc-stream`; they merge to `main` together at rele
 | --- | --- | --- |
 | M0 | Validation spike above | Report with numbers |
 | M1 | **Done.** `internal/desktop` with a `Backend` per OS; macOS screenshot and CGEvent input moved onto it, no behaviour change; Linux/other placeholders | existing tests; Linux build |
-| M2 | ScreenCaptureKit capture in one long-lived native component (AppKit context, stream kept alive); `/screen` uses it with `ETag`; locked/sleeping display detection | snapshot size/time test; office Mac |
-| M3 | VideoToolbox encoder adjusted while running (bitrate, byte cap, size ladder, keyframe), never restarted; nothing sent while idle | encode benchmark (540p–1080p) |
+| M2 | **Done.** ScreenCaptureKit snapshots at the requested size, encoded natively (`SCScreenshotManager` + ImageIO; `screencapture` on macOS 13); `/screen` with `ETag`/`304`; locked/asleep detection in `/health` (`display`) and `/screen` (503) | real capture test; macOS 13 build |
+| M3 | Long-lived `SCStream` feeding a VideoToolbox encoder in native code (frames never cross into Go); adjusted while running (bitrate, byte cap, size ladder, keyframe), never restarted; nothing sent while idle | encode benchmark (540p–1080p) |
 | M4 | `POST /stream` / `DELETE`, Pion video track, session per client, closed on revoke; display kept awake per session; Go test client | test client receives video |
 | M5 | Data channels and input; cursor position and shape | test client clicks; agent actions unchanged |
 | M6 | Rate control (see M0 result 4): start low and ramp, resolution ladder, no leaky-bucket pacer, tuned GCC or own loss/RTT controller; profiles; `stream` health feature | in-process link shaper; real device off the office network |
@@ -330,8 +333,8 @@ low-latency rate control); transport: Pion WebRTC v4.2.23, interceptor v0.1.49.
 Findings that change the implementation:
 
 - ffmpeg's AVFoundation screen input delivers no frames on macOS 26; ScreenCaptureKit is required.
-- ScreenCaptureKit needs an AppKit (`NSApplication`) context and the `SCStream` must be retained, or
-  capture stops without an error.
+- The `SCStream` must be retained, or capture stops without an error. (The spike also added an
+  `NSApplication`; M2 showed ScreenCaptureKit works inside mobd without one.)
 - Capture and encoding live in one long-running component that is adjusted, not restarted:
   restarting on every bitrate change or keyframe request froze the stream.
 - No display while the console is locked or the display sleeps (see "Locked screen").

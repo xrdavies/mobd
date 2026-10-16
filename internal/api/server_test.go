@@ -6,9 +6,9 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"github.com/xrdavies/mobd/internal/desktop"
 	"image"
-	"image/jpeg"
 	"image/png"
 	"mime/multipart"
 	"net"
@@ -821,25 +821,47 @@ printf '%s\n' '{"type":"item.completed","item":{"id":"m","type":"agent_message",
 
 func TestScreen(t *testing.T) {
 	s := testServer(t, "")
-	frame := pngBytes(t)
-	capture = func(context.Context) ([]byte, error) { return frame, nil }
-	t.Cleanup(func() { capture = desktop.Capture })
+	var got desktop.SnapshotOptions
+	frame := []byte("jpeg-bytes")
+	snapshot = func(_ context.Context, opts desktop.SnapshotOptions) (desktop.Image, error) {
+		got = opts
+		return desktop.Image{Data: frame, MIME: "image/" + opts.Format, Width: 32, Height: 16}, nil
+	}
+	t.Cleanup(func() { snapshot = desktop.Snapshot })
 
-	rr := doJSON(t, s, http.MethodGet, "/screen?maxWidth=32", "")
-	if rr.Code != http.StatusOK || rr.Header().Get("Content-Type") != "image/jpeg" {
+	rr := doJSON(t, s, http.MethodGet, "/screen?maxWidth=32&quality=65", "")
+	if rr.Code != http.StatusOK || rr.Header().Get("Content-Type") != "image/jpeg" || !bytes.Equal(rr.Body.Bytes(), frame) {
 		t.Fatalf("screen %d %v", rr.Code, rr.Header())
 	}
-	img, err := jpeg.Decode(rr.Body)
-	if err != nil || img.Bounds().Dx() != 32 || img.Bounds().Dy() != 16 {
-		t.Fatalf("bounds %v err %v", img, err)
+	if got != (desktop.SnapshotOptions{MaxWidth: 32, Format: "jpeg", Quality: 65}) {
+		t.Fatalf("options %+v", got)
 	}
-	if rr := doJSON(t, s, http.MethodGet, "/screen?format=png", ""); !bytes.Equal(rr.Body.Bytes(), frame) {
-		t.Fatal("png passthrough changed bytes")
+	etag := rr.Header().Get("ETag")
+	if etag == "" {
+		t.Fatal("no ETag")
+	}
+	req := httptest.NewRequest(http.MethodGet, "/screen", nil)
+	req.Header.Set("If-None-Match", etag)
+	rr = httptest.NewRecorder()
+	authenticatedHandler(t, s).ServeHTTP(rr, req)
+	if rr.Code != http.StatusNotModified || rr.Body.Len() != 0 {
+		t.Fatalf("unchanged screen: %d %d bytes", rr.Code, rr.Body.Len())
+	}
+	if rr := doJSON(t, s, http.MethodGet, "/screen?format=png", ""); rr.Code != http.StatusOK || got.Format != "png" {
+		t.Fatalf("png: %d %+v", rr.Code, got)
 	}
 	if rr := doJSON(t, s, http.MethodGet, "/screen?format=gif", ""); rr.Code != http.StatusBadRequest {
 		t.Fatalf("bad format: %d", rr.Code)
 	}
-	capture = func(context.Context) ([]byte, error) { return nil, desktop.ErrUnsupported }
+	snapshot = func(context.Context, desktop.SnapshotOptions) (desktop.Image, error) {
+		return desktop.Image{}, fmt.Errorf("%w: the office computer is locked", desktop.ErrScreenUnavailable)
+	}
+	if rr := doJSON(t, s, http.MethodGet, "/screen", ""); rr.Code != http.StatusServiceUnavailable || !strings.Contains(rr.Body.String(), "locked") {
+		t.Fatalf("locked: %d %s", rr.Code, rr.Body)
+	}
+	snapshot = func(context.Context, desktop.SnapshotOptions) (desktop.Image, error) {
+		return desktop.Image{}, desktop.ErrUnsupported
+	}
 	if rr := doJSON(t, s, http.MethodGet, "/screen", ""); rr.Code != http.StatusNotImplemented {
 		t.Fatalf("unsupported: %d", rr.Code)
 	}
@@ -857,6 +879,8 @@ func TestHealthReadiness(t *testing.T) {
 	perms := desktop.Permissions{Accessibility: true}
 	currentPermissions = func() (desktop.Permissions, error) { return perms, nil }
 	t.Cleanup(func() { currentPermissions = desktop.CurrentPermissions })
+	displayState = func() (desktop.DisplayState, error) { return desktop.DisplayState{Locked: true}, nil }
+	t.Cleanup(func() { displayState = desktop.State })
 	cfg := config.Config{CodexBin: bin, MobMCPCommand: "mob-mcp-missing", VNCAddr: ln.Addr().String(),
 		CodexModels: []string{"gpt-5.5"}, DataDir: dir}
 	s := newTestServer(t, cfg, task.NewStore(), codex.New(cfg))
@@ -879,7 +903,8 @@ func TestHealthReadiness(t *testing.T) {
 		t.Fatalf("health %+v", body)
 	}
 	if !c["codex"].OK || !strings.Contains(c["codex"].Detail, "codex-cli 9.9.9") || c["actuation"].OK ||
-		!c["vnc"].OK || c["accessibility"].OK != perms.Accessibility || c["screenRecording"].OK || c["screenRecording"].Detail == "" {
+		!c["vnc"].OK || c["accessibility"].OK != perms.Accessibility || c["screenRecording"].OK || c["screenRecording"].Detail == "" ||
+		c["display"].OK || !strings.Contains(c["display"].Detail, "locked") {
 		t.Fatalf("checks %+v", c)
 	}
 	if body.Runner != "codex" || len(body.Runners) != 1 || !body.Runners[0].Available || !body.Runners[0].Default ||

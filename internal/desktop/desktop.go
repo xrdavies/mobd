@@ -1,18 +1,40 @@
 package desktop
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
-	"image/png"
 	"math"
 	"slices"
 	"strings"
 )
 
-// Capture returns a PNG of the main display.
-func Capture(ctx context.Context) ([]byte, error) { return current.Capture(ctx) }
+// Snapshot captures the main display at the requested size and format ("jpeg" or "png").
+func Snapshot(ctx context.Context, opts SnapshotOptions) (Image, error) {
+	if opts.Format != "jpeg" && opts.Format != "png" {
+		return Image{}, fmt.Errorf("unsupported format %q", opts.Format)
+	}
+	return current.Snapshot(ctx, opts)
+}
+
+// State reports whether the screen is locked or the display asleep.
+func State() (DisplayState, error) { return current.State() }
+
+// ErrScreenUnavailable reports that capture found no display, usually because the screen is
+// locked or the display is asleep; errors wrap it with the reason.
+var ErrScreenUnavailable = errors.New("screen unavailable")
+
+// unavailable explains a capture that found no display, using the current display state.
+func unavailable() error {
+	st, err := current.State()
+	switch {
+	case err == nil && st.Locked:
+		return fmt.Errorf("%w: the office computer is locked; unlock it, or turn off automatic locking on a dedicated office Mac", ErrScreenUnavailable)
+	case err == nil && st.Asleep:
+		return fmt.Errorf("%w: the office computer's display is asleep", ErrScreenUnavailable)
+	}
+	return fmt.Errorf("%w: no display to capture", ErrScreenUnavailable)
+}
 
 // CurrentPermissions reports the OS grants of this process (inherited by `mobd mcp`).
 func CurrentPermissions() (Permissions, error) { return current.Permissions() }
@@ -72,20 +94,16 @@ type Permissions struct {
 
 // Screenshot captures the main display and describes its geometry.
 func Screenshot(ctx context.Context) ([]byte, ScreenMeta, error) {
-	data, err := Capture(ctx)
+	img, err := current.Snapshot(ctx, SnapshotOptions{Format: "png"})
 	if err != nil {
 		return nil, ScreenMeta{}, err
 	}
-	cfg, err := png.DecodeConfig(bytes.NewReader(data))
-	if err != nil {
-		return nil, ScreenMeta{}, fmt.Errorf("decode capture: %w", err)
-	}
 	scale := mainScale()
-	return data, ScreenMeta{
+	return img.Data, ScreenMeta{
 		Format: "png", ScaleFactor: scale,
-		PixelWidth: cfg.Width, PixelHeight: cfg.Height,
-		PointWidth:      int(math.Round(float64(cfg.Width) / scale)),
-		PointHeight:     int(math.Round(float64(cfg.Height) / scale)),
+		PixelWidth: img.Width, PixelHeight: img.Height,
+		PointWidth:      int(math.Round(float64(img.Width) / scale)),
+		PointHeight:     int(math.Round(float64(img.Height) / scale)),
 		CoordinateSpace: "points",
 		Hint:            "Pass click(x,y) in points (logical pixels), not raw Retina pixels.",
 	}, nil

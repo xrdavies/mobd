@@ -12,8 +12,14 @@ func TestUnsupportedBackend(t *testing.T) {
 	current = unsupported{name: "test"}
 	t.Cleanup(func() { current = saved })
 	ctx := context.Background()
-	if _, err := Capture(ctx); !errors.Is(err, ErrUnsupported) {
-		t.Fatalf("capture: %v", err)
+	if _, err := Snapshot(ctx, SnapshotOptions{Format: "jpeg"}); !errors.Is(err, ErrUnsupported) {
+		t.Fatalf("snapshot: %v", err)
+	}
+	if _, err := Snapshot(ctx, SnapshotOptions{Format: "gif"}); err == nil || errors.Is(err, ErrUnsupported) {
+		t.Fatalf("format check must come first: %v", err)
+	}
+	if _, err := State(); !errors.Is(err, ErrUnsupported) {
+		t.Fatalf("state: %v", err)
 	}
 	if _, _, err := Screenshot(ctx); !errors.Is(err, ErrUnsupported) {
 		t.Fatalf("screenshot: %v", err)

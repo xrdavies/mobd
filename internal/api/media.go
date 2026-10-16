@@ -2,6 +2,8 @@ package api
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"io"
 	"net/http"
@@ -22,8 +24,8 @@ const maxUpload = 20 << 20
 
 var validModel = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$`)
 
-// capture is swapped in tests; it returns a PNG of the office desktop.
-var capture = desktop.Capture
+// snapshot is swapped in tests.
+var snapshot = desktop.Snapshot
 
 func (s *Server) handleScreen(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
@@ -51,24 +53,28 @@ func (s *Server) handleScreen(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
-	png, err := capture(ctx)
+	img, err := snapshot(ctx, desktop.SnapshotOptions{MaxWidth: maxWidth, Format: format, Quality: quality})
 	if errors.Is(err, desktop.ErrUnsupported) {
 		writeErr(w, http.StatusNotImplemented, err.Error())
 		return
 	}
 	if err != nil {
+		// Includes ErrScreenUnavailable: its message says the computer is locked or asleep.
 		writeErr(w, http.StatusServiceUnavailable, err.Error())
 		return
 	}
-	out, mime, err := desktop.Encode(png, format, maxWidth, quality)
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err.Error())
+	// Clients polling an unchanged screen send If-None-Match and skip the download.
+	sum := sha256.Sum256(img.Data)
+	etag := `"` + hex.EncodeToString(sum[:12]) + `"`
+	w.Header().Set("ETag", etag)
+	w.Header().Set("Cache-Control", "no-store")
+	if r.Header.Get("If-None-Match") == etag {
+		w.WriteHeader(http.StatusNotModified)
 		return
 	}
-	w.Header().Set("Content-Type", mime)
-	w.Header().Set("Cache-Control", "no-store")
-	w.Header().Set("Content-Length", strconv.Itoa(len(out)))
-	_, _ = w.Write(out)
+	w.Header().Set("Content-Type", img.MIME)
+	w.Header().Set("Content-Length", strconv.Itoa(len(img.Data)))
+	_, _ = w.Write(img.Data)
 }
 
 func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
