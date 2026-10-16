@@ -1,7 +1,7 @@
 # Desktop streaming: design and plan
 
-Status: **draft**, on branch `feat/webrtc-stream`. The protocol below is fixed only after the
-validation spike (M0) passes.
+Status: **accepted**, on branch `feat/webrtc-stream`. The validation spike (M0) passed; see
+[Spike results](#spike-results).
 
 ## Context
 
@@ -48,7 +48,7 @@ next to the user session to reach the login screen (later).
 
 Goals
 - Picture size follows the client: viewport × pixel density, capped at 1920×1080 by default.
-- Idle desktop ≈ 0 bandwidth; typical office work 0.5–3 Mbps at 1080p (to be measured in M0).
+- Idle desktop ≈ 0 bandwidth; typical office work well under 1 Mbps at 1080p (M0: 13–165 kbps).
 - Quality adapts automatically; the user can choose Auto / High / Low per machine.
 - One pairing and credential for everything (see [pairing](pairing.md)).
 - Agent screenshots and actions use the same desktop layer as the live view.
@@ -56,7 +56,7 @@ Goals
 
 Non-goals for this release
 - Ubuntu and Windows backends (Linux is a compiled placeholder; plan below).
-- The macOS login window (needs a privileged helper; later). Locked-screen behaviour is measured in M2.
+- The macOS login window and the lock screen (need a privileged helper; later). See "Locked screen".
 - Audio, file transfer, multi-monitor selection (main display only), clipboard sync.
 
 ## Architecture
@@ -217,6 +217,20 @@ unchanged images.
 - Input is accepted only from the session's data channels; the agent's actions keep their own path.
 - Host-only ICE by default; no third-party STUN.
 
+### Locked screen
+
+ScreenCaptureKit, running as the user, sees **no display** while the console is locked or the
+display sleeps (M0). Screen Sharing (VNC) kept working there because Apple runs it as a system
+service. This release:
+
+- keeps the display awake (power assertion) while a stream session is open, so idle display sleep
+  does not lock the Mac under a watching client;
+- reports `locked` on the stream's `control` channel and in `/health` problems, and clients show
+  "The office Mac is locked" instead of a black picture;
+- recommends turning off auto-lock on a dedicated office Mac (setup guide), and states the trade-off.
+
+A privileged helper that shows and unlocks the lock screen (RustDesk-style) is a later step.
+
 ### Removing VNC
 
 `/vnc` returns `410 {"error": "Update the MOB app to use the live desktop"}`. Removed: the relay,
@@ -252,12 +266,12 @@ All repos use branch `feat/webrtc-stream`; they merge to `main` together at rele
 | --- | --- | --- |
 | M0 | Validation spike above | Report with numbers |
 | M1 | `internal/desktop` interfaces; macOS screenshot and CGEvent input moved onto them, no behaviour change; Linux/Windows placeholders | existing tests |
-| M2 | ScreenCaptureKit capture; `/screen` uses it with `ETag`; check locked screen and Screen Recording re-prompts | snapshot size/time test; office Mac |
-| M3 | VideoToolbox encoder: bitrate, frame rate, size, keyframe; nothing sent while idle | encode benchmark (720p, 1080p) |
-| M4 | `POST /stream` / `DELETE`, Pion video track, session per client, closed on revoke; Go test client | test client receives video |
+| M2 | ScreenCaptureKit capture in one long-lived native component (AppKit context, stream kept alive); `/screen` uses it with `ETag`; locked/sleeping display detection | snapshot size/time test; office Mac |
+| M3 | VideoToolbox encoder adjusted while running (bitrate, byte cap, size ladder, keyframe), never restarted; nothing sent while idle | encode benchmark (540p–1080p) |
+| M4 | `POST /stream` / `DELETE`, Pion video track, session per client, closed on revoke; display kept awake per session; Go test client | test client receives video |
 | M5 | Data channels and input; cursor position and shape | test client clicks; agent actions unchanged |
-| M6 | GCC-driven adaptation, profiles, `stream` health feature | throttled-link runs |
-| M7 | WebSocket fallback with ticket and acks | test client over Funnel |
+| M6 | Rate control (see M0 result 4): start low and ramp, resolution ladder, no leaky-bucket pacer, tuned GCC or own loss/RTT controller; profiles; `stream` health feature | in-process link shaper; real device off the office network |
+| M7 | WebSocket fallback with ticket and acks; keyframe at connect, start at 720p | test client over Funnel; first picture < 2 s |
 | M8 | Remove VNC (`/vnc` → 410), setup checks, config | `go test ./...` |
 | M9 | Docs: this file, pairing, security, remote access, connection setup, README | review |
 | later | `mob-relay` (Pion TURN) and per-session TURN credentials in `POST /stream` | gateway with a phone off Wi-Fi |
@@ -287,11 +301,39 @@ End-to-end on the office Mac (LAN, Tailscale, Funnel, hotspot) with all three ap
 
 ### Checkpoints
 
-- After M0: go/no-go on Pion + Tailscale.
-- After M2: locked screen and permission prompts.
+- After M0: go/no-go on Pion + Tailscale — **go**.
+- After M2: locked-screen detection and permission prompts with a signed build.
 - After M6: measured bitrate and latency.
 - After desktop step 2: WebKit H.264 playback (fallback: WebSocket + WebCodecs only).
 
 ## Spike results
 
-_Pending._
+Run on 2026-10-16 against the office Mac (M4002: Apple Silicon, macOS 26.5, 4K panel at 1920×1080
+points), from a Mac Studio on the same LAN and on the tailnet. Code: branch `spike/webrtc` (not
+merged). Capture and encode: a Swift helper (ScreenCaptureKit + VideoToolbox, constrained baseline,
+low-latency rate control); transport: Pion WebRTC v4.2.23, interceptor v0.1.49.
+
+| # | Question | Result |
+| --- | --- | --- |
+| 1 | Connect over LAN / Tailscale | **Pass.** 10–25 ms to connected, host candidates only. Signaling over the Tailscale address still chose the direct LAN pair (best path, no setting). |
+| 2 | Bandwidth at 1080p | **Pass.** Idle 13–67 kbps (~3 fps on change); scrolling terminal 90–165 kbps at 8–11 fps; text readable. VNC needed tens of Mbps. |
+| 3 | Latency | **Pass** on LAN: ICE and data-channel RTT 1 ms; browser decode 2–7 ms. |
+| 4 | Adaptation (2 Mbps, 1–2% loss, 20 ms, socket-level shaper) | **Fail, to fix in M6.** GCC's estimate fell from ~6 Mbps to 100 kbps and stayed there; video mostly froze. With the default leaky-bucket pacer it did not recover after the impairment ended; with the no-op pacer it recovered within ~5 s. Resolution ladder shrank keyframes from 100–200 KB to ~25 KB. The shaper may exaggerate this; re-measure on a real network. |
+| 5 | Through DERP | Not measured (both ends share a LAN). Moved to M6. |
+| 6 | Desktop webview | **Pass.** WKWebView plays WebRTC H.264 (1080p, ~3 ms decode) and WebSocket + WebCodecs (0 decode errors). |
+| 7 | Office Mac cost | **Pass.** ~2% CPU for capture + encode + Pion. |
+| 8 | Funnel | **Pass** via WebSocket fallback: 1080p, 120–165 kbps, 8–11 fps, 0 errors through Funnel's public relay; first picture took 6–9 s (fix in M7). |
+
+Findings that change the implementation:
+
+- ffmpeg's AVFoundation screen input delivers no frames on macOS 26; ScreenCaptureKit is required.
+- ScreenCaptureKit needs an AppKit (`NSApplication`) context and the `SCStream` must be retained, or
+  capture stops without an error.
+- Capture and encoding live in one long-running component that is adjusted, not restarted:
+  restarting on every bitrate change or keyframe request froze the stream.
+- No display while the console is locked or the display sleeps (see "Locked screen").
+- macOS ties the Screen Recording grant to the exact binary; unsigned rebuilds need re-approval.
+  Release builds are signed with a stable identity; development needs the same or re-approval.
+- dummynet (`dnctl`/`pfctl`) does not shape traffic on macOS 26; impair links in-process for tests.
+
+Decision: **go** with Pion WebRTC + the WebSocket fallback; rate control is a dedicated part of M6.
