@@ -1,4 +1,4 @@
-package actuate
+package desktop
 
 /*
 #cgo LDFLAGS: -framework ApplicationServices -framework CoreGraphics -framework CoreFoundation
@@ -61,6 +61,12 @@ static double mob_scale(void) {
 	return w ? (double)pw / (double)w : 1.0;
 }
 
+static unsigned int mob_main_display(double *w, double *h) {
+	CGDirectDisplayID id = CGMainDisplayID();
+	CGRect r = CGDisplayBounds(id);
+	*w = r.size.width; *h = r.size.height;
+	return id;
+}
 static unsigned long long mob_flag_command(void) { return kCGEventFlagMaskCommand; }
 static unsigned long long mob_flag_shift(void) { return kCGEventFlagMaskShift; }
 static unsigned long long mob_flag_option(void) { return kCGEventFlagMaskAlternate; }
@@ -115,6 +121,8 @@ import "C"
 
 import (
 	"errors"
+	"fmt"
+	"math"
 	"unsafe"
 )
 
@@ -123,15 +131,13 @@ func mobPostAccess() bool { return C.mob_post_access() != 0 }
 // postAccess is swapped in tests to simulate a missing Accessibility grant.
 var postAccess = mobPostAccess
 
-func requireDarwin() error { return nil }
-
-// CurrentPermissions reports the TCC grants of this process (inherited by `mobd mcp`).
-func CurrentPermissions() (Permissions, error) {
+// Permissions reports the TCC grants of this process (inherited by `mobd mcp`).
+func (macOS) Permissions() (Permissions, error) {
 	return Permissions{Accessibility: postAccess(), ScreenRecording: C.mob_screen_access() != 0}, nil
 }
 
-// RequestPermissions asks macOS to show any missing TCC prompts before the API starts.
-func RequestPermissions() {
+// RequestPermissions asks macOS to show any missing TCC prompts.
+func (macOS) RequestPermissions() {
 	if !postAccess() {
 		C.mob_request_post_access()
 	}
@@ -140,7 +146,7 @@ func RequestPermissions() {
 	}
 }
 
-func click(x, y float64, right bool, count int) error {
+func (macOS) Click(x, y float64, right bool, count int) error {
 	if !postAccess() {
 		return ErrNoAccessibility
 	}
@@ -152,7 +158,11 @@ func click(x, y float64, right bool, count int) error {
 	return nil
 }
 
-func pressKey(code int, modifiers []string) error {
+func (macOS) Key(key string, modifiers []string) error {
+	code, ok := keyCodes[key]
+	if !ok {
+		return fmt.Errorf("unknown key: %s", key)
+	}
 	if !postAccess() {
 		return ErrNoAccessibility
 	}
@@ -173,12 +183,18 @@ func pressKey(code int, modifiers []string) error {
 	return nil
 }
 
-func displayScale() float64 {
-	return float64(C.mob_scale())
+// Displays reports the main display only; streaming and agent actions use it.
+func (macOS) Displays() ([]Display, error) {
+	var w, h C.double
+	id := C.mob_main_display(&w, &h)
+	return []Display{{
+		ID: fmt.Sprint(uint32(id)), Width: int(math.Round(float64(w))), Height: int(math.Round(float64(h))),
+		Scale: float64(C.mob_scale()), Main: true,
+	}}, nil
 }
 
 // ListWindows returns normal windows with app, title (needs Screen Recording), pid and bounds.
-func ListWindows(onScreenOnly bool) ([]Window, error) {
+func (macOS) ListWindows(onScreenOnly bool) ([]Window, error) {
 	const max = 1024
 	buf := (*C.mob_window)(C.calloc(max, C.size_t(unsafe.Sizeof(C.mob_window{}))))
 	defer C.free(unsafe.Pointer(buf))

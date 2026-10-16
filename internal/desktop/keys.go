@@ -1,4 +1,4 @@
-package actuate
+package desktop
 
 import (
 	"fmt"

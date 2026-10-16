@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/xrdavies/mobd/internal/actuate"
+	"github.com/xrdavies/mobd/internal/desktop"
 	"github.com/xrdavies/mobd/internal/runner"
 )
 
@@ -105,7 +105,7 @@ func permissionChecks() (check, check) {
 }
 
 // currentPermissions is swapped in tests.
-var currentPermissions = actuate.CurrentPermissions
+var currentPermissions = desktop.CurrentPermissions
 
 func binaryCheck(bin string) check {
 	path, err := exec.LookPath(bin)

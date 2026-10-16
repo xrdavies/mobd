@@ -1,5 +1,5 @@
-// Package actuate captures and drives the office Mac desktop.
-package actuate
+// Package desktop captures and drives the office computer's desktop through one backend per OS.
+package desktop
 
 import (
 	"bytes"

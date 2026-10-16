@@ -11,7 +11,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/xrdavies/mobd/internal/actuate"
+	"github.com/xrdavies/mobd/internal/desktop"
 )
 
 const instructions = `MOB office Mac desktop actuation (mob-mcp).
@@ -25,31 +25,32 @@ Human VNC viewers must stay viewOnly — do not use this server for remote human
 
 // Desktop is the actuation surface; tests substitute a fake.
 type Desktop interface {
-	Screenshot(ctx context.Context) ([]byte, actuate.ScreenMeta, error)
+	Screenshot(ctx context.Context) ([]byte, desktop.ScreenMeta, error)
 	Click(x, y float64, button string, count int) error
 	TypeText(ctx context.Context, text string) (string, error)
 	Key(combo string) error
-	ListWindows(onScreenOnly bool) ([]actuate.Window, error)
+	ListWindows(onScreenOnly bool) ([]desktop.Window, error)
 	OpenApp(ctx context.Context, target string) (string, error)
 }
 
-type macDesktop struct{}
+// hostDesktop drives this machine through the desktop package's OS backend.
+type hostDesktop struct{}
 
-func (macDesktop) Screenshot(ctx context.Context) ([]byte, actuate.ScreenMeta, error) {
-	return actuate.Screenshot(ctx)
+func (hostDesktop) Screenshot(ctx context.Context) ([]byte, desktop.ScreenMeta, error) {
+	return desktop.Screenshot(ctx)
 }
-func (macDesktop) Click(x, y float64, button string, count int) error {
-	return actuate.Click(x, y, button, count)
+func (hostDesktop) Click(x, y float64, button string, count int) error {
+	return desktop.Click(x, y, button, count)
 }
-func (macDesktop) TypeText(ctx context.Context, text string) (string, error) {
-	return actuate.TypeText(ctx, text)
+func (hostDesktop) TypeText(ctx context.Context, text string) (string, error) {
+	return desktop.TypeText(ctx, text)
 }
-func (macDesktop) Key(combo string) error { return actuate.Key(combo) }
-func (macDesktop) ListWindows(onScreenOnly bool) ([]actuate.Window, error) {
-	return actuate.ListWindows(onScreenOnly)
+func (hostDesktop) Key(combo string) error { return desktop.Key(combo) }
+func (hostDesktop) ListWindows(onScreenOnly bool) ([]desktop.Window, error) {
+	return desktop.ListWindows(onScreenOnly)
 }
-func (macDesktop) OpenApp(ctx context.Context, target string) (string, error) {
-	return actuate.OpenApp(ctx, target)
+func (hostDesktop) OpenApp(ctx context.Context, target string) (string, error) {
+	return desktop.OpenApp(ctx, target)
 }
 
 type clickArgs struct {
@@ -162,7 +163,7 @@ func New(d Desktop, version string, asker Asker) *mcp.Server {
 // Run serves the macOS desktop over stdio until the client disconnects.
 // Nothing else may write to stdout: it is the MCP transport.
 func Run(ctx context.Context, version string) error {
-	if err := New(macDesktop{}, version, askerFromEnv()).Run(ctx, &mcp.StdioTransport{}); err != nil && ctx.Err() == nil {
+	if err := New(hostDesktop{}, version, askerFromEnv()).Run(ctx, &mcp.StdioTransport{}); err != nil && ctx.Err() == nil {
 		fmt.Fprintln(os.Stderr, "mob-mcp:", err)
 		return err
 	}

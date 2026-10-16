@@ -12,8 +12,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/xrdavies/mobd/internal/actuate"
 	"github.com/xrdavies/mobd/internal/artifact"
+	"github.com/xrdavies/mobd/internal/desktop"
 	"github.com/xrdavies/mobd/internal/runner"
 	"github.com/xrdavies/mobd/internal/task"
 )
@@ -23,7 +23,7 @@ const maxUpload = 20 << 20
 var validModel = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$`)
 
 // capture is swapped in tests; it returns a PNG of the office desktop.
-var capture = actuate.Capture
+var capture = desktop.Capture
 
 func (s *Server) handleScreen(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
@@ -52,7 +52,7 @@ func (s *Server) handleScreen(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
 	png, err := capture(ctx)
-	if errors.Is(err, actuate.ErrUnsupported) {
+	if errors.Is(err, desktop.ErrUnsupported) {
 		writeErr(w, http.StatusNotImplemented, err.Error())
 		return
 	}
@@ -60,7 +60,7 @@ func (s *Server) handleScreen(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusServiceUnavailable, err.Error())
 		return
 	}
-	out, mime, err := actuate.Encode(png, format, maxWidth, quality)
+	out, mime, err := desktop.Encode(png, format, maxWidth, quality)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return

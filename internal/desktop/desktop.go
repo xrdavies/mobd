@@ -1,4 +1,4 @@
-package actuate
+package desktop
 
 import (
 	"bytes"
@@ -7,10 +7,30 @@ import (
 	"fmt"
 	"image/png"
 	"math"
-	"os/exec"
 	"slices"
 	"strings"
 )
+
+// Capture returns a PNG of the main display.
+func Capture(ctx context.Context) ([]byte, error) { return current.Capture(ctx) }
+
+// CurrentPermissions reports the OS grants of this process (inherited by `mobd mcp`).
+func CurrentPermissions() (Permissions, error) { return current.Permissions() }
+
+// RequestPermissions asks the OS to show any missing prompts before the API starts.
+func RequestPermissions() { current.RequestPermissions() }
+
+// ListWindows returns normal windows with app, title, pid and bounds.
+func ListWindows(onScreenOnly bool) ([]Window, error) { return current.ListWindows(onScreenOnly) }
+
+// mainScale is the main display's pixels per point, or 1 when unknown.
+func mainScale() float64 {
+	displays, err := current.Displays()
+	if err != nil || len(displays) == 0 || displays[0].Scale <= 0 {
+		return 1
+	}
+	return displays[0].Scale
+}
 
 // ErrNoAccessibility reports that macOS would silently drop synthetic input.
 var ErrNoAccessibility = errors.New("macOS Accessibility permission is not enabled for the process running mobd; " +
@@ -60,7 +80,7 @@ func Screenshot(ctx context.Context) ([]byte, ScreenMeta, error) {
 	if err != nil {
 		return nil, ScreenMeta{}, fmt.Errorf("decode capture: %w", err)
 	}
-	scale := displayScale()
+	scale := mainScale()
 	return data, ScreenMeta{
 		Format: "png", ScaleFactor: scale,
 		PixelWidth: cfg.Width, PixelHeight: cfg.Height,
@@ -79,7 +99,7 @@ func Click(x, y float64, button string, count int) error {
 	if count < 1 {
 		return fmt.Errorf("count must be >= 1")
 	}
-	return click(x, y, button == "right", count)
+	return current.Click(x, y, button == "right", count)
 }
 
 // Key presses a key or chord such as "return" or "cmd+shift+t".
@@ -88,28 +108,15 @@ func Key(combo string) error {
 	if err != nil {
 		return err
 	}
-	code, ok := keyCodes[key]
-	if !ok {
-		return fmt.Errorf("unknown key: %s", key)
-	}
-	return pressKey(code, modifiers)
+	return current.Key(key, modifiers)
 }
 
-// TypeText pastes Unicode text into the focused element via the pasteboard.
+// TypeText pastes Unicode text into the focused element.
 func TypeText(ctx context.Context, text string) (string, error) {
 	if text == "" {
 		return "typed empty string (no-op)", nil
 	}
-	if err := requireDarwin(); err != nil {
-		return "", err
-	}
-	cmd := exec.CommandContext(ctx, "pbcopy")
-	cmd.Env = append(cmd.Environ(), "LANG=en_US.UTF-8", "LC_ALL=en_US.UTF-8")
-	cmd.Stdin = strings.NewReader(text)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return "", fmt.Errorf("pbcopy failed: %v %s", err, strings.TrimSpace(string(out)))
-	}
-	if err := Key("cmd+v"); err != nil {
+	if err := current.Paste(ctx, text); err != nil {
 		return "", err
 	}
 	return fmt.Sprintf("typed %d characters via pasteboard", len([]rune(text))), nil
@@ -121,22 +128,7 @@ func OpenApp(ctx context.Context, target string) (string, error) {
 	if target == "" {
 		return "", fmt.Errorf("name_or_bundle_id must be non-empty")
 	}
-	if err := requireDarwin(); err != nil {
-		return "", err
-	}
-	attempts := [][]string{{"open", "-a", target}, {"open", "-b", target}}
-	if looksLikeBundleID(target) {
-		attempts[0], attempts[1] = attempts[1], attempts[0]
-	}
-	var failures []string
-	for _, args := range attempts {
-		out, err := exec.CommandContext(ctx, args[0], args[1:]...).CombinedOutput()
-		if err == nil {
-			return fmt.Sprintf("opened %q via %s", target, strings.Join(args, " ")), nil
-		}
-		failures = append(failures, strings.TrimSpace(string(out))+" "+err.Error())
-	}
-	return "", fmt.Errorf("open_app failed for %q: %s", target, strings.Join(failures, "; "))
+	return current.OpenApp(ctx, target)
 }
 
 func looksLikeBundleID(v string) bool {

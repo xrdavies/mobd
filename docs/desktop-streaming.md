@@ -75,7 +75,10 @@ flowchart LR
 
 ### Desktop layer (`internal/desktop`)
 
-Grows out of `internal/actuate`. Interfaces (draft):
+M1 moved `internal/actuate` here. `Backend` (`backend.go`) holds today's operations: displays,
+permissions, PNG capture, click, key, paste, windows and app launching; `macOS` implements them and
+other systems get a placeholder that returns `ErrUnsupported`. The streaming interfaces below are
+added with the steps that implement them (capture M2, encoder M3, pointer/scroll/cursor M5) (draft):
 
 ```go
 type Display struct { ID string; Width, Height int; Scale float64; Main bool }
@@ -265,7 +268,7 @@ All repos use branch `feat/webrtc-stream`; they merge to `main` together at rele
 | Step | Content | Verified by |
 | --- | --- | --- |
 | M0 | Validation spike above | Report with numbers |
-| M1 | `internal/desktop` interfaces; macOS screenshot and CGEvent input moved onto them, no behaviour change; Linux/Windows placeholders | existing tests |
+| M1 | **Done.** `internal/desktop` with a `Backend` per OS; macOS screenshot and CGEvent input moved onto it, no behaviour change; Linux/other placeholders | existing tests; Linux build |
 | M2 | ScreenCaptureKit capture in one long-lived native component (AppKit context, stream kept alive); `/screen` uses it with `ETag`; locked/sleeping display detection | snapshot size/time test; office Mac |
 | M3 | VideoToolbox encoder adjusted while running (bitrate, byte cap, size ladder, keyframe), never restarted; nothing sent while idle | encode benchmark (540p–1080p) |
 | M4 | `POST /stream` / `DELETE`, Pion video track, session per client, closed on revoke; display kept awake per session; Go test client | test client receives video |

@@ -15,10 +15,10 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/xrdavies/mobd/internal/actuate"
 	"github.com/xrdavies/mobd/internal/api"
 	"github.com/xrdavies/mobd/internal/config"
 	"github.com/xrdavies/mobd/internal/control"
+	"github.com/xrdavies/mobd/internal/desktop"
 	"github.com/xrdavies/mobd/internal/mcpserver"
 	"github.com/xrdavies/mobd/internal/pairing"
 	"github.com/xrdavies/mobd/internal/runner"
@@ -183,7 +183,7 @@ func run(args []string) error {
 
 func serve(cfg config.Config) error {
 	// Ask for missing macOS TCC grants before starting the remote API.
-	actuate.RequestPermissions()
+	desktop.RequestPermissions()
 
 	// Bind before opening state so a duplicate server cannot modify the snapshot.
 	listener, err := net.Listen("tcp", cfg.ListenAddr)

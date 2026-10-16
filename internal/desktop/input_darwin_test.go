@@ -1,4 +1,4 @@
-package actuate
+package desktop
 
 import (
 	"errors"
@@ -20,5 +20,15 @@ func TestInputFailsBeforePostingWithoutAccessibility(t *testing.T) {
 	}
 	if err := Key("cmd+nosuchkey"); err == nil {
 		t.Fatal("unknown key accepted")
+	}
+}
+
+func TestMacOSReportsMainDisplay(t *testing.T) {
+	if Current().Name() != "macos" {
+		t.Fatalf("backend %q", Current().Name())
+	}
+	displays, err := Current().Displays()
+	if err != nil || len(displays) != 1 || !displays[0].Main || displays[0].Width <= 0 || displays[0].Height <= 0 || displays[0].Scale < 1 {
+		t.Fatalf("displays %+v err %v", displays, err)
 	}
 }

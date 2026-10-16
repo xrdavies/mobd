@@ -6,7 +6,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
-	"github.com/xrdavies/mobd/internal/actuate"
+	"github.com/xrdavies/mobd/internal/desktop"
 	"image"
 	"image/jpeg"
 	"image/png"
@@ -823,7 +823,7 @@ func TestScreen(t *testing.T) {
 	s := testServer(t, "")
 	frame := pngBytes(t)
 	capture = func(context.Context) ([]byte, error) { return frame, nil }
-	t.Cleanup(func() { capture = actuate.Capture })
+	t.Cleanup(func() { capture = desktop.Capture })
 
 	rr := doJSON(t, s, http.MethodGet, "/screen?maxWidth=32", "")
 	if rr.Code != http.StatusOK || rr.Header().Get("Content-Type") != "image/jpeg" {
@@ -839,7 +839,7 @@ func TestScreen(t *testing.T) {
 	if rr := doJSON(t, s, http.MethodGet, "/screen?format=gif", ""); rr.Code != http.StatusBadRequest {
 		t.Fatalf("bad format: %d", rr.Code)
 	}
-	capture = func(context.Context) ([]byte, error) { return nil, actuate.ErrUnsupported }
+	capture = func(context.Context) ([]byte, error) { return nil, desktop.ErrUnsupported }
 	if rr := doJSON(t, s, http.MethodGet, "/screen", ""); rr.Code != http.StatusNotImplemented {
 		t.Fatalf("unsupported: %d", rr.Code)
 	}
@@ -854,9 +854,9 @@ func TestHealthReadiness(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer ln.Close()
-	perms := actuate.Permissions{Accessibility: true}
-	currentPermissions = func() (actuate.Permissions, error) { return perms, nil }
-	t.Cleanup(func() { currentPermissions = actuate.CurrentPermissions })
+	perms := desktop.Permissions{Accessibility: true}
+	currentPermissions = func() (desktop.Permissions, error) { return perms, nil }
+	t.Cleanup(func() { currentPermissions = desktop.CurrentPermissions })
 	cfg := config.Config{CodexBin: bin, MobMCPCommand: "mob-mcp-missing", VNCAddr: ln.Addr().String(),
 		CodexModels: []string{"gpt-5.5"}, DataDir: dir}
 	s := newTestServer(t, cfg, task.NewStore(), codex.New(cfg))

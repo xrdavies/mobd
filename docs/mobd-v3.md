@@ -220,7 +220,7 @@ cmd/mobd            CLI: init, serve, start, stop, restart, status, logs, mcp, -
 internal/api        HTTP handlers, SSE, global event hub
 internal/task       Store (snapshot persistence), queue ordering, activities
 internal/runner     Registry, Codex app-server/exec and Claude adapters, shared CLI lifecycle
-internal/actuate    Desktop capture and cgo input on macOS; stubs elsewhere
+internal/desktop    Desktop capture and input, one backend per OS (macOS; placeholders elsewhere)
 internal/mcpserver  mobd mcp: desktop tools, questions and approvals over stdio
 internal/artifact   Content-addressed file store for screenshots and uploads
 internal/config     JSON config, environment overrides and CLI flags

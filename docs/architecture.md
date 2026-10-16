@@ -50,9 +50,9 @@ How the agent opens apps and operates the GUI on the office Mac.
 
 The `mob-mcp` tool set is built into the `mobd` binary and served by `mobd mcp`
 over stdio. The agent launches it as a separate process for each task.
-`internal/actuate` implements macOS capture and input; mobd also uses it directly
-for `/screen` and `/health` permission checks. Non-macOS builds use stubs for
-desktop operations.
+`internal/desktop` captures and drives the desktop through one backend per OS
+(macOS today; Linux and others return "unsupported"); mobd also uses it directly
+for `/screen` and `/health` permission checks. See [desktop streaming](desktop-streaming.md).
 
 The desktop tools are `screenshot`, `click`, `type_text`, `key`, `list_windows`
 and `open_app`. Screenshots return PNG data and display metadata, including

@@ -10,7 +10,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/xrdavies/mobd/internal/actuate"
+	"github.com/xrdavies/mobd/internal/desktop"
 )
 
 type fakeDesktop struct {
@@ -19,8 +19,8 @@ type fakeDesktop struct {
 	keyErr   error
 }
 
-func (f *fakeDesktop) Screenshot(context.Context) ([]byte, actuate.ScreenMeta, error) {
-	return []byte("png"), actuate.ScreenMeta{Format: "png", ScaleFactor: 2, CoordinateSpace: "points"}, nil
+func (f *fakeDesktop) Screenshot(context.Context) ([]byte, desktop.ScreenMeta, error) {
+	return []byte("png"), desktop.ScreenMeta{Format: "png", ScaleFactor: 2, CoordinateSpace: "points"}, nil
 }
 func (f *fakeDesktop) Click(x, y float64, button string, count int) error {
 	f.clicks = append(f.clicks, clickArgs{X: x, Y: y, Button: button, Count: count})
@@ -30,9 +30,9 @@ func (f *fakeDesktop) TypeText(_ context.Context, s string) (string, error) {
 	return "typed " + s, nil
 }
 func (f *fakeDesktop) Key(string) error { return f.keyErr }
-func (f *fakeDesktop) ListWindows(onScreen bool) ([]actuate.Window, error) {
+func (f *fakeDesktop) ListWindows(onScreen bool) ([]desktop.Window, error) {
 	f.onScreen = &onScreen
-	return []actuate.Window{{ID: 1, App: "Safari", Title: "Start", PID: 9}}, nil
+	return []desktop.Window{{ID: 1, App: "Safari", Title: "Start", PID: 9}}, nil
 }
 func (f *fakeDesktop) OpenApp(_ context.Context, target string) (string, error) {
 	return "opened " + target, nil
@@ -98,7 +98,7 @@ func TestDefaultsAndErrors(t *testing.T) {
 		t.Fatalf("click defaults %+v", d.clicks)
 	}
 	res := call(t, cs, "list_windows", nil)
-	var windows []actuate.Window
+	var windows []desktop.Window
 	if err := json.Unmarshal([]byte(res.Content[0].(*mcp.TextContent).Text), &windows); err != nil || !*d.onScreen || windows[0].App != "Safari" {
 		t.Fatalf("list_windows %+v onScreen=%v", res.Content, d.onScreen)
 	}
