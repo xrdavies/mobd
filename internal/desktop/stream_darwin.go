@@ -89,6 +89,12 @@ func (s *macStream) SetSize(width, height int) {
 	}
 }
 
+func (s *macStream) SetFrameRate(fps int) {
+	if s.live() {
+		C.mob_stream_fps(s.native, C.int(min(max(fps, 1), 60)))
+	}
+}
+
 func (s *macStream) Keyframe() {
 	if s.live() {
 		C.mob_stream_keyframe(s.native)

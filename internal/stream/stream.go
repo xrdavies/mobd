@@ -11,6 +11,8 @@ import (
 	"fmt"
 	"log"
 	"math"
+	"net"
+	"os"
 	"sync"
 	"time"
 
@@ -21,6 +23,9 @@ import (
 
 	"github.com/xrdavies/mobd/internal/desktop"
 )
+
+// rateTrace logs every rate-control decision (MOBD_RATE_TRACE=1), for tuning on real links.
+var rateTrace = os.Getenv("MOBD_RATE_TRACE") != ""
 
 // ErrBadRequest marks requests the client must fix (HTTP 400).
 var ErrBadRequest = errors.New("invalid stream request")
@@ -46,13 +51,14 @@ type Answer struct {
 	Display desktop.Display `json:"display"`
 }
 
-// profile bounds a quality setting. Auto follows High until adaptation lands (M6).
-type profile struct{ width, height, fps, kbps int }
+// profile bounds a quality setting: the largest size and frame rate, the bitrate ceiling and where
+// rate control starts. All three adapt to the link; they differ in limits and starting point.
+type profile struct{ width, height, fps, kbps, startKbps int }
 
 var profiles = map[string]profile{
-	"high": {1920, 1080, 30, 4000},
-	"auto": {1920, 1080, 30, 4000},
-	"low":  {1280, 720, 15, 1000},
+	"high": {1920, 1080, 30, 6000, 3000},
+	"auto": {1920, 1080, 30, 6000, 1200},
+	"low":  {1280, 720, 15, 1000, 600},
 }
 
 // Config connects the manager to the desktop and to pairing; tests substitute fakes.
@@ -66,6 +72,8 @@ type Config struct {
 	NewInput func() Input
 	// Loopback adds 127.0.0.1 candidates; only for tests on one machine.
 	Loopback bool
+	// UDP, when set, carries every session's media (tests use it to impair the link).
+	UDP net.PacketConn
 }
 
 // Manager owns the live sessions, at most one per client.
@@ -85,12 +93,17 @@ func NewManager(cfg Config) (*Manager, error) {
 		return nil, err
 	}
 	reg := &interceptor.Registry{}
+	// Before the defaults, so it sits inside the NACK responder and sees its resends (rtx.go).
+	reg.Add(rtxFactory{})
 	if err := webrtc.RegisterDefaultInterceptors(m, reg); err != nil {
 		return nil, err
 	}
 	se := webrtc.SettingEngine{}
 	se.SetNetworkTypes([]webrtc.NetworkType{webrtc.NetworkTypeUDP4, webrtc.NetworkTypeUDP6})
 	se.SetIncludeLoopbackCandidate(cfg.Loopback)
+	if cfg.UDP != nil {
+		se.SetICEUDPMux(webrtc.NewICEUDPMux(nil, cfg.UDP))
+	}
 	base, cancel := context.WithCancel(context.Background())
 	return &Manager{
 		cfg: cfg, base: base, cancel: cancel, byClient: make(map[string]*session),
@@ -142,7 +155,10 @@ func (m *Manager) Open(clientID string, req Request) (Answer, error) {
 	}
 	s := &session{m: m, id: randomID(), client: clientID, finish: finish}
 	s.ctx, s.cancel = context.WithCancel(ctx)
-	answer, err := s.start(req.Offer, desktop.StreamOptions{Width: w, Height: h, FPS: p.fps, Kbps: p.kbps})
+	s.rate = newRateController(p, w, h, time.Now())
+	t := s.rate.current()
+	s.applied = t
+	answer, err := s.start(req.Offer, desktop.StreamOptions{Width: t.width, Height: t.height, FPS: t.fps, Kbps: t.kbps})
 	if err != nil {
 		s.close()
 		return Answer{}, err
@@ -150,8 +166,8 @@ func (m *Manager) Open(clientID string, req Request) (Answer, error) {
 	m.mu.Lock()
 	m.byClient[clientID] = s
 	m.mu.Unlock()
-	log.Printf("stream %s opened for client %.8s at %dx%d (%s)", s.id, clientID, w, h, req.Quality)
-	return Answer{Session: s.id, Answer: answer, Width: w, Height: h, Display: disp}, nil
+	log.Printf("stream %s opened for client %.8s at %dx%d %d kbps (%s, up to %dx%d)", s.id, clientID, t.width, t.height, t.kbps, req.Quality, w, h)
+	return Answer{Session: s.id, Answer: answer, Width: t.width, Height: t.height, Display: disp}, nil
 }
 
 // Close ends the client's session with this id; it reports whether there was one.
@@ -198,6 +214,12 @@ type session struct {
 	release        func()
 	once           sync.Once
 	ctl            *controller
+	rate           *rateController
+	applied        target
+	lossMu         sync.Mutex
+	lossSum        float64 // receiver-reported fraction lost since the last rate tick
+	lossReports    int
+	pairRTT        func() time.Duration
 	connected      chan struct{}
 	connectedOnce  sync.Once
 	lastKeyRequest time.Time
@@ -272,7 +294,16 @@ func (s *session) start(offer string, opts desktop.StreamOptions) (string, error
 	case <-time.After(5 * time.Second):
 	}
 
+	s.pairRTT = func() time.Duration {
+		for _, st := range pc.GetStats() {
+			if p, ok := st.(webrtc.ICECandidatePairStats); ok && p.Nominated && p.CurrentRoundTripTime > 0 {
+				return time.Duration(p.CurrentRoundTripTime * float64(time.Second))
+			}
+		}
+		return 0
+	}
 	go s.readRTCP(sender)
+	go s.adapt()
 	go s.forward(track, opts.FPS)
 	go s.watch()
 	return pc.LocalDescription().SDP, nil
@@ -293,6 +324,11 @@ func (s *session) forward(track *webrtc.TrackLocalStaticSample, fps int) {
 	}
 	if err := s.src.Err(); err != nil {
 		log.Printf("stream %s: %v", s.id, err)
+		// Tell the viewer why (for example a locked screen) before the connection closes.
+		if s.ctl != nil {
+			s.ctl.send(map[string]string{"t": "ended", "message": err.Error()})
+			time.Sleep(200 * time.Millisecond)
+		}
 	}
 	s.close()
 }
@@ -305,7 +341,14 @@ func (s *session) readRTCP(sender *webrtc.RTPSender) {
 			return
 		}
 		for _, p := range pkts {
-			switch p.(type) {
+			switch p := p.(type) {
+			case *rtcp.ReceiverReport:
+				s.lossMu.Lock()
+				for _, r := range p.Reports {
+					s.lossSum += float64(r.FractionLost) / 256
+					s.lossReports++
+				}
+				s.lossMu.Unlock()
 			case *rtcp.PictureLossIndication, *rtcp.FullIntraRequest:
 				s.keyMu.Lock()
 				if time.Since(s.lastKeyRequest) >= 500*time.Millisecond {
@@ -313,6 +356,50 @@ func (s *session) readRTCP(sender *webrtc.RTPSender) {
 					s.src.Keyframe()
 				}
 				s.keyMu.Unlock()
+			}
+		}
+	}
+}
+
+// adapt runs rate control once a second and applies changes to the running encoder.
+func (s *session) adapt() {
+	tick := time.NewTicker(time.Second)
+	defer tick.Stop()
+	for {
+		select {
+		case <-s.ctx.Done():
+			return
+		case now := <-tick.C:
+			s.lossMu.Lock()
+			loss := 0.0
+			if s.lossReports > 0 {
+				loss = s.lossSum / float64(s.lossReports)
+			}
+			s.lossSum, s.lossReports = 0, 0
+			s.lossMu.Unlock()
+			f := feedback{loss: loss, rtt: s.pairRTT(), now: now}
+			t := s.rate.update(f)
+			if rateTrace {
+				log.Printf("stream %s rate: loss %.3f rtt %s base %s -> %d kbps %dx%d %d fps", s.id, f.loss, f.rtt.Round(time.Millisecond),
+					s.rate.baseRTT.Round(time.Millisecond), t.kbps, t.width, t.height, t.fps)
+			}
+			old := s.applied
+			if t.width != old.width || t.height != old.height {
+				s.src.SetSize(t.width, t.height)
+				log.Printf("stream %s: %dx%d at %d kbps (loss %.1f%%, rtt %s)", s.id, t.width, t.height, t.kbps, f.loss*100, f.rtt.Round(time.Millisecond))
+			}
+			if t.fps != old.fps {
+				s.src.SetFrameRate(t.fps)
+			}
+			if math.Abs(float64(t.kbps-old.kbps)) >= float64(old.kbps)/20 {
+				s.src.SetBitrate(t.kbps)
+			} else {
+				t.kbps = old.kbps
+			}
+			s.applied = t
+			if s.ctl != nil {
+				s.ctl.send(map[string]any{"t": "stats", "kbps": t.kbps, "width": t.width, "height": t.height, "fps": t.fps,
+					"loss": math.Round(f.loss*1000) / 1000, "rttMs": f.rtt.Milliseconds()})
 			}
 		}
 	}

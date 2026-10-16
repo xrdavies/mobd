@@ -1,6 +1,7 @@
 package stream
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"sync"
@@ -8,37 +9,50 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pion/interceptor"
 	"github.com/pion/rtcp"
 	"github.com/pion/webrtc/v4"
 
 	"github.com/xrdavies/mobd/internal/desktop"
 )
 
-// fakeStream emits a small access unit every 20 ms; keyframes on request.
+// fakeStream emits access units sized like an encoder at its target bitrate: one per frame,
+// keyframes five times larger. Content does not matter to the packetizer.
 type fakeStream struct {
 	opts      desktop.StreamOptions
 	units     chan desktop.AccessUnit
 	keyframes atomic.Int32
+	kbps      atomic.Int32
+	fps       atomic.Int32
+	key       atomic.Bool
 	closeOnce sync.Once
 	closed    chan struct{}
+	mu        sync.Mutex
+	sizes     [][2]int
 }
 
 func newFake(opts desktop.StreamOptions) *fakeStream {
 	f := &fakeStream{opts: opts, units: make(chan desktop.AccessUnit, 4), closed: make(chan struct{})}
+	f.kbps.Store(int32(opts.Kbps))
+	f.fps.Store(int32(opts.FPS))
 	go func() {
 		defer close(f.units)
 		pts := time.Duration(0)
 		for {
+			frame := time.Second / time.Duration(f.fps.Load())
 			select {
 			case <-f.closed:
 				return
-			case <-time.After(20 * time.Millisecond):
+			case <-time.After(frame):
 			}
-			pts += 20 * time.Millisecond
-			// AUD + a non-IDR slice; the payload content does not matter to the packetizer.
-			au := desktop.AccessUnit{Data: []byte{0, 0, 0, 1, 9, 0xf0, 0, 0, 0, 1, 0x41, 0x9a, 1, 2, 3}, PTS: pts}
+			pts += frame
+			n := int(f.kbps.Load()) * 1000 / 8 / int(f.fps.Load())
+			if f.key.Swap(false) {
+				n *= 5
+			}
+			data := append([]byte{0, 0, 0, 1, 9, 0xf0, 0, 0, 0, 1, 0x41}, bytes.Repeat([]byte{0xaa}, max(n, 4))...)
 			select {
-			case f.units <- au:
+			case f.units <- desktop.AccessUnit{Data: data, PTS: pts}:
 			case <-f.closed:
 				return
 			}
@@ -48,11 +62,17 @@ func newFake(opts desktop.StreamOptions) *fakeStream {
 }
 
 func (f *fakeStream) Units() <-chan desktop.AccessUnit { return f.units }
-func (f *fakeStream) SetBitrate(int)                   {}
-func (f *fakeStream) SetSize(int, int)                 {}
-func (f *fakeStream) Keyframe()                        { f.keyframes.Add(1) }
-func (f *fakeStream) Err() error                       { return nil }
-func (f *fakeStream) Close()                           { f.closeOnce.Do(func() { close(f.closed) }) }
+func (f *fakeStream) SetBitrate(k int)                 { f.kbps.Store(int32(k)) }
+func (f *fakeStream) SetFrameRate(fps int)             { f.fps.Store(int32(fps)) }
+func (f *fakeStream) SetSize(w, h int) {
+	f.mu.Lock()
+	f.sizes = append(f.sizes, [2]int{w, h})
+	f.mu.Unlock()
+	f.key.Store(true)
+}
+func (f *fakeStream) Keyframe()  { f.keyframes.Add(1); f.key.Store(true) }
+func (f *fakeStream) Err() error { return nil }
+func (f *fakeStream) Close()     { f.closeOnce.Do(func() { close(f.closed) }) }
 
 type harness struct {
 	m       *Manager
@@ -63,9 +83,11 @@ type harness struct {
 	input   *fakeInput
 }
 
-func newHarness(t *testing.T) *harness {
+func newHarness(t *testing.T) *harness { return harnessWith(t, nil) }
+
+func harnessWith(t *testing.T, tweak func(*Config)) *harness {
 	h := &harness{cancels: map[string]context.CancelFunc{}}
-	m, err := NewManager(Config{
+	cfg := Config{
 		Loopback: true,
 		Display: func() (desktop.Display, error) {
 			return desktop.Display{Width: 1920, Height: 1080, Scale: 2, Main: true}, nil
@@ -93,7 +115,11 @@ func newHarness(t *testing.T) *harness {
 			h.mu.Unlock()
 			return ctx, cancel, nil
 		},
-	})
+	}
+	if tweak != nil {
+		tweak(&cfg)
+	}
+	m, err := NewManager(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -118,6 +144,7 @@ func (h *harness) last() *fakeStream {
 type viewer struct {
 	pc      *webrtc.PeerConnection
 	packets atomic.Int32
+	bytes   atomic.Int64
 	track   chan *webrtc.TrackRemote
 	recv    *webrtc.RTPReceiver
 }
@@ -138,7 +165,7 @@ func dial(t *testing.T, m *Manager, client string, req Request, count bool) (*vi
 	se := webrtc.SettingEngine{}
 	se.SetIncludeLoopbackCandidate(true)
 	se.SetNetworkTypes([]webrtc.NetworkType{webrtc.NetworkTypeUDP4})
-	pc, err := webrtc.NewAPI(webrtc.WithSettingEngine(se)).NewPeerConnection(webrtc.Configuration{})
+	pc, err := viewerAPI(t, se).NewPeerConnection(webrtc.Configuration{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -155,10 +182,12 @@ func dial(t *testing.T, m *Manager, client string, req Request, count bool) (*vi
 			return
 		}
 		for {
-			if _, _, err := track.ReadRTP(); err != nil {
+			pkt, _, err := track.ReadRTP()
+			if err != nil {
 				return
 			}
 			v.packets.Add(1)
+			v.bytes.Add(int64(len(pkt.Payload)))
 		}
 	})
 	offer, _ := pc.CreateOffer(nil)
@@ -174,6 +203,21 @@ func dial(t *testing.T, m *Manager, client string, req Request, count bool) (*vi
 		t.Fatal(err)
 	}
 	return v, a
+}
+
+// viewerAPI builds a client with Pion's default interceptors, so it sends receiver reports and
+// NACKs like a browser.
+func viewerAPI(t *testing.T, se webrtc.SettingEngine) *webrtc.API {
+	t.Helper()
+	m := &webrtc.MediaEngine{}
+	if err := m.RegisterDefaultCodecs(); err != nil {
+		t.Fatal(err)
+	}
+	reg := &interceptor.Registry{}
+	if err := webrtc.RegisterDefaultInterceptors(m, reg); err != nil {
+		t.Fatal(err)
+	}
+	return webrtc.NewAPI(webrtc.WithMediaEngine(m), webrtc.WithInterceptorRegistry(reg), webrtc.WithSettingEngine(se))
 }
 
 func waitFor(t *testing.T, what string, ok func() bool) {
@@ -206,7 +250,7 @@ func TestFitKeepsAspectWithinViewDisplayAndProfile(t *testing.T) {
 func TestSessionStreamsVideoAndAnswersPictureLoss(t *testing.T) {
 	h := newHarness(t)
 	v, a := connect(t, h.m, "desk", Request{MaxWidth: 1280, MaxHeight: 800, Quality: "high"})
-	if a.Width != 1280 || a.Height != 720 || h.last().opts.Width != 1280 || h.last().opts.FPS != 30 {
+	if a.Width != 1280 || a.Height != 720 || h.last().opts.Width != 1280 || h.last().opts.FPS != 30 || h.last().opts.Kbps != 3000 {
 		t.Fatalf("answer %+v opts %+v", a, h.last().opts)
 	}
 	waitFor(t, "RTP packets", func() bool { return v.packets.Load() > 10 })
@@ -239,7 +283,7 @@ func TestNewSessionReplacesOldAndRevokeEndsIt(t *testing.T) {
 	_, first := connect(t, h.m, "desk", Request{})
 	firstStream := h.last()
 	_, second := connect(t, h.m, "desk", Request{Quality: "low"})
-	if first.Session == second.Session || h.m.Count() != 1 || h.last().opts.Width != 1280 || h.last().opts.FPS != 15 {
+	if first.Session == second.Session || h.m.Count() != 1 || h.last().opts.Width != 960 || h.last().opts.FPS != 15 { // Low starts at 600 kbps: the 540p rung
 		t.Fatalf("replace: %d sessions, opts %+v", h.m.Count(), h.last().opts)
 	}
 	select {

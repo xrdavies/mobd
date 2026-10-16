@@ -93,6 +93,8 @@ type Stream interface {
 	SetBitrate(kbps int)
 	// SetSize changes the encoded size; the next unit is a keyframe at the new size.
 	SetSize(width, height int)
+	// SetFrameRate changes the upper frame rate; fewer frames leave more bits for each.
+	SetFrameRate(fps int)
 	// Keyframe asks for a keyframe now, even when the screen is idle.
 	Keyframe()
 	// Err reports why the stream ended on its own, for example a locked screen.

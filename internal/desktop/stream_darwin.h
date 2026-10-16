@@ -12,6 +12,7 @@ void *mob_stream_start(uintptr_t ident, int width, int height, int fps, int kbps
 void mob_stream_bitrate(void *stream, int kbps);
 void mob_stream_size(void *stream, int width, int height);
 void mob_stream_keyframe(void *stream);
+void mob_stream_fps(void *stream, int fps);
 
 // mob_stream_stop ends capture, flushes the encoder and frees the stream. No frames arrive after it.
 void mob_stream_stop(void *stream);

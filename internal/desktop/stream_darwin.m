@@ -294,6 +294,17 @@ void mob_stream_size(void *p, int width, int height) {
 	});
 }
 
+void mob_stream_fps(void *p, int fps) {
+	MobStream *s = p;
+	dispatch_async(s->queue, ^{
+		if (s->stopped || fps == s->fps) return;
+		s->fps = fps;
+		if (s->session) VTSessionSetProperty(s->session, kVTCompressionPropertyKey_ExpectedFrameRate, (CFNumberRef)@(fps));
+		s->config.minimumFrameInterval = CMTimeMake(1, fps);
+		[s->stream updateConfiguration:s->config completionHandler:nil];
+	});
+}
+
 void mob_stream_keyframe(void *p) {
 	MobStream *s = p;
 	dispatch_async(s->queue, ^{

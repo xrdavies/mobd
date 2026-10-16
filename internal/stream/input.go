@@ -115,6 +115,17 @@ func (c *controller) report(kind string, err error) {
 	_ = c.control.SendText(string(out))
 }
 
+// send writes a message on the control channel once the client opened it.
+func (c *controller) send(v any) {
+	c.mu.Lock()
+	dc := c.control
+	c.mu.Unlock()
+	if dc != nil {
+		out, _ := json.Marshal(v)
+		_ = dc.SendText(string(out))
+	}
+}
+
 // cursorLoop sends the pointer position when it changes, so clients can draw it crisply over
 // a low-frame-rate picture.
 func (c *controller) cursorLoop(dc *webrtc.DataChannel) {
