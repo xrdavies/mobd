@@ -160,3 +160,25 @@ func TestStreamRoutesValidateAndScopeToTheClient(t *testing.T) {
 		t.Fatalf("unknown session: %d", code)
 	}
 }
+
+func TestTicketOpensTheStreamWebSocket(t *testing.T) {
+	_, srv, credential := ticketServer(t)
+	get := func(query string) int {
+		resp, err := http.Get(srv.URL + "/stream/ws?" + query)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		return resp.StatusCode
+	}
+	if code := get("session=nope"); code != 401 {
+		t.Fatalf("no credential: %d", code)
+	}
+	_, ticket := issueTicket(t, srv, credential.Token)
+	if code := get("session=nope&ticket=" + ticket); code != 404 {
+		t.Fatalf("ticket should authenticate, then find no session: %d", code)
+	}
+	if code := get("session=nope&ticket=" + ticket); code != 401 {
+		t.Fatalf("reused ticket: %d", code)
+	}
+}

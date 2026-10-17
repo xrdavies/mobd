@@ -18,9 +18,14 @@ func (s *Server) handleStreamOpen(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "invalid JSON body (maximum 64 KiB)")
 		return
 	}
-	answer, err := s.streams.Open(pairing.ClientID(r.Context()), req)
+	client := pairing.ClientID(r.Context())
+	answer, err := s.streams.Open(client, req)
 	switch {
 	case err == nil:
+		// For the WebSocket fallback from a webview; native clients send the header instead.
+		if ticket, _, err := s.pairing.IssueTicket(client); err == nil {
+			answer.WSTicket = ticket
+		}
 		writeJSON(w, http.StatusCreated, answer)
 	case errors.Is(err, stream.ErrBadRequest):
 		writeErr(w, http.StatusBadRequest, err.Error())
@@ -32,6 +37,21 @@ func (s *Server) handleStreamOpen(w http.ResponseWriter, r *http.Request) {
 	default:
 		// Includes a locked screen or missing Screen Recording; the message says which.
 		writeErr(w, http.StatusServiceUnavailable, err.Error())
+	}
+}
+
+// handleStreamWS carries an open session over a WebSocket where UDP cannot pass.
+func (s *Server) handleStreamWS(w http.ResponseWriter, r *http.Request) {
+	if !s.originAllowed(r) {
+		writeErr(w, http.StatusForbidden, "origin not allowed")
+		return
+	}
+	err := s.streams.ServeWS(pairing.ClientID(r.Context()), r.URL.Query().Get("session"), w, r)
+	switch {
+	case errors.Is(err, stream.ErrNotFound):
+		writeErr(w, http.StatusNotFound, err.Error())
+	case errors.Is(err, stream.ErrConflict):
+		writeErr(w, http.StatusConflict, err.Error())
 	}
 }
 

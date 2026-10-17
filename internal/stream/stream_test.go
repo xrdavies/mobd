@@ -47,12 +47,13 @@ func newFake(opts desktop.StreamOptions) *fakeStream {
 			}
 			pts += frame
 			n := int(f.kbps.Load()) * 1000 / 8 / int(f.fps.Load())
-			if f.key.Swap(false) {
+			key := f.key.Swap(false)
+			if key {
 				n *= 5
 			}
 			data := append([]byte{0, 0, 0, 1, 9, 0xf0, 0, 0, 0, 1, 0x41}, bytes.Repeat([]byte{0xaa}, max(n, 4))...)
 			select {
-			case f.units <- desktop.AccessUnit{Data: data, PTS: pts}:
+			case f.units <- desktop.AccessUnit{Data: data, PTS: pts, Key: key}:
 			case <-f.closed:
 				return
 			}

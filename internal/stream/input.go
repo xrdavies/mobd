@@ -48,20 +48,26 @@ type controller struct {
 	input Input
 
 	mu      sync.Mutex
-	control *webrtc.DataChannel
+	control textSender
 	lastErr map[string]time.Time
 }
+
+// textSender is the control channel: a data channel, or the WebSocket in the fallback.
+type textSender interface{ SendText(string) error }
 
 func (c *controller) attach(dc *webrtc.DataChannel) {
 	dc.OnMessage(func(msg webrtc.DataChannelMessage) { c.handle(msg.Data) })
 	if dc.Label() == "control" {
-		dc.OnOpen(func() {
-			c.mu.Lock()
-			c.control = dc
-			c.mu.Unlock()
-			go c.cursorLoop(dc)
-		})
+		dc.OnOpen(func() { c.setControl(dc) })
 	}
+}
+
+// setControl starts sending cursor positions, stats and errors on a control channel.
+func (c *controller) setControl(t textSender) {
+	c.mu.Lock()
+	c.control = t
+	c.mu.Unlock()
+	go c.cursorLoop(t)
 }
 
 func (c *controller) handle(data []byte) {
@@ -128,7 +134,7 @@ func (c *controller) send(v any) {
 
 // cursorLoop sends the pointer position when it changes, so clients can draw it crisply over
 // a low-frame-rate picture.
-func (c *controller) cursorLoop(dc *webrtc.DataChannel) {
+func (c *controller) cursorLoop(dc textSender) {
 	t := time.NewTicker(cursorPeriod)
 	defer t.Stop()
 	lastX, lastY := -1.0, -1.0

@@ -68,8 +68,9 @@ func (s *Server) withAuth(next http.Handler) http.Handler {
 		var ctx context.Context
 		var finish func()
 		var err error
-		// Only the live desktop accepts a ticket; every other route needs the header.
-		if ticket := r.URL.Query().Get("ticket"); token == "" && ticket != "" && r.Method == http.MethodGet && r.URL.Path == "/vnc" {
+		// Only the live desktop's WebSockets accept a ticket (webviews cannot set headers there);
+		// every other route needs the header.
+		if ticket := r.URL.Query().Get("ticket"); token == "" && ticket != "" && r.Method == http.MethodGet && (r.URL.Path == "/vnc" || r.URL.Path == "/stream/ws") {
 			ctx, finish, err = s.pairing.BeginTicket(r.Context(), ticket, r.Method, r.URL.Path)
 		} else {
 			ctx, finish, err = s.pairing.Begin(r.Context(), token, r.Method, r.URL.Path)

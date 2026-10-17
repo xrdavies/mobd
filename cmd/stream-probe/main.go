@@ -6,17 +6,21 @@ package main
 
 import (
 	"bytes"
+	"context"
+	"encoding/binary"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"strings"
 	"sync/atomic"
 	"time"
 
+	"github.com/coder/websocket"
 	"github.com/pion/rtcp"
 	"github.com/pion/webrtc/v4"
 )
@@ -30,12 +34,26 @@ func main() {
 	pliEvery := flag.Duration("pli", 0, "send a picture-loss report this often (0: never)")
 	typeText := flag.String("type", "", "type this text once connected (\\n presses Return)")
 	click := flag.String("click", "", "left-click at normalized x,y (0..1) once connected, e.g. 0.53,0.38")
+	useWS := flag.Bool("ws", false, "use the WebSocket fallback instead of WebRTC")
+	resolve := flag.String("resolve", "", "connect to this IP instead of resolving the host (e.g. Funnel's public address)")
 	flag.Parse()
+	if *resolve != "" {
+		// Like curl --resolve: keeps the host name for TLS, dials the given address.
+		dialer := &net.Dialer{Timeout: 10 * time.Second}
+		http.DefaultTransport.(*http.Transport).DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+			_, port, _ := net.SplitHostPort(addr)
+			return dialer.DialContext(ctx, network, net.JoinHostPort(*resolve, port))
+		}
+	}
 	if *token == "" {
 		log.Fatal("-token or MOBD_TOKEN is required")
 	}
 	base := strings.TrimRight(*addr, "/")
 
+	if *useWS {
+		watchWS(strings.TrimRight(*addr, "/"), *token, *seconds, *maxWidth, *quality)
+		return
+	}
 	pc, err := webrtc.NewPeerConnection(webrtc.Configuration{})
 	if err != nil {
 		log.Fatal(err)
@@ -171,4 +189,80 @@ func main() {
 		resp.Body.Close()
 		log.Printf("DELETE /stream: %s", resp.Status)
 	}
+}
+
+// watchWS opens a session without an offer and watches it over GET /stream/ws, acknowledging every
+// video message as the apps will.
+func watchWS(base, token string, seconds, maxWidth int, quality string) {
+	start := time.Now()
+	body, _ := json.Marshal(map[string]any{"maxWidth": maxWidth, "quality": quality})
+	req, _ := http.NewRequest("POST", base+"/stream", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		log.Fatal(err)
+	}
+	raw, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		log.Fatalf("POST /stream: %s %s", resp.Status, raw)
+	}
+	var answer struct {
+		Session       string
+		Width, Height int
+	}
+	_ = json.Unmarshal(raw, &answer)
+	log.Printf("session %s, %dx%d, answered in %s", answer.Session, answer.Width, answer.Height, time.Since(start).Round(time.Millisecond))
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(seconds+10)*time.Second)
+	defer cancel()
+	wsURL := "ws" + strings.TrimPrefix(base, "http") + "/stream/ws?session=" + answer.Session
+	c, _, err := websocket.Dial(ctx, wsURL, &websocket.DialOptions{HTTPHeader: http.Header{"Authorization": {"Bearer " + token}}})
+	if err != nil {
+		log.Fatalf("GET /stream/ws: %v", err)
+	}
+	defer c.CloseNow()
+	c.SetReadLimit(8 << 20)
+	log.Printf("websocket open after %s", time.Since(start).Round(time.Millisecond))
+	var bytesIn, frames, keys, cursors atomic.Int64
+	var firstFrame atomic.Int64
+	go func() {
+		for {
+			typ, data, err := c.Read(ctx)
+			if err != nil {
+				return
+			}
+			if typ == websocket.MessageText {
+				if strings.Contains(string(data), `"t":"cursor"`) {
+					cursors.Add(1)
+				} else if strings.Contains(string(data), `"t":"stats"`) && os.Getenv("PROBE_STATS") != "" {
+					log.Printf("stats: %s", data)
+				} else if !strings.Contains(string(data), `"t":"stats"`) {
+					log.Printf("control: %s", data)
+				}
+				continue
+			}
+			if len(data) < 10 {
+				continue
+			}
+			ack, _ := json.Marshal(map[string]any{"t": "ack", "pts": int64(binary.BigEndian.Uint64(data[1:9]))})
+			_ = c.Write(ctx, websocket.MessageText, ack)
+			bytesIn.Add(int64(len(data)))
+			if data[9]&1 != 0 {
+				keys.Add(1)
+			}
+			if frames.Add(1) == 1 {
+				firstFrame.Store(int64(time.Since(start)))
+			}
+		}
+	}()
+	var lastBytes, lastFrames int64
+	for i := 0; i < seconds; i++ {
+		time.Sleep(time.Second)
+		b, f := bytesIn.Load(), frames.Load()
+		fmt.Printf("t=%2ds %5d kbps %3d fps  keyframes %d  cursor updates %d\n", i+1, (b-lastBytes)*8/1000, f-lastFrames, keys.Load(), cursors.Load())
+		lastBytes, lastFrames = b, f
+	}
+	fmt.Printf("first frame after %s; %d frames, %d KB\n", time.Duration(firstFrame.Load()).Round(time.Millisecond), frames.Load(), bytesIn.Load()/1024)
+	c.Close(websocket.StatusNormalClosure, "")
 }

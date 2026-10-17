@@ -143,6 +143,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /vnc/ticket", s.handleVNCTicket)
 	mux.HandleFunc("POST /stream", s.handleStreamOpen)
 	mux.HandleFunc("DELETE /stream/{id}", s.handleStreamClose)
+	mux.HandleFunc("GET /stream/ws", s.handleStreamWS)
 	mux.HandleFunc("POST /tasks/{id}/questions/{qid}/answer", s.handleAnswer)
 	mux.HandleFunc("POST /tasks/{id}/steer", s.handleSteer)
 	public := http.NewServeMux()

@@ -1,6 +1,6 @@
-// Package stream serves the live desktop over WebRTC: one Pion session per paired client, an
-// H.264 track fed by desktop.StartStream, keyframes on request, and teardown when the client is
-// revoked. See docs/desktop-streaming.md.
+// Package stream serves the live desktop: one session per paired client, fed by
+// desktop.StartStream, carried over WebRTC (Pion) or a WebSocket where UDP cannot pass, with
+// keyframes on request and teardown when the client is revoked. See docs/desktop-streaming.md.
 package stream
 
 import (
@@ -14,6 +14,7 @@ import (
 	"net"
 	"os"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/pion/interceptor"
@@ -27,16 +28,23 @@ import (
 // rateTrace logs every rate-control decision (MOBD_RATE_TRACE=1), for tuning on real links.
 var rateTrace = os.Getenv("MOBD_RATE_TRACE") != ""
 
-// ErrBadRequest marks requests the client must fix (HTTP 400).
-var ErrBadRequest = errors.New("invalid stream request")
+var (
+	// ErrBadRequest marks requests the client must fix (HTTP 400).
+	ErrBadRequest = errors.New("invalid stream request")
+	// ErrNotFound: no such session for this client (HTTP 404).
+	ErrNotFound = errors.New("stream session not found")
+	// ErrConflict: the session is already connected over the other transport (HTTP 409).
+	ErrConflict = errors.New("stream session already connected")
+)
 
 // connectTimeout ends a session whose peer never connects, so its capture does not run forever.
 const connectTimeout = 30 * time.Second
 
 // Request opens a session. MaxWidth and MaxHeight are the client's view in pixels; the stream is
-// never larger than the view, the display or the quality profile.
+// never larger than the view, the display or the quality profile. Without an offer the session
+// waits for the WebSocket only.
 type Request struct {
-	Offer     string `json:"offer"`
+	Offer     string `json:"offer,omitempty"`
 	MaxWidth  int    `json:"maxWidth"`
 	MaxHeight int    `json:"maxHeight"`
 	Quality   string `json:"quality"`
@@ -44,11 +52,13 @@ type Request struct {
 
 // Answer is returned to the client; Width and Height are the encoded size.
 type Answer struct {
-	Session string          `json:"session"`
-	Answer  string          `json:"answer"`
-	Width   int             `json:"width"`
-	Height  int             `json:"height"`
-	Display desktop.Display `json:"display"`
+	Session string `json:"session"`
+	Answer  string `json:"answer,omitempty"`
+	// WSTicket opens GET /stream/ws once for clients that cannot send headers (set by the API).
+	WSTicket string          `json:"wsTicket,omitempty"`
+	Width    int             `json:"width"`
+	Height   int             `json:"height"`
+	Display  desktop.Display `json:"display"`
 }
 
 // profile bounds a quality setting: the largest size and frame rate, the bitrate ceiling and where
@@ -133,8 +143,8 @@ func (m *Manager) Open(clientID string, req Request) (Answer, error) {
 		req.Quality = "auto"
 	}
 	p, ok := profiles[req.Quality]
-	if !ok || req.Offer == "" || req.MaxWidth < 0 || req.MaxHeight < 0 || req.MaxWidth > 8192 || req.MaxHeight > 8192 {
-		return Answer{}, fmt.Errorf("%w: needs an SDP offer, quality auto/high/low and a view of at most 8192 pixels", ErrBadRequest)
+	if !ok || req.MaxWidth < 0 || req.MaxHeight < 0 || req.MaxWidth > 8192 || req.MaxHeight > 8192 {
+		return Answer{}, fmt.Errorf("%w: needs quality auto/high/low and a view of at most 8192 pixels", ErrBadRequest)
 	}
 	disp, err := m.cfg.Display()
 	if err != nil {
@@ -158,6 +168,7 @@ func (m *Manager) Open(clientID string, req Request) (Answer, error) {
 	s.rate = newRateController(p, w, h, time.Now())
 	t := s.rate.current()
 	s.applied = t
+	s.targetKbps.Store(int32(t.kbps))
 	answer, err := s.start(req.Offer, desktop.StreamOptions{Width: t.width, Height: t.height, FPS: t.fps, Kbps: t.kbps})
 	if err != nil {
 		s.close()
@@ -219,11 +230,16 @@ type session struct {
 	lossMu         sync.Mutex
 	lossSum        float64 // receiver-reported fraction lost since the last rate tick
 	lossReports    int
-	pairRTT        func() time.Duration
+	targetKbps     atomic.Int32 // the encoder's current target, read by the WebSocket flow control
 	connected      chan struct{}
 	connectedOnce  sync.Once
 	lastKeyRequest time.Time
 	keyMu          sync.Mutex
+
+	mu        sync.Mutex
+	transport string                         // "webrtc" or "ws" once one connects
+	sink      func(desktop.AccessUnit) error // writes to the connected transport
+	feedback  func(now time.Time) feedback   // the connected transport's view of the link
 }
 
 func (s *session) start(offer string, opts desktop.StreamOptions) (string, error) {
@@ -246,12 +262,56 @@ func (s *session) start(offer string, opts desktop.StreamOptions) (string, error
 		return "", err
 	}
 	s.src = src
+	if s.m.cfg.NewInput != nil {
+		s.ctl = &controller{s: s, input: s.m.cfg.NewInput()}
+	}
+	s.connected = make(chan struct{})
+	answer := ""
+	if offer != "" {
+		if answer, err = s.startWebRTC(offer, opts.FPS); err != nil {
+			return "", err
+		}
+	}
+	go s.adapt()
+	go s.forward()
+	go s.watch()
+	return answer, nil
+}
 
+// choose makes the first transport to connect carry the session; it reports false when the other
+// one already does.
+func (s *session) choose(transport string, sink func(desktop.AccessUnit) error, fb func(time.Time) feedback) bool {
+	s.mu.Lock()
+	if s.transport != "" {
+		s.mu.Unlock()
+		return false
+	}
+	s.transport, s.sink, s.feedback = transport, sink, fb
+	pc := s.pc
+	s.mu.Unlock()
+	s.connectedOnce.Do(func() { close(s.connected) })
+	if transport == "ws" && pc != nil {
+		go pc.Close() // the WebSocket won the race
+	}
+	s.src.Keyframe() // a picture right away, not at the next change
+	log.Printf("stream %s connected over %s", s.id, transport)
+	return true
+}
+
+func (s *session) chosen() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.transport
+}
+
+func (s *session) startWebRTC(offer string, fps int) (string, error) {
 	pc, err := s.m.api.NewPeerConnection(webrtc.Configuration{}) // host candidates: LAN and Tailscale
 	if err != nil {
 		return "", err
 	}
+	s.mu.Lock()
 	s.pc = pc
+	s.mu.Unlock()
 	track, err := webrtc.NewTrackLocalStaticSample(webrtc.RTPCodecCapability{
 		MimeType: webrtc.MimeTypeH264, ClockRate: 90000,
 		SDPFmtpLine: "level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42e01f",
@@ -263,18 +323,48 @@ func (s *session) start(offer string, opts desktop.StreamOptions) (string, error
 	if err != nil {
 		return "", err
 	}
-	if s.m.cfg.NewInput != nil {
-		s.ctl = &controller{s: s, input: s.m.cfg.NewInput()}
+	if s.ctl != nil {
 		pc.OnDataChannel(s.ctl.attach)
 	}
-	s.connected = make(chan struct{})
+	var last time.Duration
+	sink := func(u desktop.AccessUnit) error {
+		d := time.Second / time.Duration(fps)
+		if last != 0 && u.PTS > last {
+			d = u.PTS - last
+		}
+		last = u.PTS
+		return track.WriteSample(media.Sample{Data: u.Data, Duration: d})
+	}
+	fb := func(now time.Time) feedback {
+		s.lossMu.Lock()
+		loss := 0.0
+		if s.lossReports > 0 {
+			loss = s.lossSum / float64(s.lossReports)
+		}
+		s.lossSum, s.lossReports = 0, 0
+		s.lossMu.Unlock()
+		var rtt time.Duration
+		for _, st := range pc.GetStats() {
+			if p, ok := st.(webrtc.ICECandidatePairStats); ok && p.Nominated && p.CurrentRoundTripTime > 0 {
+				rtt = time.Duration(p.CurrentRoundTripTime * float64(time.Second))
+			}
+		}
+		return feedback{loss: loss, rtt: rtt, now: now}
+	}
 	pc.OnConnectionStateChange(func(st webrtc.PeerConnectionState) {
 		switch st {
 		case webrtc.PeerConnectionStateConnected:
-			s.connectedOnce.Do(func() { close(s.connected) })
-			s.src.Keyframe()
+			if !s.choose("webrtc", sink, fb) {
+				_ = pc.Close()
+			}
 		case webrtc.PeerConnectionStateFailed, webrtc.PeerConnectionStateClosed:
-			go s.close()
+			switch s.chosen() {
+			case "webrtc":
+				go s.close()
+			case "":
+				// No UDP path (Funnel, a blocked network): keep the session for the WebSocket.
+				go pc.Close()
+			}
 		}
 	})
 	if err := pc.SetRemoteDescription(webrtc.SessionDescription{Type: webrtc.SDPTypeOffer, SDP: offer}); err != nil {
@@ -293,32 +383,21 @@ func (s *session) start(offer string, opts desktop.StreamOptions) (string, error
 	case <-gathered:
 	case <-time.After(5 * time.Second):
 	}
-
-	s.pairRTT = func() time.Duration {
-		for _, st := range pc.GetStats() {
-			if p, ok := st.(webrtc.ICECandidatePairStats); ok && p.Nominated && p.CurrentRoundTripTime > 0 {
-				return time.Duration(p.CurrentRoundTripTime * float64(time.Second))
-			}
-		}
-		return 0
-	}
 	go s.readRTCP(sender)
-	go s.adapt()
-	go s.forward(track, opts.FPS)
-	go s.watch()
 	return pc.LocalDescription().SDP, nil
 }
 
-// forward writes access units to the track until the desktop stream ends.
-func (s *session) forward(track *webrtc.TrackLocalStaticSample, fps int) {
-	var last time.Duration
+// forward writes access units to the connected transport until the desktop stream ends; units
+// before a transport connects are dropped (connecting asks for a keyframe).
+func (s *session) forward() {
 	for u := range s.src.Units() {
-		d := time.Second / time.Duration(fps)
-		if last != 0 && u.PTS > last {
-			d = u.PTS - last
+		s.mu.Lock()
+		sink := s.sink
+		s.mu.Unlock()
+		if sink == nil {
+			continue
 		}
-		last = u.PTS
-		if err := track.WriteSample(media.Sample{Data: u.Data, Duration: d}); err != nil {
+		if err := sink(u); err != nil {
 			break
 		}
 	}
@@ -370,14 +449,13 @@ func (s *session) adapt() {
 		case <-s.ctx.Done():
 			return
 		case now := <-tick.C:
-			s.lossMu.Lock()
-			loss := 0.0
-			if s.lossReports > 0 {
-				loss = s.lossSum / float64(s.lossReports)
+			s.mu.Lock()
+			fb := s.feedback
+			s.mu.Unlock()
+			if fb == nil {
+				continue // not connected yet
 			}
-			s.lossSum, s.lossReports = 0, 0
-			s.lossMu.Unlock()
-			f := feedback{loss: loss, rtt: s.pairRTT(), now: now}
+			f := fb(now)
 			t := s.rate.update(f)
 			if rateTrace {
 				log.Printf("stream %s rate: loss %.3f rtt %s base %s -> %d kbps %dx%d %d fps", s.id, f.loss, f.rtt.Round(time.Millisecond),
@@ -397,6 +475,7 @@ func (s *session) adapt() {
 				t.kbps = old.kbps
 			}
 			s.applied = t
+			s.targetKbps.Store(int32(t.kbps))
 			if s.ctl != nil {
 				s.ctl.send(map[string]any{"t": "stats", "kbps": t.kbps, "width": t.width, "height": t.height, "fps": t.fps,
 					"loss": math.Round(f.loss*1000) / 1000, "rttMs": f.rtt.Milliseconds()})
@@ -420,8 +499,11 @@ func (s *session) watch() {
 func (s *session) close() {
 	s.once.Do(func() {
 		s.cancel()
-		if s.pc != nil {
-			_ = s.pc.Close()
+		s.mu.Lock()
+		pc := s.pc
+		s.mu.Unlock()
+		if pc != nil {
+			_ = pc.Close()
 		}
 		if s.src != nil {
 			s.src.Close()
