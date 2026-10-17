@@ -254,7 +254,33 @@ this branch's mobd and `cmd/stream-probe`.
 | Input | click and Unicode text work, including at the lock screen |
 | Display put to sleep mid-stream | `ended` with the reason within 1 s, then closed |
 
-Not measured: a remote network (Tailscale relay, phone off Wi-Fi) and the WebSocket fallback (M7).
+Not measured: a remote network (Tailscale relay, phone off Wi-Fi).
+
+### WebSocket fallback results (M7)
+
+Run on 2026-10-18 with a dev mobd (`46b80f1`) on the Mac Studio and `stream-probe -ws`. For Funnel,
+the office Mac forwarded a temporary `:8443` Funnel to it and the probe was pinned to Funnel's public
+relay (`-resolve`), so every byte crossed the relay. Pion is not in this path; capture, encoder, rate
+control and sessions are shared with WebRTC.
+
+| Check | LAN | Funnel (8 runs) |
+| --- | --- | --- |
+| `POST /stream` answered | 0.09–0.30 s | 1.6–3.6 s |
+| WebSocket open | 0.10–0.30 s | 3.1–6.9 s |
+| First picture | 0.12–0.35 s | 3.6–8.8 s |
+| Steady state | 720p, 1.2–1.4 Mbps, ~100 kbps idle | 360p, 120–500 kbps, 3–20 fps, rare 1 s stalls |
+
+The Funnel target (< 2 s) is not met, and mostly not by mobd: from this network the relay connects
+TCP in ~0.17 s but takes 1.3–2 s more for TLS, and carries ~200 kbps (a 530 KB screenshot took 21 s).
+Two things are ours and are left for when Funnel is picked up again:
+
+- The client pays the TLS handshake twice (`POST /stream`, then the WebSocket). Opening the session
+  from `GET /stream/ws` itself would save one, 1.5–3.5 s here.
+- Starting at 720p / 1200 kbps is ~5× this link: the first keyframe takes ~1 s, the controller sees
+  60–100% loss, steps to 360p within 2–5 s and sends up to 7 keyframes in 8 s. WebSocket sessions
+  should start lower (540p, ~450 kbps) and ramp.
+
+Even with both, this relay path would stay around 2.5–3 s; < 2 s needs a faster route to the relay.
 
 ### Encoder (M3)
 
@@ -351,7 +377,7 @@ All repos use branch `feat/webrtc-stream`; they merge to `main` together at rele
 | M4 | **Done.** `internal/stream`: `POST /stream` / `DELETE /stream/{id}`, Pion H.264 track fed by `desktop.StartStream`, keyframe on PLI/FIR, one session per client (a new one replaces it), closed on revoke/delete/reset/shutdown and when the peer never connects; display woken and kept awake per session; `cmd/stream-probe` | fake-source and real-pipeline tests; dev mobd + probe: pair, stream, PLI, DELETE, revoke |
 | M5 | **Done.** `desktop.Input` (held state, drags, multi-clicks, release) over a per-OS `RemoteInput`; macOS CGEvent mouse/key/Unicode/pixel scroll with web key codes; `input`/`pointer`/`control` channels; cursor position on `control` (shape stays in the video) | recorded-event tests; data-channel test; opt-in real pointer test |
 | M6 | **Done.** Own rate control from receiver reports and ICE RTT (start low, ramp, back off once per RTT sample), size ladder with hysteresis, half frame rate below 400 kbps, retransmission budget (30% of fresh bytes), profiles, `stats`/`ended` on `control`, `stream` health feature | impaired-link test (2 Mbps/1%/20 ms: 1.3–1.95 Mbps, no freezes, recovery to 4 Mbps in 12 s); office Mac over LAN and Tailscale |
-| M7 | WebSocket fallback with ticket and acks; keyframe at connect, start at 720p | test client over Funnel; first picture < 2 s |
+| M7 | **Done, Funnel target open.** `GET /stream/ws` (header or `wsTicket` from `POST /stream`, which no longer needs an offer); binary access units, control JSON, per-frame acks driving in-flight flow control and the shared rate controller; keyframe at connect, start at 720p. Fixed the retransmission budget mixing RTX and video sequence numbers. First picture < 2 s on the LAN, 3.6–8.8 s through Funnel (see M7 results; two fixes deferred) | ws tests; LAN and Funnel probe runs |
 | M8 | Remove VNC (`/vnc` → 410), setup checks, config | `go test ./...` |
 | M9 | Docs: this file, pairing, security, remote access, connection setup, README | review |
 | later | `mob-relay` (Pion TURN) and per-session TURN credentials in `POST /stream` | gateway with a phone off Wi-Fi |
