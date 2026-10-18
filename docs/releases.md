@@ -78,6 +78,9 @@ curl 不依赖浏览器 CORS，官网获取发布清单需要它。
 上表在 **Environment variables** 中添加；Apple 凭据和 R2 访问密钥在 **Environment secrets** 中添加。
 可以复用同一 Developer ID 证书、Apple 公证账号和 R2 桶，但 mob 仓库的 environment
 配置不会自动继承；若使用组织级 Secrets，须给 mobd 仓库授权。这里不需要 Tauri 密钥。
+3 个 Variables 也可以作为同名 Secrets 配置，Variables 优先。
+
+可选 Secret `SITE_DISPATCH_TOKEN`：R2 发布后触发 `mob-site` 重建；未配置时官网在每小时构建时获取新版本。
 
 ```bash
 openssl base64 -A -in /path/to/DeveloperID.p12 -out /tmp/apple-certificate.txt
@@ -252,12 +255,12 @@ agent 可执行路径、工作目录。仅通过本机代理或隧道访问时�
 mobd 不使用桌面应用的 Tauri updater；升级通过再次运行安装脚本完成。
 裸 CLI 无法 stapling 公证票据，Gatekeeper 查询 Apple 公证记录时可能需要联网。
 
-Codex/Claude 的安装和登录、辅助功能、屏幕录制、屏幕共享仍是办公室端运行前提。
+Codex/Claude 的安装和登录、辅助功能和屏幕录制权限是办公室端运行前提；不需要屏幕共享。
 使用普通登录用户，不安装 root 服务。详细配置见 [mobd 文档](../README.md)。
 
 ## 发布验收清单
 
-以下为每次发布需要核对的清单，不代表所有手动验收已经执行：
+每次发布核对：
 
 - [ ] mobd 仓库 `release` 环境已配置 8 个 Secrets 和 3 个 Variables。
 - [ ] R2 下载域名公开可访问，CORS 允许官网，动态入口绕过缓存。

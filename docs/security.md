@@ -10,16 +10,14 @@ for the live-view connection.
   addresses. Without an encrypted tunnel, observers can capture invitations,
   long-lived credentials and business data. Authentication does not encrypt HTTP;
   the CLI does not infer transport security from an IP range or hostname.
-- For home-to-office access, follow the [remote-access guide](remote-access.md):
-  prefer **Tailscale Serve** with restricted tailnet access and a loopback mobd
-  listener, or use a trusted **SSH** tunnel. A public HTTPS/WSS proxy also needs
-  authentication on every route; TLS alone is not access control.
-- Phone access without a VPN requires a public gateway or Tailscale Funnel plus
-  paired credentials on every route; see the [architecture](remote-access.md).
-  Desktop/mobile client integration is pending. Funnel provides transport, not application login.
-- The planned managed relay must authorize each user/device mapping and isolate
-  customers' office machines. A gateway that terminates TLS can read proxied
-  data; this topology does not provide end-to-end encryption from client to mobd.
+- For home-to-office access, follow the [connection guide](connection-setup.md):
+  prefer **Tailscale Serve** with restricted tailnet access, or use a trusted **SSH**
+  tunnel. A public HTTPS/WSS proxy also needs authentication on every route; TLS alone
+  is not access control.
+- Phone access without a VPN uses Tailscale Funnel or a self-hosted HTTPS gateway, with
+  paired credentials on every route. Funnel provides transport, not application login.
+  A gateway that terminates TLS can read proxied data; there is no end-to-end encryption
+  from client to mobd in that topology.
 - `mobd init` writes `0.0.0.0:8080` (all IPv4 interfaces). Without a config override, the runtime default is `:8080`; use `127.0.0.1:8080` when access should only go through a local proxy or tunnel.
 
 ## View vs actuation
@@ -55,10 +53,8 @@ creates an empty identity, never anonymous access. Local management stays on the
 Unix socket; agent/MCP calls retain per-task tokens. All paired clients have full
 access to the same office data; there is no multi-user isolation or security audit log.
 
-Remove nonempty `sharedSecret` / `MOBD_SHARED_SECRET` before upgrading and pair each
-client. The old global secret and `X-Mob-Token` are no longer accepted. Business data
-is preserved. The mob desktop/mobile implementations must be updated separately,
-including secure storage and credentials on streaming/image/WebSocket requests.
+A global shared secret is not supported: a nonempty `sharedSecret` / `MOBD_SHARED_SECRET`
+fails startup.
 
 ## Distributed binaries
 
@@ -67,7 +63,7 @@ checks the archive SHA-256, exact regular-file entries, Developer ID / Team ID,
 program identifier and binary version before replacing the executable. CI signs
 and notarizes it. Installation runs as the logged-in user without sudo, preserves
 existing configuration and data, and refuses to replace a running daemon.
-See [releases](releases.md) for the workflow and remaining manual checks.
+See [releases](releases.md) for the workflow.
 
 ## Client trust
 

@@ -23,7 +23,7 @@ See [architecture](architecture.md), [runners](runners.md),
 Codex and Claude Code runners, questions/approvals and Codex app-server steering
 are implemented. Every business route requires a paired device credential in
 `Authorization: Bearer <token>`, including `/health` and the live desktop (`/stream`). See the
-[pairing protocol](pairing.md) for invitations, CLI management and client migration.
+[pairing protocol](pairing.md) for invitations and CLI management.
 The `pairing` feature is advertised after authentication. There is no multi-user
 login or dedicated security audit log. Storage uses an
 atomic JSON snapshot with separate image files. Tasks share one desktop; human
@@ -160,7 +160,7 @@ Invitation redemption and preview are documented in [pairing](pairing.md).
 | POST | `/stream` | Opens the live desktop: `{offer?, maxWidth, maxHeight, quality}` → **201** `{session, answer?, wsTicket, width, height, display}` ([desktop-streaming.md](desktop-streaming.md)) |
 | DELETE | `/stream/{id}` | Ends the client's live desktop session |
 | GET | `/stream/ws` | `?session=` (and `?ticket=` for webviews): the same session over a WebSocket where UDP cannot pass. 403 for unknown origins, 404 unknown session, 409 if WebRTC already carries it |
-| GET, POST | `/vnc`, `/vnc/ticket` | Removed with the VNC relay: **410** |
+| GET, POST | `/vnc`, `/vnc/ticket` | Not supported: **410** asking the client to update |
 
 ### Health
 
@@ -217,13 +217,18 @@ JSON keys, environment variables and defaults.
 ## Internal structure
 
 ```text
-cmd/mobd            CLI: init, serve, start, stop, restart, status, logs, mcp, --version
+cmd/mobd            CLI: init, serve, start, stop, restart, status, logs, mcp, link, clients,
+                    connections, auth, --version
+cmd/stream-probe    Command-line live desktop viewer for testing
 internal/api        HTTP handlers, SSE, global event hub
+internal/pairing    Invitations, device credentials, WebSocket tickets, auth.json
+internal/control    Private Unix-socket management API used by link/clients/connections/auth
+internal/stream     Live desktop sessions: WebRTC (Pion), WebSocket fallback, rate control, input
 internal/task       Store (snapshot persistence), queue ordering, activities
 internal/runner     Registry, Codex app-server/exec and Claude adapters, shared CLI lifecycle
-internal/desktop    Desktop capture and input, one backend per OS (macOS; placeholders elsewhere)
+internal/desktop    Capture, H.264 encoding, snapshots and input, one backend per OS (macOS; placeholders elsewhere)
 internal/mcpserver  mobd mcp: desktop tools, questions and approvals over stdio
-internal/artifact   Content-addressed file store for screenshots and uploads
+internal/artifact   File store for screenshots and uploads (random immutable IDs)
 internal/config     JSON config, environment overrides and CLI flags
 internal/service    Per-user macOS LaunchAgent and saved service configuration
 ```

@@ -11,7 +11,7 @@ Signed and notarized macOS Apple Silicon binaries are distributed through
 
 ### Client (dispatcher + monitor)
 
-Runs on the home Mac and iPhone.
+Runs on the user's Mac (mob), iPhone (mob-ios) or Android phone (mob-android).
 
 - **Dispatcher:** send tasks, watch task status, converse with the office agent session.
 - **Monitor:** the apps show the live desktop that mobd streams. The small view only watches; the large view has an explicit Control mode for mouse, keyboard and touch input.
@@ -71,14 +71,10 @@ The default command is this mobd binary with the `mcp` argument.
 - Input arrives as normalized coordinates and web key codes and is posted with CGEvent; held keys and buttons are released when the session ends.
 - One session per client; it closes on credential revocation, deletion, auth reset or daemon shutdown. `/health` lists `stream` and `streamResize` and reports `streamSessions`.
 - Details: [desktop streaming](desktop-streaming.md).
-- Transport: use the intranet / VPN or an SSH tunnel. For home-to-office access,
-  [Tailscale Serve](remote-access.md) provides a private HTTPS/WSS entry point to
-  a loopback mobd listener; a public reverse proxy needs authentication on all routes.
-- The [connection design](remote-access.md) offers private networking, user-managed
-  Funnel and our managed relay using the same API. mobd enforces individual
-  client authentication in every mode, with no anonymous access. The [pairing protocol](pairing.md)
-  and local management are implemented; desktop/mobile integration is pending.
-  The managed relay still needs device enrollment and isolation between users.
+- Network: LAN/VPN, Tailscale Serve or Funnel, a self-hosted HTTPS gateway or an SSH
+  tunnel; see the [connection guide](connection-setup.md). Every mode uses the same API
+  and mandatory per-client [pairing](pairing.md), with no anonymous access. A managed
+  relay is planned, not implemented.
 
 See [desktop streaming](desktop-streaming.md) and [security](security.md).
 

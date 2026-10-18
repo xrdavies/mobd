@@ -3,7 +3,7 @@
 Verify the installed mobd, one configured agent runner, and the home client's live
 view on the real office desktop.
 
-For separate home/office networks, complete the [remote-access setup](remote-access.md)
+For separate home/office networks, complete the [connection setup](connection-setup.md)
 and test from the actual home network. The release download domain distributes files; it is
 not the task API address. See [security](security.md) for the current access controls.
 
@@ -51,7 +51,7 @@ Edit `~/.mobd/config.json` before starting:
    ```bash
    mobd start
    mobd status
-   # Pair first using mobd link and POST /pair (see docs/pairing.md).
+   # Pair first with mobd link and POST /pair (docs/pairing.md); MOBD_TOKEN is the returned token.
    curl -fsS -H "Authorization: Bearer $MOBD_TOKEN" http://127.0.0.1:8080/health
    ```
 
@@ -75,7 +75,7 @@ curl -fsS -H "Authorization: Bearer $MOBD_TOKEN" http://127.0.0.1:8080/tasks \
 ```
 
 Every request requires a paired device credential, including reads and streams.
-Desktop/mobile integration must be completed before running the client checks. Use the returned task ID with `GET /tasks/{id}` and
+Use the returned task ID with `GET /tasks/{id}` and
 `GET /tasks/{id}/events`, or watch the client's timeline.
 
 **Pass:** the real desktop changes, tool activity is visible, and the task succeeds.

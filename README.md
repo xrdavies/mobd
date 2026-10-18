@@ -52,8 +52,8 @@ On macOS, mobd requests Accessibility and Screen Recording when it starts if
 they are missing; approve the system prompts for the app that launches mobd.
 You can also grant them in System Settings → Privacy & Security. The live desktop is
 streamed by mobd itself (H.264 over WebRTC); Screen Sharing is not needed. For direct LAN/VPN access,
-configure `listen` for that interface; use loopback when using the remote-access
-proxy below. `mobd init` sets `listen` to `0.0.0.0:8080` (all IPv4 interfaces).
+configure `listen` for that interface; loopback is enough behind Tailscale Serve,
+a gateway or an SSH tunnel. `mobd init` sets `listen` to `0.0.0.0:8080` (all IPv4 interfaces).
 The download domain serves files; clients connect to your office Mac's mobd URL.
 Follow the [office smoke checklist](docs/office-smoke-checklist.md) to verify the setup.
 
@@ -84,22 +84,11 @@ make stop
 make serve ARGS='--config ./config.dev.json'
 ```
 
-### Connect from home
+### Connect clients
 
-The proposed connection setup offers three choices per office device:
-
-- **Private network:** the office machine and remote clients use the user's
-  Tailscale network or existing VPN.
-- **User-managed Funnel:** the user enables Tailscale Funnel at the office;
-  remote clients connect over public HTTPS without installing Tailscale.
-- **Our relay:** clients sign in and select a bound device through our managed
-  gateway; device enrollment, authorization and relay infrastructure are still to be built.
-
-All three reuse mandatory per-device authentication: pair once, then authenticate
-with a persistent credential until revoked, deleted or authentication is reset.
-There is no anonymous mode. mobd implements [pairing](docs/pairing.md); desktop and
-mobile client integration and the mode-selection UI are follow-up work. Existing
-clients need upgrading before they can connect to this version.
+Every client pairs once and then authenticates with its own persistent credential
+until it is revoked, deleted or authentication is reset. There is no anonymous mode.
+See [pairing](docs/pairing.md).
 
 ```bash
 mobd link --url https://office.example.com  # QR + one-use link, expires in 10 minutes
@@ -111,34 +100,20 @@ mobd link --close                         # close unused invitations only
 mobd auth reset --yes                     # invalidate all credentials; retain history
 ```
 
-Commands use a private local management socket. Invitations are temporary;
-paired credentials survive invitation expiry and daemon/client restarts.
+Commands use a private local management socket. Use the address the client actually
+reaches; link generation does not test connectivity or change the listener. An HTTP URL
+such as `http://192.168.1.20:8080` prints a risk warning to stderr and still generates
+the link: HTTP does not encrypt invitations, credentials or data.
 
-For direct LAN access, `mobd link --url http://192.168.1.20:8080` prints an HTTP
-risk warning to stderr and still generates the link and QR. HTTP does not encrypt
-invitations, credentials or data; an encrypted tunnel can protect the network path.
-Pairing remains mandatory. Use the actual client-accessible address; link generation
-does not test connectivity or change the listener.
-
-For separate home and office networks, use **Tailscale + Tailscale Serve** when
-both devices can install Tailscale. Keep mobd on `127.0.0.1:8080`; Serve provides
-a private HTTPS URL for the home mob client, carrying API requests, SSE and live
-desktop signaling through one endpoint; the video then flows directly over the tailnet. No office public IP or router port
-forward is needed. Reuse an existing company VPN when available.
-
-Follow the [connection setup guide](docs/connection-setup.md) for step-by-step LAN,
-Tailscale Funnel and self-hosted HTTPS relay setup, pairing tests and shutdown.
-The [remote-access guide](docs/remote-access.md) covers the mode design, private
-Tailscale Serve deployment and an SSH alternative.
-Public deployments require HTTPS/WSS and authenticated requests, including SSE and
-the live desktop. Where UDP cannot pass (Tailscale Funnel, an HTTPS gateway) the apps
-fall back to the `/stream/ws` WebSocket; WebView clients open it with the single-use
-[`wsTicket`](docs/pairing.md#实时桌面票据) from `POST /stream`. Validate real client and tunnel behavior
-before deployment; the managed relay is not implemented.
+For separate home and office networks, use **Tailscale + Tailscale Serve** when both
+devices can install Tailscale: a private HTTPS URL carries API requests, SSE and live
+desktop signaling, and the video flows directly over the tailnet. Without Tailscale on
+the client, use Tailscale Funnel, a self-hosted HTTPS gateway or an SSH tunnel; there
+the live desktop falls back to the `/stream/ws` WebSocket. The
+[connection guide](docs/connection-setup.md) covers each option step by step.
+A managed relay is planned, not implemented.
 
 ### Configuration
-
-Older configs may still contain `vncAddr` or `vncViewUrl` from the removed VNC relay; they are accepted and ignored.
 
 JSON `mcpArgs`, `corsOrigins`, `codexModels`, `claudeModels` and `runners` are arrays of strings. `questionTimeout` is a Go duration string such as `"30m"`.
 
@@ -338,7 +313,7 @@ curl -H "Authorization: Bearer $MOBD_TOKEN" -s localhost:8080/artifacts/ARTIFACT
 | `workdir` | `MOBD_CODEX_WORKDIR` | process cwd | Codex working directory |
 | `mcpCommand` | `MOBD_MOB_MCP_COMMAND` | this `mobd` binary | MCP server command for Codex `-c` injection; empty = built-in `mobd mcp` |
 | `mcpArgs` | `MOBD_MOB_MCP_ARGS` | `["mcp"]` when built-in, else `[]` | JSON array of args (external command only) |
-| `sharedSecret` | `MOBD_SHARED_SECRET` | empty | Removed; nonempty values fail startup with migration instructions. Pair each client instead. |
+| `sharedSecret` | `MOBD_SHARED_SECRET` | empty | Not supported; a nonempty value fails startup. Pair each client instead. |
 | `controlSocket` | `MOBD_CONTROL_SOCKET` | `~/.mobd/run/control.sock` | Private local management; parent directory must be owned by this user with mode 0700 |
 | `statePath` | `MOBD_STATE_PATH` | user config directory + `mob/state.json` | Private conversation snapshot; on macOS: `~/Library/Application Support/mob/state.json` |
 | `maxRunning` | `MOBD_MAX_RUNNING` | `1` | Tasks running at once across all sessions; others wait in the FIFO desktop queue |
@@ -355,6 +330,8 @@ curl -H "Authorization: Bearer $MOBD_TOKEN" -s localhost:8080/artifacts/ARTIFACT
 | `claudeBin` | `MOBD_CLAUDE_BIN` | `claude` | Claude Code executable |
 | `claudeWorkdir` | `MOBD_CLAUDE_WORKDIR` | Codex workdir | Claude working directory |
 | `claudeModels` | `MOBD_CLAUDE_MODELS` | `opus,sonnet,haiku` | Claude model picker |
+
+`vncAddr` and `vncViewUrl` in older configs are accepted and ignored.
 
 
 ## Conversations and runner lifecycle
@@ -379,5 +356,6 @@ CORS covers API responses and SSE, plus `OPTIONS` preflight for `GET`/`POST`/`PA
 
 - [Releases and installation](docs/releases.md): signing, GitHub Actions, R2, install and upgrade.
 - [Architecture](docs/architecture.md), [API reference](docs/mobd-v3.md), [runners](docs/runners.md): server behavior and supported capabilities.
+- [Connection setup](docs/connection-setup.md), [pairing](docs/pairing.md): networks, client pairing and authentication.
 - [Office smoke checklist](docs/office-smoke-checklist.md), [security](docs/security.md): deployment and verification.
 - [Live desktop streaming](docs/desktop-streaming.md): capture, encoding, WebRTC and WebSocket transports, rate control and input.
