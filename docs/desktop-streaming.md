@@ -378,7 +378,8 @@ All repos use branch `feat/webrtc-stream`; they merge to `main` together at rele
 | M5 | **Done.** `desktop.Input` (held state, drags, multi-clicks, release) over a per-OS `RemoteInput`; macOS CGEvent mouse/key/Unicode/pixel scroll with web key codes; `input`/`pointer`/`control` channels; cursor position on `control` (shape stays in the video) | recorded-event tests; data-channel test; opt-in real pointer test |
 | M6 | **Done.** Own rate control from receiver reports and ICE RTT (start low, ramp, back off once per RTT sample), size ladder with hysteresis, half frame rate below 400 kbps, retransmission budget (30% of fresh bytes), profiles, `stats`/`ended` on `control`, `stream` health feature | impaired-link test (2 Mbps/1%/20 ms: 1.3–1.95 Mbps, no freezes, recovery to 4 Mbps in 12 s); office Mac over LAN and Tailscale |
 | M7 | **Done, Funnel target open.** `GET /stream/ws` (header or `wsTicket` from `POST /stream`, which no longer needs an offer); binary access units, control JSON, per-frame acks driving in-flight flow control and the shared rate controller; keyframe at connect, start at 720p. Fixed the retransmission budget mixing RTX and video sequence numbers. First picture < 2 s on the LAN, 3.6–8.8 s through Funnel (see M7 results; two fixes deferred) | ws tests; LAN and Funnel probe runs |
-| M8 | Remove VNC (`/vnc` → 410), setup checks, config | `go test ./...` |
+| M7b | WebSocket sessions start at 540p (the encoder steps down when the WebSocket wins); `{"t":"resize","maxWidth","maxHeight"}` on `control` refits the running session without reconnecting | stream tests; office Mac over LAN and Funnel |
+| M8 | Remove VNC (`/vnc` → 410), setup checks, config; after every client has a live view | `go test ./...` |
 | M9 | Docs: this file, pairing, security, remote access, connection setup, README | review |
 | later | `mob-relay` (Pion TURN) and per-session TURN credentials in `POST /stream` | gateway with a phone off Wi-Fi |
 
@@ -393,6 +394,26 @@ All repos use branch `feat/webrtc-stream`; they merge to `main` together at rele
 | 5 | WebSocket fallback (WebCodecs) | VideoToolbox | MediaCodec |
 | 6 | Remove svnc, ticket code, Desktop sign-in | remove RFB/VNC, sign-in | same |
 | 7 | Tests and app check | Simulator | emulator/phone |
+
+### Order (revised 2026-10-18)
+
+1. mobd M0–M7 and desktop D1–D5: done.
+2. mobd M7b: WebSocket sessions start at 540p; a `resize` control message instead of reconnecting
+   when the view changes size. Clients that needed the WebSocket for a machine try it first next time
+   (they skip the WebRTC head start). The desktop app follows.
+3. iOS I1–I5 and Android A1–A5, in parallel, after choosing each platform's WebRTC library.
+4. VNC removal together, once every client has a live view: mobd M8, D6, I6, A6. Removing it
+   earlier would leave the phones without one.
+5. Tests and app checks (D7, I7, A7), docs (M9), release.
+
+Opening the session from the WebSocket itself (deferred from M7) is dropped: the apps keep a warm
+connection to mobd for `/events` and `/health`, so `POST /stream` costs no new TLS handshake; only the
+WebSocket does.
+
+Client design settled on the desktop (D3–D5), to follow on the phones where it applies: the small
+view only watches and the large view controls, with View/Control in its toolbar; quality is switched
+from the view as well as Settings; the readout shows size, fps, kB/s, transport and network with
+signal bars; WebRTC gets a 5 s head start before the WebSocket fallback.
 
 ### mob-site
 
