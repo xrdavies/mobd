@@ -37,8 +37,13 @@ var (
 	ErrConflict = errors.New("stream session already connected")
 )
 
-// connectTimeout ends a session whose peer never connects, so its capture does not run forever.
-const connectTimeout = 30 * time.Second
+const (
+	// connectTimeout ends a session whose peer never connects, so its capture does not run forever.
+	connectTimeout = 30 * time.Second
+	// wsStartKbps caps where a WebSocket session starts (540p): it is the path through relays and
+	// gateways, and a 720p keyframe at 1.2 Mbps took seconds through Funnel (M7).
+	wsStartKbps = 450
+)
 
 // Request opens a session. MaxWidth and MaxHeight are the client's view in pixels; the stream is
 // never larger than the view, the display or the quality profile. Without an offer the session
@@ -163,7 +168,8 @@ func (m *Manager) Open(clientID string, req Request) (Answer, error) {
 	if old != nil {
 		old.close()
 	}
-	s := &session{m: m, id: randomID(), client: clientID, finish: finish}
+	s := &session{m: m, id: randomID(), client: clientID, finish: finish,
+		display: [2]int{int(float64(disp.Width) * scale), int(float64(disp.Height) * scale)}, profile: p}
 	s.ctx, s.cancel = context.WithCancel(ctx)
 	s.rate = newRateController(p, w, h, time.Now())
 	t := s.rate.current()
@@ -225,6 +231,9 @@ type session struct {
 	release        func()
 	once           sync.Once
 	ctl            *controller
+	display        [2]int // capture size in pixels, for refitting on resize
+	profile        profile
+	rateMu         sync.Mutex // rate and applied: the adapt loop, the WebSocket start and resize
 	rate           *rateController
 	applied        target
 	lossMu         sync.Mutex
@@ -289,6 +298,11 @@ func (s *session) choose(transport string, sink func(desktop.AccessUnit) error, 
 	s.transport, s.sink, s.feedback = transport, sink, fb
 	pc := s.pc
 	s.mu.Unlock()
+	if transport == "ws" {
+		s.rateMu.Lock()
+		s.apply(s.rate.startAt(wsStartKbps), "WebSocket start")
+		s.rateMu.Unlock()
+	}
 	s.connectedOnce.Do(func() { close(s.connected) })
 	if transport == "ws" && pc != nil {
 		go pc.Close() // the WebSocket won the race
@@ -456,32 +470,53 @@ func (s *session) adapt() {
 				continue // not connected yet
 			}
 			f := fb(now)
+			s.rateMu.Lock()
 			t := s.rate.update(f)
 			if rateTrace {
 				log.Printf("stream %s rate: loss %.3f rtt %s base %s -> %d kbps %dx%d %d fps", s.id, f.loss, f.rtt.Round(time.Millisecond),
 					s.rate.baseRTT.Round(time.Millisecond), t.kbps, t.width, t.height, t.fps)
 			}
-			old := s.applied
-			if t.width != old.width || t.height != old.height {
-				s.src.SetSize(t.width, t.height)
-				log.Printf("stream %s: %dx%d at %d kbps (loss %.1f%%, rtt %s)", s.id, t.width, t.height, t.kbps, f.loss*100, f.rtt.Round(time.Millisecond))
-			}
-			if t.fps != old.fps {
-				s.src.SetFrameRate(t.fps)
-			}
-			if math.Abs(float64(t.kbps-old.kbps)) >= float64(old.kbps)/20 {
-				s.src.SetBitrate(t.kbps)
-			} else {
-				t.kbps = old.kbps
-			}
-			s.applied = t
-			s.targetKbps.Store(int32(t.kbps))
+			t = s.apply(t, fmt.Sprintf("loss %.1f%%, rtt %s", f.loss*100, f.rtt.Round(time.Millisecond)))
+			s.rateMu.Unlock()
 			if s.ctl != nil {
 				s.ctl.send(map[string]any{"t": "stats", "kbps": t.kbps, "width": t.width, "height": t.height, "fps": t.fps,
 					"loss": math.Round(f.loss*1000) / 1000, "rttMs": f.rtt.Milliseconds()})
 			}
 		}
 	}
+}
+
+// apply hands a new target to the running encoder; small bitrate changes are skipped. The caller
+// holds rateMu.
+func (s *session) apply(t target, why string) target {
+	old := s.applied
+	if t.width != old.width || t.height != old.height {
+		s.src.SetSize(t.width, t.height)
+		log.Printf("stream %s: %dx%d at %d kbps (%s)", s.id, t.width, t.height, t.kbps, why)
+	}
+	if t.fps != old.fps {
+		s.src.SetFrameRate(t.fps)
+	}
+	if math.Abs(float64(t.kbps-old.kbps)) >= float64(old.kbps)/20 {
+		s.src.SetBitrate(t.kbps)
+	} else {
+		t.kbps = old.kbps
+	}
+	s.applied = t
+	s.targetKbps.Store(int32(t.kbps))
+	return t
+}
+
+// resize refits the running session to the client's new view, in pixels like Request.MaxWidth.
+func (s *session) resize(maxW, maxH int) error {
+	if maxW < 0 || maxH < 0 || maxW > 8192 || maxH > 8192 {
+		return errors.New("resize needs a view of at most 8192 pixels")
+	}
+	w, h := fit(s.display[0], s.display[1], maxW, maxH, s.profile)
+	s.rateMu.Lock()
+	defer s.rateMu.Unlock()
+	s.apply(s.rate.resize(w, h), "view resized")
+	return nil
 }
 
 // watch ends the session on revoke, shutdown, or a peer that never connects.

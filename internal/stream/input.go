@@ -35,6 +35,9 @@ type message struct {
 	Text   string  `json:"text,omitempty"`
 	DX     float64 `json:"dx,omitempty"`
 	DY     float64 `json:"dy,omitempty"`
+	// resize: the client's new view in pixels, as in Request.
+	MaxWidth  int `json:"maxWidth,omitempty"`
+	MaxHeight int `json:"maxHeight,omitempty"`
 }
 
 const (
@@ -97,6 +100,8 @@ func (c *controller) handle(data []byte) {
 		err = c.input.Scroll(m.X, m.Y, m.DX, m.DY)
 	case "keyframe":
 		c.s.src.Keyframe()
+	case "resize":
+		err = c.s.resize(m.MaxWidth, m.MaxHeight)
 	default:
 		err = errors.New("unknown message type " + m.T)
 	}

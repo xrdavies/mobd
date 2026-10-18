@@ -281,3 +281,35 @@ func TestWebSocketOnASlowLink(t *testing.T) {
 		}
 	}
 }
+
+// A WebSocket session starts at 540p and a lower bitrate; resize refits it without reconnecting.
+func TestWebSocketStartsLowerAndResizes(t *testing.T) {
+	h := newHarness(t)
+	a, err := h.m.Open("desk", Request{Quality: "auto"})
+	if err != nil || a.Width != 1280 {
+		t.Fatalf("open: %v %dx%d", err, a.Width, a.Height)
+	}
+	c, _ := dialWS(t, wsServer(t, h.m)+"/?session="+a.Session)
+	var texts []map[string]any
+	readVideo(t, c, true, &texts)
+	h.mu.Lock()
+	f := h.streams[0]
+	h.mu.Unlock()
+	sizes := func() [][2]int { f.mu.Lock(); defer f.mu.Unlock(); return append([][2]int(nil), f.sizes...) }
+	if s := sizes(); len(s) != 1 || s[0] != [2]int{960, 540} || f.kbps.Load() > wsStartKbps {
+		t.Fatalf("WebSocket start: sizes %v at %d kbps", s, f.kbps.Load())
+	}
+	_ = c.Write(context.Background(), websocket.MessageText, []byte(`{"t":"resize","maxWidth":640,"maxHeight":640}`))
+	waitFor(t, "resize", func() bool { s := sizes(); return len(s) == 2 && s[1] == [2]int{640, 360} })
+	_ = c.Write(context.Background(), websocket.MessageText, []byte(`{"t":"resize","maxWidth":99999}`))
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		readVideo(t, c, false, &texts)
+		for _, v := range texts {
+			if v["t"] == "error" && v["about"] == "resize" {
+				return
+			}
+		}
+	}
+	t.Fatal("an oversized resize was not reported")
+}

@@ -167,6 +167,7 @@ Messages are small JSON objects with a `t` field. Coordinates are **normalized t
 | `text` | `input` | `text` (≤ 4096 characters, typed as Unicode without the clipboard; newlines press Return) |
 | `scroll` | `input` | `x`, `y`, `dx`, `dy` in pixels (positive = down/right, like `WheelEvent`) |
 | `keyframe` | `control` | — |
+| `resize` | `control` (or the WebSocket) | `maxWidth`, `maxHeight`: the view changed size; the running session is refitted, like a new `POST /stream`, without reconnecting |
 | `cursor` | `control`, from mobd | `x`, `y` when the pointer moves (≤ 30/s) |
 | `error` | `control`, from mobd | `about` (message type), `message`; at most once a second per type |
 
@@ -378,7 +379,7 @@ All repos use branch `feat/webrtc-stream`; they merge to `main` together at rele
 | M5 | **Done.** `desktop.Input` (held state, drags, multi-clicks, release) over a per-OS `RemoteInput`; macOS CGEvent mouse/key/Unicode/pixel scroll with web key codes; `input`/`pointer`/`control` channels; cursor position on `control` (shape stays in the video) | recorded-event tests; data-channel test; opt-in real pointer test |
 | M6 | **Done.** Own rate control from receiver reports and ICE RTT (start low, ramp, back off once per RTT sample), size ladder with hysteresis, half frame rate below 400 kbps, retransmission budget (30% of fresh bytes), profiles, `stats`/`ended` on `control`, `stream` health feature | impaired-link test (2 Mbps/1%/20 ms: 1.3–1.95 Mbps, no freezes, recovery to 4 Mbps in 12 s); office Mac over LAN and Tailscale |
 | M7 | **Done, Funnel target open.** `GET /stream/ws` (header or `wsTicket` from `POST /stream`, which no longer needs an offer); binary access units, control JSON, per-frame acks driving in-flight flow control and the shared rate controller; keyframe at connect, start at 720p. Fixed the retransmission budget mixing RTX and video sequence numbers. First picture < 2 s on the LAN, 3.6–8.8 s through Funnel (see M7 results; two fixes deferred) | ws tests; LAN and Funnel probe runs |
-| M7b | WebSocket sessions start at 540p (the encoder steps down when the WebSocket wins); `{"t":"resize","maxWidth","maxHeight"}` on `control` refits the running session without reconnecting | stream tests; office Mac over LAN and Funnel |
+| M7b | **Done.** WebSocket sessions start at 540p / 450 kbps (the encoder steps down when the WebSocket wins); `{"t":"resize","maxWidth","maxHeight"}` refits the running session without reconnecting, errors reported per type as usual | `TestWebSocketStartsLowerAndResizes`, `TestRateStartsLowerAndRefits`; office Mac with desktop D5b |
 | M8 | Remove VNC (`/vnc` → 410), setup checks, config; after every client has a live view | `go test ./...` |
 | M9 | Docs: this file, pairing, security, remote access, connection setup, README | review |
 | later | `mob-relay` (Pion TURN) and per-session TURN credentials in `POST /stream` | gateway with a phone off Wi-Fi |

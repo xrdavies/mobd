@@ -92,6 +92,20 @@ func (c *rateController) current() target {
 	return target{kbps: int(c.kbps), width: w, height: h, fps: fps}
 }
 
+// startAt lowers the bitrate (and the size with it) to at most kbps; used when the WebSocket, a slower
+// path than WebRTC, carries the session.
+func (c *rateController) startAt(kbps int) target {
+	c.kbps = math.Min(c.kbps, math.Max(float64(kbps), minKbps))
+	c.rung = c.rungFor(c.kbps)
+	return c.current()
+}
+
+// resize fits the stream to a new view (in device pixels, already fitted to the display and profile).
+func (c *rateController) resize(maxW, maxH int) target {
+	c.maxW, c.maxH = maxW, maxH
+	return c.current()
+}
+
 func (c *rateController) update(f feedback) target {
 	if f.rtt > 0 && (c.baseRTT == 0 || f.rtt < c.baseRTT) {
 		c.baseRTT = f.rtt

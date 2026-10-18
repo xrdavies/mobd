@@ -70,3 +70,17 @@ func TestRateWaitsBeforeSteppingUp(t *testing.T) {
 		t.Fatalf("no step up after hold and cooldown: %+v", got)
 	}
 }
+
+func TestRateStartsLowerAndRefits(t *testing.T) {
+	now := time.Now()
+	c := newRateController(profiles["auto"], 1920, 1080, now)
+	if got := c.startAt(450); got.kbps != 450 || got.width != 960 || got.height != 540 {
+		t.Fatalf("startAt: %+v", got)
+	}
+	if got := c.startAt(5000); got.kbps != 450 {
+		t.Fatalf("startAt only lowers: %+v", got)
+	}
+	if got := c.resize(640, 360); got.width != 640 || got.height != 360 {
+		t.Fatalf("resize: %+v", got)
+	}
+}
