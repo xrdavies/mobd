@@ -232,7 +232,7 @@ curl -i --connect-timeout 10 --max-time 15 https://office-mac.example-tailnet.ts
 
 准备域名，例如 `office.example.com`，将 A 记录指向公网服务器；只有 IPv6 确实可用时才配置 AAAA。
 服务器防火墙和云安全组放行 TCP 80、443，供客户端访问及自动证书签发；保留已有管理访问规则。
-办公室不做公网端口映射，也不公开 VNC 的 5900 或 mobd 的 8080。
+办公室不做公网端口映射，也不公开 mobd 的 8080。
 
 按 [Caddy 官方 Ubuntu/Debian 安装步骤](https://caddyserver.com/docs/install#debian-ubuntu-raspbian)
 安装稳定版及其 systemd 服务。编辑 `/etc/caddy/Caddyfile`，添加以下独立站点，保留已有站点：
@@ -247,11 +247,12 @@ office.example.com {
 
 两个域名都必须替换为自己的实际值。上游使用完整 Serve 域名，Caddy 会验证其证书；
 显式设置上游 Host 兼容不同 Caddy 版本。Caddy 默认转发客户端 Authorization，支持 WebSocket
-升级，并对 `text/event-stream` 即时刷新，无需另写 SSE/VNC 路由或配置共享 token。
+升级，并对 `text/event-stream` 即时刷新，无需另写 SSE/WebSocket 路由或配置共享 token。
+此拓扑只通 TCP，实时桌面走 `/stream/ws` WebSocket 回退。
 见 [reverse_proxy 文档](https://caddyserver.com/docs/caddyfile/directives/reverse_proxy)。
 
 不要删除或替换客户端的 Authorization，不在代理中缓存配对或业务响应。
-若另加访问日志，应屏蔽敏感头和 `/vnc?ticket=` 查询参数，避免记录凭据或短期票据。
+若另加访问日志，应屏蔽敏感头和 `/stream/ws?ticket=` 查询参数，避免记录凭据或短期票据。
 自定义 Web 客户端的 Origin 需加入 mobd 的 `corsOrigins` 精确允许列表，并保留原有来源；
 Caddy 改写上游 Host 不会自动授权公网域名的 Web 页面。
 
@@ -286,7 +287,7 @@ mobd link --url https://office.example.com
 它仍使用 Tailscale 的协调服务，不是自托管控制平面或自建 DERP。
 
 关闭对外发布时，移除 Caddyfile 中本节的站点块，验证并 reload，保留其他站点。
-Caddy reload 可能影响现有 WebSocket；需要立即停止目标客户端的 SSE/VNC 时，在办公室撤销其凭据。
+Caddy reload 可能影响现有 WebSocket；需要立即停止目标客户端的 SSE 和实时桌面时，在办公室撤销其凭据。
 若办公室的 Serve 入口也不再使用，可关闭本节配置：
 
 ```bash
@@ -356,11 +357,11 @@ unset MOBD_TEST_DIR MOBD_URL
 需要移除撤销记录时，在办公室运行 `mobd clients delete CLIENT_ID`。
 不要为了清理一次测试执行 `auth reset`，它会使所有客户端凭据失效。
 
-正式使用前，还需在实际客户端验证上传、截图、附件、任务事件、断线重连和 VNC 画面。
-`/vnc` 使用 Authorization 握手，WebView 无法设置请求头时使用
-[短期 VNC 票据](pairing.md#实时桌面票据)，不能把长期凭据放进 URL。
-Screen Sharing 登录与 mobd 配对各自独立，办公室 `vncAddr` 仍指向本机 VNC 服务。
-撤销目标客户端应中断其 SSE/VNC，其他客户端应保持正常。
+正式使用前，还需在实际客户端验证上传、截图、附件、任务事件、断线重连和实时桌面。
+实时桌面读数显示所用传输：`WebRTC · LAN`/`Tailscale`，或只通 TCP 时的 `WebSocket`。
+`/stream/ws` 使用 Authorization 握手，WebView 无法设置请求头时使用
+[短期票据](pairing.md#实时桌面票据)，不能把长期凭据放进 URL。无需开启 Screen Sharing。
+撤销目标客户端应中断其 SSE 和实时桌面，其他客户端应保持正常。
 
 ## 常见问题
 
@@ -372,7 +373,7 @@ Screen Sharing 登录与 mobd 配对各自独立，办公室 `vncAddr` 仍指向
 | 自建中继 502 | 先在网关 curl 办公室 Serve 域名；检查 tailnet 规则、DNS、Caddy 上游和办公室 mobd |
 | 证书错误 | 使用实际入口域名，检查 DNS、系统时间、证书签发；不要关闭证书校验 |
 | 配对后仍为 401 | 是否使用兑换后的 token、请求是否带 Authorization、设备是否已被撤销 |
-| VNC 403 / 502 | 403 检查 Origin 允许列表；502 检查办公室 Screen Sharing 和 `vncAddr` |
+| 实时桌面打不开 | 403 检查 Origin 允许列表；按客户端显示的 mobd 原因处理（屏幕锁定休眠、屏幕录制权限）；客户端显示“Update mobd”时升级办公室 mobd |
 | SSE 无心跳 / 画面卡顿 | 代理是否缓冲、Tailscale 是否退回中继、Funnel 带宽、办公室上行网络 |
 
 操作命令按官方文档与 mobd 接口核对。自动测试不能替代真实跨网 DNS、证书、访问策略及画面性能验收。

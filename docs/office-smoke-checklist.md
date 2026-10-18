@@ -42,8 +42,10 @@ Edit `~/.mobd/config.json` before starting:
    app that launches mobd (Terminal/iTerm for a shell launch, or mobd under
    launchd). You can review the grants in System Settings → Privacy & Security;
    restart mobd after changing them.
-2. Enable System Settings → General → Sharing → Screen Sharing. Confirm its
-   host, port and credentials, then set `vncAddr` if it differs from `127.0.0.1:5900`.
+2. Screen Sharing is not needed: mobd streams the desktop itself, with the
+   Screen Recording and Accessibility grants above. For a dedicated office Mac, turn
+   off automatic screen locking so snapshots keep working (the live view works at
+   the lock screen).
 3. Start the daemon and inspect readiness:
 
    ```bash
@@ -55,7 +57,7 @@ Edit `~/.mobd/config.json` before starting:
 
    Adjust the health address if listening on a different interface or port.
    `ok: true` means the API is serving; inspect `checks` and `runners` for agent,
-   macOS permissions and VNC readiness. Use `mobd logs` to investigate failures.
+   macOS permissions and display state (`display`: locked or asleep). Use `mobd logs` to investigate failures.
 
 `mobd mcp` is built into the same binary. mobd injects its configuration into each
 agent turn; no separate MCP installation or global agent configuration is needed.
@@ -83,23 +85,22 @@ any presented question/approval card and confirm the turn resumes.
 
 ## 4. Verify the home view
 
-1. First confirm Screen Sharing works from another trusted machine.
-2. In the mob client, use the office mobd URL. The default VNC connection is its
-   `/vnc` WebSocket relay; mob users do not need a separate websockify process.
-3. Watch the smoke task in the default preview. Keyboard/mouse input must remain
-   disabled until the user explicitly enables Control mode.
-4. If testing Control mode, finish the agent task first: human takeover does not
+1. In the mob client, connect the live view. Its readout shows the transport
+   (`WebRTC · LAN` or `Tailscale`; `WebSocket` through Funnel or an HTTPS gateway).
+2. Watch the smoke task in the small preview, which only watches. Mouse and keyboard
+   input must stay off until the user switches the large view to Control.
+3. If testing Control mode, finish the agent task first: human takeover does not
    automatically pause the agent.
 
-For a standalone svnc monitor, use `viewOnly: true`; the optional websockify path
-is documented in [VNC setup](vnc-svnc-setup.md).
+Without a client, `go run ./cmd/stream-probe -url … -token …` (add `-ws` for the
+WebSocket) reports first-picture time, bitrate and frame rate.
 
 ## 5. Acceptance and service lifecycle
 
 | Check | Criterion |
 | --- | --- |
 | Install | `mobd --version` matches the selected published release. |
-| Readiness | Configured runner, permissions and VNC checks are ready. |
+| Readiness | Configured runner and permission checks are ready; `features` include `stream`. |
 | Actuation | A task submitted through mobd visibly changes the office UI. |
 | View | Home preview shows the same desktop with input disabled by default. |
 | Persistence | After completed tasks, `mobd restart` retains conversations and configuration. |

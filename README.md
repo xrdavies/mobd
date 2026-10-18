@@ -2,7 +2,7 @@
 
 Office control plane: HTTP task API + Codex and Claude Code runners. The same binary provides the desktop actuation MCP server (`mobd mcp`), launched by the agent for each task.
 
-Desktop clients connect over HTTP/SSE and the VNC relay. The desktop app lives in
+Desktop clients connect over HTTP/SSE and the live desktop stream (WebRTC, with a WebSocket fallback). The desktop app lives in
 [xrdavies/mob](https://github.com/xrdavies/mob); this repository builds independently.
 
 Source: Go 1.27+ and Xcode Command Line Tools on macOS. Run `make build`,
@@ -50,8 +50,8 @@ mobd serve                      # foreground; Ctrl-C to stop
 Install and authenticate the agent CLI you plan to use (Codex or Claude Code).
 On macOS, mobd requests Accessibility and Screen Recording when it starts if
 they are missing; approve the system prompts for the app that launches mobd.
-You can also grant them in System Settings → Privacy & Security. Enable macOS
-Screen Sharing for live viewing. For direct LAN/VPN access,
+You can also grant them in System Settings → Privacy & Security. The live desktop is
+streamed by mobd itself (H.264 over WebRTC); Screen Sharing is not needed. For direct LAN/VPN access,
 configure `listen` for that interface; use loopback when using the remote-access
 proxy below. `mobd init` sets `listen` to `0.0.0.0:8080` (all IPv4 interfaces).
 The download domain serves files; clients connect to your office Mac's mobd URL.
@@ -122,8 +122,8 @@ does not test connectivity or change the listener.
 
 For separate home and office networks, use **Tailscale + Tailscale Serve** when
 both devices can install Tailscale. Keep mobd on `127.0.0.1:8080`; Serve provides
-a private HTTPS URL for the home mob client, carrying API requests, SSE and the
-`/vnc` WebSocket relay through one endpoint. No office public IP or router port
+a private HTTPS URL for the home mob client, carrying API requests, SSE and live
+desktop signaling through one endpoint; the video then flows directly over the tailnet. No office public IP or router port
 forward is needed. Reuse an existing company VPN when available.
 
 Follow the [connection setup guide](docs/connection-setup.md) for step-by-step LAN,
@@ -131,11 +131,14 @@ Tailscale Funnel and self-hosted HTTPS relay setup, pairing tests and shutdown.
 The [remote-access guide](docs/remote-access.md) covers the mode design, private
 Tailscale Serve deployment and an SSH alternative.
 Public deployments require HTTPS/WSS and authenticated requests, including SSE and
-VNC. WebView clients can use the [short-lived VNC ticket](docs/pairing.md#实时桌面票据)
-when they cannot set WebSocket headers. Validate real client and tunnel behavior
+the live desktop. Where UDP cannot pass (Tailscale Funnel, an HTTPS gateway) the apps
+fall back to the `/stream/ws` WebSocket; WebView clients open it with the single-use
+[`wsTicket`](docs/pairing.md#实时桌面票据) from `POST /stream`. Validate real client and tunnel behavior
 before deployment; the managed relay is not implemented.
 
 ### Configuration
+
+Older configs may still contain `vncAddr` or `vncViewUrl` from the removed VNC relay; they are accepted and ignored.
 
 JSON `mcpArgs`, `corsOrigins`, `codexModels`, `claudeModels` and `runners` are arrays of strings. `questionTimeout` is a Go duration string such as `"30m"`.
 
@@ -314,13 +317,14 @@ curl -H "Authorization: Bearer $MOBD_TOKEN" -s -X DELETE localhost:8080/sessions
 # timeline: messages + activities (tool calls, commands, plans…) + task usage
 curl -H "Authorization: Bearer $MOBD_TOKEN" -s localhost:8080/sessions/SESSION_ID | jq '.activities'
 
-# live view: WebSocket relay to Screen Sharing
-# ws://localhost:8080/vnc   ← svnc / the App connect here
+# live view: POST /stream with a WebRTC offer (see docs/desktop-streaming.md);
+# cmd/stream-probe is a command-line viewer for testing:
+go run ./cmd/stream-probe -url http://localhost:8080 -token "$MOBD_TOKEN" -seconds 10
 
 # global live stream (session / session.deleted / task / queue / reset)
 curl -H "Authorization: Bearer $MOBD_TOKEN" -N localhost:8080/events
 
-# desktop snapshot without VNC; tool screenshots and uploads
+# desktop snapshot; tool screenshots and uploads
 curl -H "Authorization: Bearer $MOBD_TOKEN" -s 'localhost:8080/screen?maxWidth=720' -o screen.jpg
 curl -H "Authorization: Bearer $MOBD_TOKEN" -s localhost:8080/artifacts/ARTIFACT_ID -o artifact.png
 ```
@@ -336,12 +340,10 @@ curl -H "Authorization: Bearer $MOBD_TOKEN" -s localhost:8080/artifacts/ARTIFACT
 | `mcpArgs` | `MOBD_MOB_MCP_ARGS` | `["mcp"]` when built-in, else `[]` | JSON array of args (external command only) |
 | `sharedSecret` | `MOBD_SHARED_SECRET` | empty | Removed; nonempty values fail startup with migration instructions. Pair each client instead. |
 | `controlSocket` | `MOBD_CONTROL_SOCKET` | `~/.mobd/run/control.sock` | Private local management; parent directory must be owned by this user with mode 0700 |
-| `vncViewUrl` | `MOBD_VNC_VIEW_URL` | empty | Returned on tasks / health for svnc viewOnly |
 | `statePath` | `MOBD_STATE_PATH` | user config directory + `mob/state.json` | Private conversation snapshot; on macOS: `~/Library/Application Support/mob/state.json` |
 | `maxRunning` | `MOBD_MAX_RUNNING` | `1` | Tasks running at once across all sessions; others wait in the FIFO desktop queue |
 | `dataDir` | `MOBD_DATA_DIR` | directory of `MOBD_STATE_PATH` | Root of `artifacts/` (tool screenshots, uploads) and private `auth.json` |
 | `codexModels` | `MOBD_CODEX_MODELS` | empty | Comma-separated model IDs advertised on `/health` for client pickers; `MOBD_MODELS` is also accepted, with lower priority |
-| `vncAddr` | `MOBD_VNC_ADDR` | `127.0.0.1:5900` | VNC server (macOS Screen Sharing) relayed by `GET /vnc` and checked by `/health` |
 | `corsOrigins` | `MOBD_CORS_ORIGINS` | `http://localhost:1420,http://127.0.0.1:1420,tauri://localhost,http://tauri.localhost` | Comma-separated exact origins; a nonempty value replaces the defaults |
 | `questionTimeout` | `MOBD_QUESTION_TIMEOUT` | `30m` | How long a turn waits for your answer to the agent's question or approval request |
 | `runners` | `MOBD_RUNNERS` | `codex,claude` | Enabled runners |
@@ -377,4 +379,5 @@ CORS covers API responses and SSE, plus `OPTIONS` preflight for `GET`/`POST`/`PA
 
 - [Releases and installation](docs/releases.md): signing, GitHub Actions, R2, install and upgrade.
 - [Architecture](docs/architecture.md), [API reference](docs/mobd-v3.md), [runners](docs/runners.md): server behavior and supported capabilities.
-- [Office smoke checklist](docs/office-smoke-checklist.md), [VNC setup](docs/vnc-svnc-setup.md), [security](docs/security.md): deployment and verification.
+- [Office smoke checklist](docs/office-smoke-checklist.md), [security](docs/security.md): deployment and verification.
+- [Live desktop streaming](docs/desktop-streaming.md): capture, encoding, WebRTC and WebSocket transports, rate control and input.

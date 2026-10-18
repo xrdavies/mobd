@@ -14,7 +14,7 @@ Signed and notarized macOS Apple Silicon binaries are distributed through
 Runs on the home Mac and iPhone.
 
 - **Dispatcher:** send tasks, watch task status, converse with the office agent session.
-- **Monitor:** the desktop client embeds svnc. Human input is disabled by default; an explicit Control mode enables it in the full-size view.
+- **Monitor:** the apps show the live desktop that mobd streams. The small view only watches; the large view has an explicit Control mode for mouse, keyboard and touch input.
 
 Clients are a remote control + monitor, not the place where the agent runtime lives.
 
@@ -63,13 +63,14 @@ tool operation with the [office checklist](office-smoke-checklist.md).
 `mcpCommand` and `mcpArgs` configure an external MCP command when needed.
 The default command is this mobd binary with the `mcp` argument.
 
-### View (VNC + svnc)
+### Live desktop (stream)
 
-- Office Mac runs a VNC server exposing the desktop.
-- Humans connect with **[svnc](https://github.com/xrdavies/svnc)** through mobd's WebSocket relay at `/vnc`; view-only by default, with an explicit Control mode in the App's full-size view.
-- The relay connects to `vncAddr` (default `127.0.0.1:5900`) and copies RFB bytes without interpreting them. Screen Sharing handles VNC authentication, including Apple Remote Desktop sign-in.
-- The client derives the WebSocket URL from the mobd URL. `/health` reports VNC reachability and the number of open relays in `vncSessions`.
-- Browser origins must match the relay host or `corsOrigins`; authenticated clients without an Origin header are accepted. Relays close on credential revocation or daemon shutdown.
+- mobd captures the display with ScreenCaptureKit and encodes H.264 with VideoToolbox, sized to the view the client shows; an unchanged screen sends nothing.
+- `POST /stream` opens a session with a WebRTC offer (Pion): one video track plus `control`, `input` and `pointer` data channels. Where UDP cannot pass, the same session continues over `GET /stream/ws`.
+- mobd's own rate control adapts bitrate, size and frame rate from receiver reports (WebRTC) or acknowledgements (WebSocket); clients send `resize` when their view changes.
+- Input arrives as normalized coordinates and web key codes and is posted with CGEvent; held keys and buttons are released when the session ends.
+- One session per client; it closes on credential revocation, deletion, auth reset or daemon shutdown. `/health` lists `stream` and `streamResize` and reports `streamSessions`.
+- Details: [desktop streaming](desktop-streaming.md).
 - Transport: use the intranet / VPN or an SSH tunnel. For home-to-office access,
   [Tailscale Serve](remote-access.md) provides a private HTTPS/WSS entry point to
   a loopback mobd listener; a public reverse proxy needs authentication on all routes.
@@ -79,7 +80,7 @@ The default command is this mobd binary with the `mcp` argument.
   and local management are implemented; desktop/mobile integration is pending.
   The managed relay still needs device enrollment and isolation between users.
 
-See [VNC setup](vnc-svnc-setup.md) and [security](security.md).
+See [desktop streaming](desktop-streaming.md) and [security](security.md).
 
 ## Operating limits
 
@@ -107,14 +108,12 @@ flowchart TB
     API[MOB task API - Go]
     Runner[Codex or Claude runner]
     MCP[mobd mcp]
-    VNC[VNC server]
   end
 
   C -->|tasks| T --> API
   API --> Runner
   Runner --> MCP
-  C -->|live view via svnc| T
-  API -->|/vnc relay| VNC
+  C -->|live desktop: WebRTC or /stream/ws| T
 ```
 
 `ask_user` and `request_approval` are implemented. Runner permissions default to

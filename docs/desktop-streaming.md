@@ -1,7 +1,7 @@
 # Desktop streaming: design and plan
 
-Status: **accepted**, on branch `feat/webrtc-stream`. The validation spike (M0) passed; see
-[Spike results](#spike-results).
+Status: **implemented** (mobd M0–M8, all three apps; VNC removed). The validation spike (M0)
+passed; see [Spike results](#spike-results). The context below describes the VNC relay this replaced.
 
 ## Context
 
@@ -381,7 +381,7 @@ All repos use branch `feat/webrtc-stream`; they merge to `main` together at rele
 | M7 | **Done, Funnel target open.** `GET /stream/ws` (header or `wsTicket` from `POST /stream`, which no longer needs an offer); binary access units, control JSON, per-frame acks driving in-flight flow control and the shared rate controller; keyframe at connect, start at 720p. Fixed the retransmission budget mixing RTX and video sequence numbers. First picture < 2 s on the LAN, 3.6–8.8 s through Funnel (see M7 results; two fixes deferred) | ws tests; LAN and Funnel probe runs |
 | M7b | **Done.** WebSocket sessions start at 540p / 450 kbps (the encoder steps down when the WebSocket wins); `{"t":"resize","maxWidth","maxHeight"}` refits the running session without reconnecting, errors reported per type as usual | `TestWebSocketStartsLowerAndResizes`, `TestRateStartsLowerAndRefits`; office Mac with desktop D5b |
 | M8 | **Done.** VNC relay removed: `GET /vnc` and `POST /vnc/ticket` answer 410 pointing to the live desktop stream; the Screen Sharing health check, the `vncProxy`/`vncTicket` features and `vncSessions` are gone; tasks no longer carry `vncViewUrl`. `vncAddr`/`vncViewUrl` in a config are accepted and ignored so older configs load. The ticket store stays for `/stream/ws` (`wsTicket`) | `go test ./...` |
-| M9 | Docs: this file, pairing, security, remote access, connection setup, README | review |
+| M9 | **Done.** Docs: this file, architecture, pairing, security, remote access, connection setup, smoke checklist, API reference, README; the VNC setup guide removed | review |
 | later | `mob-relay` (Pion TURN) and per-session TURN credentials in `POST /stream` | gateway with a phone off Wi-Fi |
 
 ### Clients (each in its own repo, after mobd M7)

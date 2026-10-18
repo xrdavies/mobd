@@ -15,14 +15,14 @@ See [architecture](architecture.md), [runners](runners.md),
 3. **Manage conversations**: rename, pin, archive, delete.
 4. **Live multi-client state**: a global event stream keeps the sidebar, queue and status chips current without polling.
 5. **Task options**: per-task model and reasoning effort, plus image attachments.
-6. **Desktop snapshots without VNC**: `GET /screen` for thumbnails (iPhone, session previews) and readiness checks.
-7. **Readiness**: `/health` explains what is missing on the office Mac (Codex, actuation, macOS permissions, VNC).
+6. **Desktop snapshots**: `GET /screen` for thumbnails (iPhone, session previews) and readiness checks.
+7. **Readiness**: `/health` explains what is missing on the office Mac (Codex, actuation, macOS permissions, display state).
 
 ## Current scope
 
 Codex and Claude Code runners, questions/approvals and Codex app-server steering
 are implemented. Every business route requires a paired device credential in
-`Authorization: Bearer <token>`, including `/health` and `/vnc`. See the
+`Authorization: Bearer <token>`, including `/health` and the live desktop (`/stream`). See the
 [pairing protocol](pairing.md) for invitations, CLI management and client migration.
 The `pairing` feature is advertised after authentication. There is no multi-user
 login or dedicated security audit log. Storage uses an
@@ -77,7 +77,6 @@ type Task = {
   createdAt: string;
   updatedAt: string;
   error: string | null;
-  vncViewUrl?: string;
   model?: string;
   effort?: string;                // allowed values come from the selected runner in /health
   attachments?: string[];         // upload artifact IDs
@@ -158,7 +157,10 @@ Invitation redemption and preview are documented in [pairing](pairing.md).
 | POST | `/tasks/{id}/questions/{qid}/answer` | Answer a pending question: `{answer}` (questions) or `{approved, answer?}` (approvals) → question; 409 if already settled ([runners.md](runners.md#asking-the-user-ask_user-request_approval)) |
 | POST | `/tasks/{id}/steer` | `{prompt}`: add a message to the running turn (runners with `steer`; Codex app-server). 409 when the turn cannot take input |
 | POST | `/internal/tasks/{id}/ask` | Used by `mobd mcp` only (per-turn token); blocks until the question is settled |
-| GET | `/vnc` | WebSocket ↔ TCP relay to `MOBD_VNC_ADDR` (Screen Sharing). 403 for unknown origins, 502 if the VNC server is down |
+| POST | `/stream` | Opens the live desktop: `{offer?, maxWidth, maxHeight, quality}` → **201** `{session, answer?, wsTicket, width, height, display}` ([desktop-streaming.md](desktop-streaming.md)) |
+| DELETE | `/stream/{id}` | Ends the client's live desktop session |
+| GET | `/stream/ws` | `?session=` (and `?ticket=` for webviews): the same session over a WebSocket where UDP cannot pass. 403 for unknown origins, 404 unknown session, 409 if WebRTC already carries it |
+| GET, POST | `/vnc`, `/vnc/ticket` | Removed with the VNC relay: **410** |
 
 ### Health
 
@@ -168,8 +170,8 @@ Example response (abridged):
 {
   "ok": true, "service": "mobd", "apiVersion": 3,
   "runner": "codex", "maxRunning": 1,
-  "vncViewUrl": "…", "mobMcp": "/path/to/mobd",
-  "features": ["queue", "activities", "sessionAdmin", "events", "screen", "uploads", "taskOptions", "vncProxy", "runners", "questions", "steer"],
+  "mobMcp": "/path/to/mobd",
+  "features": ["queue", "activities", "sessionAdmin", "events", "screen", "uploads", "taskOptions", "runners", "questions", "steer", "pairing", "stream", "streamResize"],
   "models": [],
   "efforts": ["minimal", "low", "medium", "high", "xhigh"],
   "checks": {
@@ -177,12 +179,12 @@ Example response (abridged):
     "actuation": { "ok": true,  "detail": "built-in (mobd mcp)" },
     "accessibility":   { "ok": false, "detail": "grant Accessibility to the app that launches mobd" },
     "screenRecording": { "ok": true },
-    "vnc":       { "ok": true,  "detail": "127.0.0.1:5900 reachable" }
+    "display":   { "ok": true,  "detail": "unlocked and awake" }
   }
 }
 ```
 
-`ok` is true when mobd is serving. `checks` explain readiness without blocking anything and are cached for 10 s. Each check is `{ok, unknown?, detail?}`; permission checks come from `CGPreflightPostEventAccess` / `CGPreflightScreenCaptureAccess` in mobd and are `unknown` off macOS. `runners` lists each enabled runner's capabilities and readiness ([runners.md](runners.md)); top-level `models`/`efforts` describe the default runner. Codex models come from `MOBD_CODEX_MODELS`; an empty list means "the agent's default only". The `vnc` check dials `MOBD_VNC_ADDR` (default `127.0.0.1:5900`); `vncSessions` counts open `/vnc` relays.
+`ok` is true when mobd is serving. `checks` explain readiness without blocking anything and are cached for 10 s. Each check is `{ok, unknown?, detail?}`; permission checks come from `CGPreflightPostEventAccess` / `CGPreflightScreenCaptureAccess` in mobd and are `unknown` off macOS. `runners` lists each enabled runner's capabilities and readiness ([runners.md](runners.md)); top-level `models`/`efforts` describe the default runner. Codex models come from `MOBD_CODEX_MODELS`; an empty list means "the agent's default only". `display` reports a locked console or sleeping display (snapshots need it awake; the live view wakes it); `streamSessions` counts open live desktop sessions.
 
 ### Global events (`GET /events`)
 
@@ -210,7 +212,6 @@ JSON keys, environment variables and defaults.
 | `MOBD_MAX_RUNNING` | `1` | Tasks allowed to run at once (one desktop → 1) |
 | `MOBD_DATA_DIR` | directory of `MOBD_STATE_PATH` | Root for `artifacts/` (screenshots, uploads) |
 | `MOBD_CODEX_MODELS` | empty | Codex model IDs offered to clients (`MOBD_MODELS` is also accepted, with lower priority) |
-| `MOBD_VNC_ADDR` | `127.0.0.1:5900` | VNC server relayed by `GET /vnc` and checked by `/health` |
 | `MOBD_QUESTION_TIMEOUT` | `30m` | How long a turn waits for an answer to `ask_user` / `request_approval` |
 
 ## Internal structure

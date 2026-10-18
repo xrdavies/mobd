@@ -5,10 +5,10 @@
 本文保留产品模式设计、双端私有 Serve 和 SSH 备选方案；自建网关与尚未实现的托管中继分别运营。
 
 目标是让用户为每台办公室机器选择 **私有网络、用户自管 Funnel、我们的中继** 三种连接方式。
-三种方式复用同一套 mobd API、SSE 和 VNC 中继；手机不想安装 VPN 时选择后两种。
+三种方式复用同一套 mobd API、SSE 和实时桌面流；手机不想安装 VPN 时选择后两种。
 **三种模式都要求客户端认证；首次配对，后续自动认证，不提供无认证模式。**
-mobd 已实现配对和完整业务认证；客户端选择界面、凭据适配和托管中继仍待实施。
-可以先用 curl 测试网络和配对接口；正式使用前需完成客户端适配并验证 HTTPS、SSE 和 VNC。
+mobd 和三端客户端已实现配对和完整业务认证；连接方式选择界面和托管中继仍待实施。
+可以先用 curl 测试网络和配对接口；正式使用前在客户端验证 HTTPS、SSE 和实时桌面。
 
 ## 三种连接模式
 
@@ -55,13 +55,14 @@ mobd 已强制执行配对认证，非空的旧 `sharedSecret` 配置会提示�
 | 用户自行维护公网服务器 | 自有 HTTPS 网关 + 办公室私有连接 + 完整认证 | 手机使用自定义 URL；与我们的托管中继分别运营 |
 | 不方便安装 VPN，但两端能运行 SSH，且有可信公网服务器 | 下文的 SSH 双向转发 | 自行维护服务器、SSH 密钥与断线重连 |
 
-mobd 已将 HTTP API、SSE 事件流和 `/vnc` WebSocket 中继放在同一个端口。
-只需连接这一个入口，`5900` 不需要经过公网转发。远端地址不写入 `vncAddr`
-或 `vncViewUrl`；它是家庭 mob 客户端的服务器地址。本地 agent/MCP 继续访问本机 mobd。
+mobd 已将 HTTP API、SSE 事件流和实时桌面的信令（`POST /stream`）及 WebSocket 回退
+（`/stream/ws`）放在同一个端口；它是家庭 mob 客户端的服务器地址。本地 agent/MCP 继续访问本机 mobd。
+实时桌面优先用 WebRTC（UDP）：私有网络和 Tailscale 下视频直接走 tailnet；Funnel、
+HTTPS 网关、SSH 转发等只通 TCP 的入口下，客户端自动回退到 `/stream/ws`，画质和延迟较差。
 
-mobd 的读取、写入、SSE、截图、附件和 `/vnc` 均要求独立设备凭据。
+mobd 的读取、写入、SSE、截图、附件和实时桌面均要求独立设备凭据。
 HTTPS 仅加密传输，CORS 仅约束浏览器来源，两者均不能代替身份认证。
-客户端凭据适配和真实跨网验证仍待完成。完整边界见 [security](security.md)。
+跨网（手机移动网络）验证仍待完成。完整边界见 [security](security.md)。
 
 ### `mobd link --url` 应填写哪个地址
 
@@ -108,9 +109,9 @@ flowchart LR
 无法把 Serve 变成普通公网 HTTP 服务：DERP 为 Tailscale 节点转发加密流量。
 
 Funnel 有不可配置的带宽限制、域名限制，官方当前标为 beta。因此先在完整认证下
-验证 API、SSE、WebSocket 和实际 VNC 画面性能，再决定是否长期采用；不能只凭
-`/health` 可达就认为满足远程桌面需求。当前发布指引仍以私有 Serve 为主，
-客户端完成配对和所有通道认证后再验收公网 Funnel。
+验证 API、SSE 和实际画面性能，再决定是否长期采用；不能只凭
+`/health` 可达就认为满足远程桌面需求。Funnel 只通 TCP，实时桌面走 WebSocket 回退：
+实测（办公室 → Funnel 公共中继，约 200 kbps）首帧数秒、稳定在 360p；当前发布指引仍以私有 Serve 为主。
 
 ### 需要自有 relay 时：公网 HTTPS 网关
 
@@ -130,7 +131,7 @@ flowchart LR
 此拓扑 TLS 在网关终止，**网关可以读取会话和画面数据**，必须使用可信服务器。
 目标方案由 mobd 验证独立客户端凭据；网关可另加账号授权，但不能绕过 mobd 认证，
 也不能用全用户共享的密钥冒充所有客户端。
-无需为手机开放 VNC 的 TCP 5900；所有流量仍经 mobd 的 HTTP 端口。
+所有流量经 mobd 的 HTTP 端口；实时桌面在此拓扑下走 WebSocket 回退（之后可由 `mob-relay` 的 TURN 承载 WebRTC）。
 
 ### 我们的中继：在网关之上提供设备绑定与隔离
 
@@ -149,21 +150,21 @@ Tailscale 是可选的底层通道，不是手机端协议。若以后要求办�
   不能接受客户端提供的任意转发目标。
 - 限制网关到每台办公室机器的服务端口，并隔离不同用户的办公室设备，禁止相互访问。
   不将所有客户放进默认全互通的私有网络。
-- API、SSE 和 VNC 握手统一授权；撤销设备或用户访问时关闭相关长连接。
+- API、SSE 和实时桌面统一授权；撤销设备或用户访问时关闭相关长连接。
   断线重连需要恢复订阅，不能自动重发可能已执行的任务创建请求。
 - 管理带宽、连接数和可用性；公网网关终止 TLS 时运营方可读取流量，需明确告知用户。
   端到端内容加密需要另行设计，当前拓扑不作此承诺。
 
 ### mobd 和 mob 必须配合的改动
 
-1. mobd 在所有网络模式强制认证，覆盖读取、写入、SSE、截图、附件与 VNC 握手，拒绝空凭据。
+1. mobd 在所有网络模式强制认证，覆盖读取、写入、SSE、截图、附件与实时桌面，拒绝空凭据。
    保留本地 agent/MCP 的按任务认证，不能因代理请求来自 loopback 就跳过认证。
 2. mob 手机端提供地址和配对/登录流程，并为 HTTP、SSE、图片和 WebSocket 使用一致的凭据。
-   WebView 无法设置 WebSocket 请求头时使用已实现的[短期 VNC 票据](pairing.md#实时桌面票据)；
+   WebView 无法设置 WebSocket 请求头时使用 `POST /stream` 返回的[短期票据](pairing.md#实时桌面票据)；
    SSE 使用能携带 Authorization 的网络接口。不将长期密钥放进 URL，凭据保存在系统安全存储中。
 3. 联调未登录拒绝访问、凭据撤销、SSE 实时推送、画面更新，以及手机网络切换后的恢复。
 
-mobd 统一认证、配对、本机管理和撤销断连已实现；手机端尚未适配或验证。
+mobd 统一认证、配对、本机管理和撤销断连，以及三端客户端适配均已实现；手机移动网络下的真机验证待完成。
 后续顺序是：**完成 mob 配对及模式选择，验证自管 Funnel，再接入我们的中继服务**。
 中继完成前不展示为可用服务。隧道负责网络可达性，应用负责识别和授权用户。
 
@@ -177,7 +178,7 @@ flowchart LR
     H[家庭 mob 客户端] -->|HTTPS / SSE / WSS| T[Tailscale 私有网络]
     T --> S[办公室 Tailscale Serve]
     S -->|本机 HTTP / WS| M[mobd 127.0.0.1:8080]
-    M -->|本机 TCP| V[Screen Sharing 127.0.0.1:5900]
+    H -.->|实时桌面 WebRTC（UDP，经 tailnet）| M
     M --> A[本机 agent / MCP]
 ```
 
@@ -233,14 +234,16 @@ mobd 不根据 Tailscale 身份头自动配对或隔离用户数据。
 ### 3. 办公室启动 mobd
 
 按 [安装说明](../README.md#install--run-office-mac) 初始化、设置 runner 和 macOS 权限。
-编辑现有 `~/.mobd/config.json` 中以下两项，保留工作目录、runner 等其他配置：
+编辑现有 `~/.mobd/config.json` 中的 `listen`，保留工作目录、runner 等其他配置：
 
 ```json
 {
-  "listen": "127.0.0.1:8080",
-  "vncAddr": "127.0.0.1:5900"
+  "listen": "127.0.0.1:8080"
 }
 ```
+
+实时桌面的 WebRTC 视频不经过 Serve，而是在 tailnet 上直连 mobd 的 UDP 端口（host candidate），
+因此 `listen` 改为本机后画面仍可用。
 
 首次启动运行 `mobd start`；已启动则在当前任务结束后运行 `mobd restart`。
 配置使用自定义文件时继续指定该文件。随后检查：
@@ -272,7 +275,7 @@ tailscale serve status
 确认输出为 **Available within your tailnet**，并检查 `tailscale funnel status`
 没有将该入口公开。若已有其他 Serve 服务，先安排独立入口，不要覆盖其配置。
 
-Serve 在办公室终止 HTTPS，再代理到本机 HTTP；API、SSE 和 `/vnc` 使用同一个根路径入口。
+Serve 在办公室终止 HTTPS，再代理到本机 HTTP；API、SSE 和实时桌面信令使用同一个根路径入口。
 `--bg` 保存后台服务配置，Tailscale 重启后可恢复，但不会替你启动 mobd。
 mobd 需要登录后自启时使用 `mobd start --login`；已在运行则用 `mobd restart --login`。
 Tailscale 也必须保持连接。参见官方 [Serve 命令](https://tailscale.com/docs/reference/tailscale-cli/serve)。
@@ -291,16 +294,16 @@ curl -iN -H "Authorization: Bearer $MOBD_TOKEN" --max-time 20 "$MOBD_REMOTE_URL/
 事件流应返回 `200`、`Content-Type: text/event-stream`，空闲约 15 秒出现 `: ping`。
 第二条命令在 20 秒主动结束，curl 返回超时退出码 28 是预期行为；不能只有响应头而无心跳。
 
-在 mob 客户端填写同一 HTTPS URL。客户端的 VNC 地址应派生为
-`wss://office-mac.example-tailnet.ts.net/vnc`，Screen Sharing 的登录凭据仍然单独验证。
+在 mob 客户端粘贴 `mobd link` 输出的配对链接。实时桌面的读数应显示 `WebRTC · Tailscale`
+（同一局域网时为 `LAN`）；显示 `WebSocket` 说明 UDP 不通，已回退到 TCP。
 默认 `corsOrigins` 已包含 mob 桌面客户端的常见来源；自定义 Web 客户端需添加自己的精确
 Origin（协议、主机、端口），并保留仍在使用的其他来源。不能用放开 CORS 代替网络授权。
 
 实际验收必须覆盖：
 
 - 在家庭网络提交一个无破坏性任务，事件实时到达，审批/回答（若启用）可以继续任务。
-- 读取会话、上传图片、打开截图或附件；所有请求和 VNC 握手均需携带设备凭据。
-- 打开 VNC 预览，确认画面持续更新且默认不发送键鼠输入。
+- 读取会话、上传图片、打开截图或附件；所有请求和实时桌面均需携带设备凭据。
+- 打开实时桌面，确认画面持续更新，小窗只观看，切换到 Control 后才发送键鼠输入。
 - 关闭家庭端 Tailscale 后，新请求无法到达；另一个没有获准的 tailnet 设备也不能访问。
 - 在无任务运行时重启 mobd、断开并重连 Tailscale，确认重新连接后可继续读取会话和查看画面。
 
@@ -317,7 +320,7 @@ Origin（协议、主机、端口），并保留仍在使用的其他来源。�
 | HTTPS 证书失败 | 使用 Serve 输出的完整域名，检查 HTTPS 是否启用和系统时间；不要跳过证书验证 |
 | HTTP 502 | 检查 Serve 的本机目标、mobd 是否运行及端口是否一致 |
 | HTTP 401 | 尚未配对或凭据已撤销；先完成配对并检查所有通道的 Authorization |
-| API 正常，VNC 403/502 | 403 检查客户端 Origin；502 检查办公室 Screen Sharing 和 `vncAddr` |
+| 实时桌面打不开 | 403 检查客户端 Origin；503/`ended` 看 mobd 给出的原因（屏幕锁定休眠、缺少屏幕录制权限）；`/vnc` 返回 410 说明客户端过旧 |
 | 画面延迟大 | 从家庭端 `tailscale ping office-mac` 并查看 `tailscale status`；`relay` 表示 DERP 中继，测实际带宽后再决定是否部署更近的中继 |
 | SSE 没有心跳或更新 | 确认请求到达 mobd；额外代理必须关闭流缓冲和缓存，允许长连接 |
 
@@ -353,8 +356,8 @@ ssh -NT -o ExitOnForwardFailure=yes \
 ```
 
 家庭 mob 客户端填写 `http://127.0.0.1:18080`。HTTP、SSE、WebSocket 的字节都经过 SSH；
-两个 `18080` 监听均只在各自机器本机开放，服务器防火墙不开放 18080/8080/5900。
-同样用 `/health`、`/events` 和 VNC 完成验收。任一 SSH 命令退出都会断线，Ctrl-C 可关闭。
+两个 `18080` 监听均只在各自机器本机开放，服务器防火墙不开放 18080/8080。
+SSH 只转发 TCP，实时桌面走 WebSocket 回退。同样用 `/health`、`/events` 和实时桌面完成验收。任一 SSH 命令退出都会断线，Ctrl-C 可关闭。
 
 这是两段 SSH 加密：**跳板机及其本地用户能访问中间端口，也能看到转发的数据**，
 因此需要专用、可信的服务器，不能把 loopback 当成账号隔离。

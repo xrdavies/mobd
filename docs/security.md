@@ -1,11 +1,11 @@
 # Security notes
 
-Access controls and deployment requirements for mobd. See [VNC setup](vnc-svnc-setup.md)
+Access controls and deployment requirements for mobd. See [desktop streaming](desktop-streaming.md)
 for the live-view connection.
 
 ## Deployment posture
 
-- Prefer **office intranet** or **VPN**. Do not expose raw VNC to the public internet.
+- Prefer **office intranet** or **VPN**. Expose only mobd's HTTPS endpoint, never its plain HTTP port.
 - HTTP pairing links are allowed with a CLI warning, including LAN and Tailscale
   addresses. Without an encrypted tunnel, observers can capture invitations,
   long-lived credentials and business data. Authentication does not encrypt HTTP;
@@ -24,8 +24,8 @@ for the live-view connection.
 
 ## View vs actuation
 
-- **Humans:** the mob desktop client disables input by default and offers an explicit Control mode. A standalone svnc monitor can use **`viewOnly: true`**. This is client behavior; mobd relays RFB bytes and does not enforce view-only access.
-- **Agent:** desktop tools run through **local MCP** (`mobd mcp`) on the office Mac, independently of the human VNC connection.
+- **Humans:** the apps' small live view only watches; mouse, keyboard and touch input go to the office Mac only in the large view's explicit Control mode. This is client behavior: mobd accepts input from any paired client's live session and does not enforce view-only access.
+- **Agent:** desktop tools run through **local MCP** (`mobd mcp`) on the office Mac, independently of the human live view.
 
 Keeping these channels apart limits accidental remote control and makes auditing clearer.
 
@@ -38,15 +38,16 @@ Keeping these channels apart limits accidental remote control and makes auditing
 ## Mandatory device authentication
 
 Every business route requires `Authorization: Bearer <device credential>`, including
-health, reads, writes, SSE, images and VNC. Credentials are independent per client
+health, reads, writes, SSE, images and the live desktop. Credentials are independent per client
 and remain valid until revoked, deleted or authentication is reset. The
 [pairing protocol](pairing.md) uses ten-minute, single-use invitations generated
 through a user-private Unix socket. Loopback and proxy headers do not bypass auth.
-Because browser WebSockets cannot send headers, `GET /vnc` alone also accepts a
-`?ticket=` from `POST /vnc/ticket`: 30 seconds, single use, bound to the issuing
-client and invalidated with it. The long-lived credential never appears in a URL.
-Revocation disconnects the client's active SSE/VNC streams. Screen Sharing still
-performs its own upstream VNC authentication; browser origins are checked separately.
+Because browser WebSockets cannot send headers, `GET /stream/ws` alone also accepts a
+`?ticket=`: the `wsTicket` returned by `POST /stream`, valid 30 seconds, single use,
+bound to the issuing client and invalidated with it. The long-lived credential never
+appears in a URL. Revocation disconnects the client's SSE streams and live desktop
+session. Browser origins are checked separately. WebRTC media is encrypted (DTLS-SRTP)
+and uses host candidates only, so the office's public IP is not disclosed.
 
 Authentication state is private, atomically persisted and locked to one daemon.
 Only credential hashes are stored. Corrupt state fails startup; missing state
