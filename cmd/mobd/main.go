@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -181,6 +182,13 @@ func run(args []string) error {
 	return serve(cfg)
 }
 
+func streamPort(cfg config.Config) string {
+	if cfg.StreamPort == 0 {
+		return "random"
+	}
+	return strconv.Itoa(cfg.StreamPort)
+}
+
 func serve(cfg config.Config) error {
 	// Ask for missing macOS TCC grants before starting the remote API.
 	desktop.RequestPermissions()
@@ -191,6 +199,14 @@ func serve(cfg config.Config) error {
 		return err
 	}
 	defer listener.Close()
+	if cfg.StreamPort > 0 {
+		udp, err := net.ListenUDP("udp", &net.UDPAddr{Port: cfg.StreamPort})
+		if err != nil {
+			return fmt.Errorf("live desktop UDP port %d: %w", cfg.StreamPort, err)
+		}
+		defer udp.Close()
+		cfg.StreamUDP = udp
+	}
 
 	management, release, err := control.Listen(cfg.ControlSocket)
 	if err != nil {
@@ -234,7 +250,7 @@ func serve(cfg config.Config) error {
 	serveErr := make(chan error, 2)
 	go func() { serveErr <- adminSrv.Serve(management) }()
 	go func() {
-		log.Printf("mobd listening on %s; health=%s/health (runners=%s default=%s)", cfg.ListenAddr, cfg.SelfURL(), strings.Join(cfg.Runners, ","), cfg.DefaultRunner)
+		log.Printf("mobd listening on %s, live desktop UDP %s; health=%s/health (runners=%s default=%s)", cfg.ListenAddr, streamPort(cfg), cfg.SelfURL(), strings.Join(cfg.Runners, ","), cfg.DefaultRunner)
 		serveErr <- httpSrv.Serve(listener)
 	}()
 

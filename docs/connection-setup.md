@@ -32,7 +32,8 @@ curl -i --connect-timeout 5 --max-time 10 http://127.0.0.1:8080/health
 
 `mobd init` 生成的配置使用 `"listen": "0.0.0.0:8080"`，同时支持内网直连和本机代理。
 只需要隧道或代理访问时，可改为 `127.0.0.1:8080`；WebRTC 视频不经过 HTTP 监听地址，
-仍在局域网或 tailnet 上直连 mobd 的 UDP 端口。公网 HTTPS 由 Tailscale 或网关提供，mobd 本身保持 HTTP。
+仍在局域网或 tailnet 上直连 mobd 的 UDP 端口 `9527`（`streamPort` / `MOBD_STREAM_PORT`，
+所有接口；`0` 表示每个会话随机端口）。公网 HTTPS 由 Tailscale 或网关提供，mobd 本身保持 HTTP。
 
 修改现有配置时保留其他字段，在无任务运行时 `mobd restart`。环境变量和启动参数会覆盖配置，
 无参数重启还会复用已保存参数；以 `mobd status` 显示的地址为准。
@@ -57,7 +58,8 @@ Tailscale 的后台服务不会替你启动 mobd。
    curl -i --connect-timeout 5 --max-time 10 http://192.168.1.20:8080/health
    ```
 
-   预期 **401**。超时先检查 IP、网络隔离和 macOS 防火墙是否允许 mobd 入站。
+   预期 **401**。超时先检查 IP、网络隔离和 macOS 防火墙是否允许 mobd 入站
+   （TCP 8080；实时桌面另需 UDP 9527）。
 4. 在办公室生成邀请：
 
    ```bash
@@ -107,7 +109,7 @@ flowchart LR
 
 ### 2. 限制访问范围
 
-在 Tailscale 管理控制台的访问控制中，将访问限定到需要使用 mobd 的可信设备和办公室 Mac 的 TCP 443。
+在 Tailscale 管理控制台的访问控制中，将访问限定到需要使用 mobd 的可信设备和办公室 Mac 的 TCP 443 与 UDP 9527（实时桌面）。
 mobd 不根据 Tailscale 身份头自动配对或隔离用户数据。以下是**专用两机 tailnet** 的最小示例，
 将 IP 替换为两端 `tailscale ip -4` 的实际输出（`src` 为客户端，`dst` 为办公室）：
 
@@ -117,7 +119,7 @@ mobd 不根据 Tailscale 身份头自动配对或隔离用户数据。以下是*
     {
       "src": ["100.101.102.103"],
       "dst": ["100.101.102.104"],
-      "ip": ["tcp:443"]
+      "ip": ["tcp:443", "udp:9527"]
     }
   ]
 }
@@ -126,8 +128,8 @@ mobd 不根据 Tailscale 身份头自动配对或隔离用户数据。以下是*
 规则是累加放行：**仅添加这条规则不会收紧已有的 allow-all**。专用 tailnet 应替换默认全放行策略；
 共享 tailnet 由管理员调整相关规则并保留其他业务配置，不要直接覆盖整份策略。
 设备重新注册导致地址变化时同步更新。参见 [grants 语法](https://tailscale.com/docs/reference/syntax/grants)。
-WebRTC 视频直连 mobd 的 UDP 端口；策略只放行 TCP 443 时客户端会回退到 WebSocket，
-需要 WebRTC 时为该客户端另外放行到办公室的 UDP。
+WebRTC 视频直连 mobd 的 UDP 9527；只放行 TCP 443 时客户端会回退到 WebSocket，画质和延迟较差。
+修改了 `streamPort` 时同步修改规则中的端口。
 
 ### 3. 启用私有 HTTPS 入口
 
@@ -438,7 +440,7 @@ unset MOBD_TEST_DIR MOBD_URL
 | 证书错误 | 使用实际入口域名，检查 DNS、系统时间、证书签发；不要关闭证书校验 |
 | 配对后仍为 401 | 是否使用兑换后的 token、请求是否带 Authorization、设备是否已被撤销 |
 | 实时桌面打不开 | 403 检查 Origin 允许列表；503/`ended` 看 mobd 给出的原因（显示器休眠、屏幕录制权限）；客户端显示“Update mobd”时升级办公室 mobd |
-| 实时桌面只能走 WebSocket | UDP 不通：检查访问策略是否只放行 TCP、网络是否阻断 UDP |
+| 实时桌面只能走 WebSocket | UDP 9527 不通：检查访问策略是否放行 `udp:9527`、防火墙或网络是否阻断 UDP |
 | 画面延迟大 | `tailscale ping office-mac` 显示 `relay` 表示经 DERP；Funnel 带宽；办公室上行网络 |
 | SSE 无心跳 | 额外代理必须关闭流缓冲和缓存，允许长连接 |
 

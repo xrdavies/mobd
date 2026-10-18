@@ -19,13 +19,18 @@ import (
 
 // Config is shared by foreground and launchd-managed servers.
 type Config struct {
-	ControlSocket string   `json:"controlSocket"`
-	ListenAddr    string   `json:"listen"`
-	CodexBin      string   `json:"codexBin"`
-	CodexWorkDir  string   `json:"workdir"`
-	MobMCPCommand string   `json:"mcpCommand"`
-	MobMCPArgs    []string `json:"mcpArgs"`
-	SharedSecret  string   `json:"sharedSecret,omitempty"`
+	ControlSocket string `json:"controlSocket"`
+	ListenAddr    string `json:"listen"`
+	// StreamPort carries every live desktop session's WebRTC media on one UDP port, so a
+	// firewall or tailnet rule can name it; 0 picks a random port per session.
+	StreamPort int `json:"streamPort"`
+	// StreamUDP is the socket bound to StreamPort by serve.
+	StreamUDP     net.PacketConn `json:"-"`
+	CodexBin      string         `json:"codexBin"`
+	CodexWorkDir  string         `json:"workdir"`
+	MobMCPCommand string         `json:"mcpCommand"`
+	MobMCPArgs    []string       `json:"mcpArgs"`
+	SharedSecret  string         `json:"sharedSecret,omitempty"`
 	// Removed with the VNC relay (the live desktop is /stream now); accepted so older configs load.
 	RemovedVNCViewURL    string        `json:"vncViewUrl,omitempty"`
 	StatePath            string        `json:"statePath"`
@@ -125,7 +130,7 @@ func Load(args []string) (Config, string, error) {
 		return Config{}, path, err
 	}
 	cfg := Config{
-		ListenAddr: ":8080", CodexBin: "codex", CodexWorkDir: cwd,
+		ListenAddr: ":8080", StreamPort: 9527, CodexBin: "codex", CodexWorkDir: cwd,
 		// Keep existing history visible when upgrading from environment-only releases.
 		StatePath:   filepath.Join(stateDir, "mob", "state.json"),
 		CORSOrigins: []string{"http://localhost:1420", "http://127.0.0.1:1420", "tauri://localhost", "http://tauri.localhost"},
@@ -185,6 +190,12 @@ func Load(args []string) (Config, string, error) {
 			if err := json.Unmarshal([]byte(value), &cfg.MobMCPArgs); err != nil {
 				return cfg, path, fmt.Errorf("MOBD_MOB_MCP_ARGS must be a JSON string array: %w", err)
 			}
+		}
+	}
+	if value, ok := os.LookupEnv("MOBD_STREAM_PORT"); ok {
+		cfg.StreamPort, err = strconv.Atoi(value)
+		if err != nil {
+			return cfg, path, fmt.Errorf("MOBD_STREAM_PORT: %w", err)
 		}
 	}
 	if value, ok := os.LookupEnv("MOBD_MAX_RUNNING"); ok {
@@ -261,6 +272,9 @@ func Load(args []string) (Config, string, error) {
 		if err != nil || parseErr != nil || n < 1 || n > 65535 {
 			return cfg, path, fmt.Errorf("%s must be host:port with port 1–65535", name)
 		}
+	}
+	if cfg.StreamPort < 0 || cfg.StreamPort > 65535 {
+		return cfg, path, errors.New("streamPort must be 0–65535 (0: a random port per session)")
 	}
 	if cfg.CodexBin == "" || cfg.CodexWorkDir == "" || cfg.StatePath == "" || cfg.ClaudeBin == "" {
 		return cfg, path, errors.New("codexBin, claudeBin, workdir and statePath must not be empty")

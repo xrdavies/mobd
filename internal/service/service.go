@@ -60,6 +60,15 @@ func (m *Manager) Start(cfg config.Config, args []string, login bool) error {
 	if err := listener.Close(); err != nil {
 		return err
 	}
+	if cfg.StreamPort > 0 {
+		udp, err := net.ListenUDP("udp", &net.UDPAddr{Port: cfg.StreamPort})
+		if err != nil {
+			return fmt.Errorf("live desktop UDP port %d: %w", cfg.StreamPort, err)
+		}
+		if err := udp.Close(); err != nil {
+			return err
+		}
+	}
 	// Do not mistake a foreground daemon's management socket for our new service.
 	_, release, err := control.Listen(cfg.ControlSocket)
 	if err != nil {

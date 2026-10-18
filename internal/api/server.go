@@ -88,6 +88,7 @@ func New(cfg config.Config, store *task.Store, auth *pairing.Store, runners ...r
 			return auth.Attach(parent, client, http.MethodPost, "/stream")
 		},
 		NewInput: func() stream.Input { return desktop.NewInput() },
+		UDP:      cfg.StreamUDP,
 	})
 	if err != nil {
 		panic(err)

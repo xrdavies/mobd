@@ -52,7 +52,9 @@ Content-Type: application/json
 `201 {"session", "answer", "wsTicket", "width", "height", "display"}`. `width`/`height` are the
 encoded size. Without `offer` the session waits for the WebSocket only and `answer` is omitted.
 ICE is gathered before answering (no trickle). Candidates are host-only UDP, so LAN and Tailscale
-addresses work without STUN and the office's public IP is not exposed.
+addresses work without STUN and the office's public IP is not exposed. All sessions share one UDP
+socket on every interface, port `streamPort` (default 9527, `MOBD_STREAM_PORT`), so a firewall or
+tailnet rule can allow it; `0` gives each session a random port. mobd fails to start if the port is taken.
 
 - The picture is scaled to fit `maxWidth`/`maxHeight`, the display and the quality profile; never
   upscaled; even sizes.

@@ -37,10 +37,17 @@ func TestPrecedence(t *testing.T) {
 	if got := loadTest(t, data, "--listen", "127.0.0.1:8003").ListenAddr; got != "127.0.0.1:8003" {
 		t.Fatal(got)
 	}
+	if got := loadTest(t, `{"streamPort":0}`).StreamPort; got != 0 {
+		t.Fatal(got)
+	}
+	t.Setenv("MOBD_STREAM_PORT", "9600")
+	if got := loadTest(t, `{"streamPort":0}`).StreamPort; got != 9600 {
+		t.Fatal(got)
+	}
 }
 
 func TestInvalidConfig(t *testing.T) {
-	for _, data := range []string{`{`, `null`, `{} {}`, `{"typo":true}`, `{"sharedSecret":"legacy"}`, `{"maxRunning":0}`, `{"listen":":0"}`, `{"listen":"bad"}`, `{"mcpArgs":"bad"}`, `{"workdir":""}`, `{"questionTimeout":"0s"}`, `{"questionTimeout":123}`, `{"codexMode":"invalid"}`, `{"codexPermissions":"typo"}`, `{"claudePermissions":"typo"}`, `{"runners":[]}`, `{"runners":["unknown"]}`, `{"runners":["codex","codex"]}`, `{"runners":["claude"],"defaultRunner":"codex"}`} {
+	for _, data := range []string{`{`, `null`, `{} {}`, `{"typo":true}`, `{"sharedSecret":"legacy"}`, `{"maxRunning":0}`, `{"listen":":0"}`, `{"listen":"bad"}`, `{"streamPort":-1}`, `{"streamPort":65536}`, `{"mcpArgs":"bad"}`, `{"workdir":""}`, `{"questionTimeout":"0s"}`, `{"questionTimeout":123}`, `{"codexMode":"invalid"}`, `{"codexPermissions":"typo"}`, `{"claudePermissions":"typo"}`, `{"runners":[]}`, `{"runners":["unknown"]}`, `{"runners":["codex","codex"]}`, `{"runners":["claude"],"defaultRunner":"codex"}`} {
 		t.Run(data, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "config.json")
 			if err := os.WriteFile(path, []byte(data), 0600); err != nil {
@@ -54,7 +61,7 @@ func TestInvalidConfig(t *testing.T) {
 	if _, _, err := Load([]string{"--config", filepath.Join(t.TempDir(), "missing.json")}); err == nil {
 		t.Fatal("missing explicit config accepted")
 	}
-	for key, value := range map[string]string{"MOBD_MAX_RUNNING": "oops", "MOBD_MOB_MCP_ARGS": "not-json", "MOBD_QUESTION_TIMEOUT": "soon", "MOBD_SHARED_SECRET": "legacy"} {
+	for key, value := range map[string]string{"MOBD_MAX_RUNNING": "oops", "MOBD_STREAM_PORT": "udp", "MOBD_MOB_MCP_ARGS": "not-json", "MOBD_QUESTION_TIMEOUT": "soon", "MOBD_SHARED_SECRET": "legacy"} {
 		t.Run(key, func(t *testing.T) {
 			t.Setenv(key, value)
 			path := filepath.Join(t.TempDir(), "config.json")
@@ -118,7 +125,7 @@ func TestDefaultsAndNoDotEnv(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if path != filepath.Join(dir, ".mobd", "config.json") || cfg.ListenAddr != ":8080" ||
+	if path != filepath.Join(dir, ".mobd", "config.json") || cfg.ListenAddr != ":8080" || cfg.StreamPort != 9527 ||
 		cfg.CodexMode != "app-server" || cfg.DefaultRunner != "codex" || len(cfg.Runners) != 2 ||
 		cfg.ClaudeWorkDir != cfg.CodexWorkDir || cfg.QuestionTimeout != 30*time.Minute || len(cfg.CORSOrigins) != 4 {
 		t.Fatalf("defaults: %+v; path=%s", cfg, path)

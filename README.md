@@ -309,6 +309,7 @@ curl -H "Authorization: Bearer $MOBD_TOKEN" -s localhost:8080/artifacts/ARTIFACT
 | JSON key | Environment variable | Default | Meaning |
 | --- | --- | --- | --- |
 | `listen` | `MOBD_LISTEN` | `:8080` | HTTP bind |
+| `streamPort` | `MOBD_STREAM_PORT` | `9527` | UDP port for live desktop WebRTC on all interfaces; `0` = random per session |
 | `codexBin` | `MOBD_CODEX_BIN` | `codex` | Codex CLI |
 | `workdir` | `MOBD_CODEX_WORKDIR` | process cwd | Codex working directory |
 | `mcpCommand` | `MOBD_MOB_MCP_COMMAND` | this `mobd` binary | MCP server command for Codex `-c` injection; empty = built-in `mobd mcp` |
