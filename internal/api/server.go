@@ -12,7 +12,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/xrdavies/mobd/internal/artifact"
@@ -34,8 +33,7 @@ type Server struct {
 	artifacts *artifact.Store
 	health    healthCache
 
-	vncSessions atomic.Int64
-	streams     *stream.Manager
+	streams *stream.Manager
 
 	// self is how `mobd mcp` reaches this server; empty uses cfg.SelfURL().
 	self string
@@ -139,8 +137,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /screen", s.handleScreen)
 	mux.HandleFunc("POST /uploads", s.handleUpload)
 	mux.HandleFunc("GET /artifacts/{id}", s.handleArtifact)
-	mux.HandleFunc("GET /vnc", s.handleVNC)
-	mux.HandleFunc("POST /vnc/ticket", s.handleVNCTicket)
+	// The VNC relay was replaced by the live desktop stream; old clients get a readable error.
+	mux.HandleFunc("GET /vnc", vncGone)
+	mux.HandleFunc("POST /vnc/ticket", vncGone)
 	mux.HandleFunc("POST /stream", s.handleStreamOpen)
 	mux.HandleFunc("DELETE /stream/{id}", s.handleStreamClose)
 	mux.HandleFunc("GET /stream/ws", s.handleStreamWS)
@@ -205,7 +204,7 @@ func (s *Server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusServiceUnavailable, "mobd is stopping")
 		return
 	}
-	t, err := s.store.CreateTurnWith(req.SessionID, req.Prompt, s.cfg.VNCViewURL, opts)
+	t, err := s.store.CreateTurnWith(req.SessionID, req.Prompt, opts)
 	if err != nil {
 		s.mu.Unlock()
 		code := http.StatusInternalServerError

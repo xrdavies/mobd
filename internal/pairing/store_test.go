@@ -232,7 +232,7 @@ func TestInviteAndClientValidation(t *testing.T) {
 	assertAuthorized(t, s, strings.Repeat("x", 64), false)
 }
 
-func TestVNCTicketsExpireAreCappedAndClearedByReset(t *testing.T) {
+func TestTicketsExpireAreCappedAndClearedByReset(t *testing.T) {
 	s := openTest(t, filepath.Join(t.TempDir(), "auth.json"))
 	c, err := s.Redeem(invitation(t, s), "desk")
 	if err != nil {
@@ -245,7 +245,7 @@ func TestVNCTicketsExpireAreCappedAndClearedByReset(t *testing.T) {
 		t.Fatal(err)
 	}
 	now = now.Add(TicketTTL)
-	if _, _, err := s.BeginTicket(context.Background(), old, "GET", "/vnc"); !errors.Is(err, ErrUnauthorized) {
+	if _, _, err := s.BeginTicket(context.Background(), old, "GET", "/stream/ws"); !errors.Is(err, ErrUnauthorized) {
 		t.Fatalf("expired ticket: %v", err)
 	}
 	for range maxTicketsPerClient {

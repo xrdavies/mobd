@@ -12,7 +12,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/coder/websocket"
 	"github.com/xrdavies/mobd/internal/config"
 	"github.com/xrdavies/mobd/internal/pairing"
 	"github.com/xrdavies/mobd/internal/runner"
@@ -142,11 +141,10 @@ func TestPairPreviewRedemptionAndNoManagementOverTCP(t *testing.T) {
 	}
 }
 
-func TestRevokeAndDeleteDisconnectSSEAndVNC(t *testing.T) {
+func TestRevokeAndDeleteDisconnectSSE(t *testing.T) {
 	for _, remove := range []bool{false, true} {
 		t.Run(map[bool]string{false: "revoke", true: "delete"}[remove], func(t *testing.T) {
 			s := testServer(t, "")
-			s.cfg.VNCAddr = fakeVNC(t)
 			credential, other := pairedClient(t, s), pairedClient(t, s)
 			srv := httptest.NewServer(s.Handler())
 			defer srv.Close()
@@ -162,7 +160,7 @@ func TestRevokeAndDeleteDisconnectSSEAndVNC(t *testing.T) {
 			if res.StatusCode != 200 {
 				t.Fatalf("SSE: %d", res.StatusCode)
 			}
-			task, _ := s.store.Create("stream test", "")
+			task, _ := s.store.Create("stream test")
 			taskReq, _ := http.NewRequestWithContext(ctx, "GET", srv.URL+"/tasks/"+task.ID+"/events", nil)
 			taskReq.Header.Set("Authorization", "Bearer "+credential.Token)
 			taskRes, err := http.DefaultClient.Do(taskReq)
@@ -173,26 +171,16 @@ func TestRevokeAndDeleteDisconnectSSEAndVNC(t *testing.T) {
 			if taskRes.StatusCode != 200 {
 				t.Fatalf("task SSE: %d", taskRes.StatusCode)
 			}
-			ws, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(srv.URL, "http")+"/vnc", &websocket.DialOptions{HTTPHeader: http.Header{"Authorization": {"Bearer " + credential.Token}}})
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer ws.CloseNow()
-			conn := websocket.NetConn(ctx, ws, websocket.MessageBinary)
-			if _, err := io.ReadFull(conn, make([]byte, 12)); err != nil {
-				t.Fatal(err)
-			}
-			if len(s.pairing.Connections()) != 3 {
+			if len(s.pairing.Connections()) != 2 {
 				t.Fatal("streams not registered")
 			}
 			if err := s.pairing.Revoke(credential.ClientID, remove); err != nil {
 				t.Fatal(err)
 			}
-			ended := make(chan struct{}, 3)
+			ended := make(chan struct{}, 2)
 			go func() { _, _ = io.ReadAll(res.Body); ended <- struct{}{} }()
 			go func() { _, _ = io.ReadAll(taskRes.Body); ended <- struct{}{} }()
-			go func() { _, _ = conn.Read(make([]byte, 1)); ended <- struct{}{} }()
-			for range 3 {
+			for range 2 {
 				select {
 				case <-ended:
 				case <-time.After(2 * time.Second):

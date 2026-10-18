@@ -173,3 +173,11 @@ func TestInit(t *testing.T) {
 		t.Fatalf("must not overwrite config: %v", err)
 	}
 }
+
+// Configs written before the VNC relay was removed still load; the keys are ignored.
+func TestRemovedVNCKeysStillLoad(t *testing.T) {
+	cfg := loadTest(t, `{"listen":"0.0.0.0:8080","vncAddr":"127.0.0.1:5900","vncViewUrl":"vnc://office"}`)
+	if cfg.ListenAddr != "0.0.0.0:8080" {
+		t.Fatalf("listen %q", cfg.ListenAddr)
+	}
+}

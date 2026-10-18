@@ -11,7 +11,6 @@ import (
 	"image"
 	"image/png"
 	"mime/multipart"
-	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -33,7 +32,6 @@ func testServer(t *testing.T, secret string) *Server {
 		CodexWorkDir:  t.TempDir(),
 		MobMCPCommand: "mob-mcp",
 		SharedSecret:  secret,
-		VNCViewURL:    "https://office.example/view",
 		CORSOrigins:   []string{"http://localhost:1420"},
 		DataDir:       t.TempDir(),
 	}
@@ -58,7 +56,7 @@ func (w *replayWriter) Flush() {
 
 func TestReplyArrivingDuringReplayIsNotLost(t *testing.T) {
 	s := testServer(t, "")
-	tk, _ := s.store.Create("reply during replay", "")
+	tk, _ := s.store.Create("reply during replay")
 	w := &replayWriter{ResponseRecorder: httptest.NewRecorder()}
 	w.onFlush = func(n int) {
 		if n != 2 {
@@ -86,7 +84,7 @@ func TestReplyArrivingDuringReplayIsNotLost(t *testing.T) {
 
 func TestEventCursorResumesWithoutDuplicates(t *testing.T) {
 	s := testServer(t, "")
-	tk, _ := s.store.Create("cursor", "")
+	tk, _ := s.store.Create("cursor")
 	_ = s.store.AppendEvent(tk.ID, task.Event{Type: "message", MessageID: "reply", Message: "answer"})
 	_, _ = s.store.UpdateStatus(tk.ID, task.StatusSucceeded, "")
 	for _, tc := range []struct {
@@ -223,7 +221,7 @@ printf '%s\n' '{"type":"turn.completed"}'
 
 func TestCancelDoesNotReleaseSessionBeforeRunnerStops(t *testing.T) {
 	s := testServer(t, "")
-	tk, _ := s.store.Create("busy", "")
+	tk, _ := s.store.Create("busy")
 	cancelled := false
 	s.cancels[tk.ID] = func() { cancelled = true }
 	rr := httptest.NewRecorder()
@@ -238,7 +236,7 @@ func TestCancelDoesNotReleaseSessionBeforeRunnerStops(t *testing.T) {
 		t.Fatalf("overlapping turn accepted: %d %s", rr.Code, rr.Body.String())
 	}
 	_, _ = s.store.UpdateStatus(tk.ID, task.StatusCancelled, "cancelled")
-	if _, err := s.store.CreateTurn(tk.SessionID, "after stop", ""); err != nil {
+	if _, err := s.store.CreateTurn(tk.SessionID, "after stop"); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -340,9 +338,6 @@ func TestCreateListGetTask(t *testing.T) {
 	}
 	if created.ID == "" || created.Status != task.StatusQueued {
 		t.Fatalf("created %+v", created)
-	}
-	if created.VNCViewURL != "https://office.example/view" {
-		t.Fatalf("vnc %q", created.VNCViewURL)
 	}
 
 	// Wait briefly for stub runner to fail (missing codex).
@@ -567,11 +562,11 @@ func doJSON(t *testing.T, s *Server, method, path, body string) *httptest.Respon
 
 func TestSessionAdmin(t *testing.T) {
 	s := testServer(t, "")
-	old, _ := s.store.Create("older", "")
+	old, _ := s.store.Create("older")
 	_, _ = s.store.UpdateStatus(old.ID, task.StatusSucceeded, "")
-	recent, _ := s.store.Create("recent", "")
+	recent, _ := s.store.Create("recent")
 	_, _ = s.store.UpdateStatus(recent.ID, task.StatusSucceeded, "")
-	busy, _ := s.store.Create("busy", "")
+	busy, _ := s.store.Create("busy")
 
 	if rr := doJSON(t, s, http.MethodPatch, "/sessions/"+old.SessionID, `{"title":"  Weekly   report ","pinned":true}`); rr.Code != http.StatusOK ||
 		!strings.Contains(rr.Body.String(), `"title":"Weekly report"`) || !strings.Contains(rr.Body.String(), `"pinned":true`) {
@@ -621,8 +616,8 @@ func TestSessionAdmin(t *testing.T) {
 
 func TestListTasksFilters(t *testing.T) {
 	s := testServer(t, "")
-	a, _ := s.store.Create("a", "")
-	b, _ := s.store.Create("b", "")
+	a, _ := s.store.Create("a")
+	b, _ := s.store.Create("b")
 	_, _ = s.store.UpdateStatus(b.ID, task.StatusSucceeded, "")
 	list := func(query string) []task.Task {
 		var body struct{ Tasks []task.Task }
@@ -871,17 +866,12 @@ func TestHealthReadiness(t *testing.T) {
 	dir := t.TempDir()
 	bin := filepath.Join(dir, "codex")
 	_ = os.WriteFile(bin, []byte("#!/bin/sh\necho codex-cli 9.9.9\n"), 0700)
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer ln.Close()
 	perms := desktop.Permissions{Accessibility: true}
 	currentPermissions = func() (desktop.Permissions, error) { return perms, nil }
 	t.Cleanup(func() { currentPermissions = desktop.CurrentPermissions })
 	displayState = func() (desktop.DisplayState, error) { return desktop.DisplayState{Locked: true}, nil }
 	t.Cleanup(func() { displayState = desktop.State })
-	cfg := config.Config{CodexBin: bin, MobMCPCommand: "mob-mcp-missing", VNCAddr: ln.Addr().String(),
+	cfg := config.Config{CodexBin: bin, MobMCPCommand: "mob-mcp-missing",
 		CodexModels: []string{"gpt-5.5"}, DataDir: dir}
 	s := newTestServer(t, cfg, task.NewStore(), codex.New(cfg))
 	t.Cleanup(s.Close)
@@ -903,7 +893,7 @@ func TestHealthReadiness(t *testing.T) {
 		t.Fatalf("health %+v", body)
 	}
 	if !c["codex"].OK || !strings.Contains(c["codex"].Detail, "codex-cli 9.9.9") || c["actuation"].OK ||
-		!c["vnc"].OK || c["accessibility"].OK != perms.Accessibility || c["screenRecording"].OK || c["screenRecording"].Detail == "" ||
+		c["vnc"] != (check{}) || c["accessibility"].OK != perms.Accessibility || c["screenRecording"].OK || c["screenRecording"].Detail == "" ||
 		!c["display"].OK || !strings.Contains(c["display"].Detail, "locked") {
 		t.Fatalf("checks %+v", c)
 	}

@@ -122,16 +122,16 @@ func NewStore() *Store {
 }
 
 // Create preserves the one-shot API; CreateTurn continues an explicit session.
-func (s *Store) Create(prompt, vncViewURL string) (*Task, error) {
-	return s.CreateTurn("", prompt, vncViewURL)
+func (s *Store) Create(prompt string) (*Task, error) {
+	return s.CreateTurn("", prompt)
 }
 
-func (s *Store) CreateTurn(sessionID, prompt, vncViewURL string) (*Task, error) {
-	return s.CreateTurnWith(sessionID, prompt, vncViewURL, TurnOptions{})
+func (s *Store) CreateTurn(sessionID, prompt string) (*Task, error) {
+	return s.CreateTurnWith(sessionID, prompt, TurnOptions{})
 }
 
 // CreateTurnWith queues a turn with validated runner options.
-func (s *Store) CreateTurnWith(sessionID, prompt, vncViewURL string, opts TurnOptions) (*Task, error) {
+func (s *Store) CreateTurnWith(sessionID, prompt string, opts TurnOptions) (*Task, error) {
 	prompt = strings.TrimSpace(prompt)
 	if prompt == "" {
 		return nil, ErrInvalidPrompt
@@ -167,7 +167,7 @@ func (s *Store) CreateTurnWith(sessionID, prompt, vncViewURL string, opts TurnOp
 		ID: newID(), SessionID: session.ID, ResumeID: session.ResumeID,
 		Prompt: prompt, Status: StatusQueued, Runner: session.Runner,
 		Model: opts.Model, Effort: opts.Effort, Attachments: append([]string(nil), opts.Attachments...),
-		CreatedAt: now, UpdatedAt: now, VNCViewURL: vncViewURL, EventID: 1,
+		CreatedAt: now, UpdatedAt: now, EventID: 1,
 	}
 	session.ActiveTaskID, session.Status, session.UpdatedAt = t.ID, t.Status, now
 	session.Messages = append(session.Messages, Message{

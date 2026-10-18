@@ -12,21 +12,18 @@ import (
 
 func TestCreateGetList(t *testing.T) {
 	s := NewStore()
-	a, err := s.Create("do thing", "https://vnc.example/")
+	a, err := s.Create("do thing")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if a.Status != StatusQueued || a.Runner != LegacyRunner {
 		t.Fatalf("unexpected task: %+v", a)
 	}
-	if a.VNCViewURL != "https://vnc.example/" {
-		t.Fatalf("vnc url: %q", a.VNCViewURL)
-	}
 	got, err := s.Get(a.ID)
 	if err != nil || got.Prompt != "do thing" {
 		t.Fatalf("get: %+v %v", got, err)
 	}
-	b, _ := s.Create("second", "")
+	b, _ := s.Create("second")
 	list := s.List(10)
 	if len(list) != 2 || list[0].ID != b.ID {
 		t.Fatalf("list newest-first: %+v", list)
@@ -35,14 +32,14 @@ func TestCreateGetList(t *testing.T) {
 
 func TestCreateEmptyPrompt(t *testing.T) {
 	s := NewStore()
-	if _, err := s.Create("   ", ""); err != ErrInvalidPrompt {
+	if _, err := s.Create("   "); err != ErrInvalidPrompt {
 		t.Fatalf("want ErrInvalidPrompt, got %v", err)
 	}
 }
 
 func TestUpdateStatusAndEvents(t *testing.T) {
 	s := NewStore()
-	tk, _ := s.Create("x", "")
+	tk, _ := s.Create("x")
 	if _, err := s.UpdateStatus(tk.ID, StatusRunning, ""); err != nil {
 		t.Fatal(err)
 	}
@@ -61,7 +58,7 @@ func TestUpdateStatusAndEvents(t *testing.T) {
 
 func TestCanCancel(t *testing.T) {
 	s := NewStore()
-	tk, _ := s.Create("x", "")
+	tk, _ := s.Create("x")
 	if _, err := s.CanCancel(tk.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -83,8 +80,8 @@ func TestGetMissing(t *testing.T) {
 
 func TestSessionContinuationAndIsolation(t *testing.T) {
 	s := NewStore()
-	first, _ := s.Create("Remember 蓝鲸", "")
-	if _, err := s.CreateTurn(first.SessionID, "too soon", ""); !errors.Is(err, ErrSessionBusy) {
+	first, _ := s.Create("Remember 蓝鲸")
+	if _, err := s.CreateTurn(first.SessionID, "too soon"); !errors.Is(err, ErrSessionBusy) {
 		t.Fatalf("must serialize turns: %v", err)
 	}
 	if err := s.AppendEvent(first.ID, Event{Type: "resume", ResumeID: "thread-one"}); err != nil {
@@ -96,11 +93,11 @@ func TestSessionContinuationAndIsolation(t *testing.T) {
 		}
 	}
 	_, _ = s.UpdateStatus(first.ID, StatusSucceeded, "")
-	second, err := s.CreateTurn(first.SessionID, "What did I say?", "")
+	second, err := s.CreateTurn(first.SessionID, "What did I say?")
 	if err != nil || second.ResumeID != "thread-one" || second.SessionID != first.SessionID {
 		t.Fatalf("continuation: %+v %v", second, err)
 	}
-	other, _ := s.Create("separate conversation", "")
+	other, _ := s.Create("separate conversation")
 	if other.SessionID == first.SessionID || other.ResumeID != "" {
 		t.Fatalf("thread leaked into another session: %+v", other)
 	}
@@ -120,13 +117,13 @@ func TestSessionContinuationAndIsolation(t *testing.T) {
 
 func TestOnlyOneConcurrentTurnPerSession(t *testing.T) {
 	s := NewStore()
-	first, _ := s.Create("first", "")
+	first, _ := s.Create("first")
 	_, _ = s.UpdateStatus(first.ID, StatusSucceeded, "")
 	var wg sync.WaitGroup
 	results := make(chan error, 20)
 	for range 20 {
 		wg.Go(func() {
-			_, err := s.CreateTurn(first.SessionID, "next", "")
+			_, err := s.CreateTurn(first.SessionID, "next")
 			results <- err
 		})
 	}
@@ -151,11 +148,11 @@ func TestRestartRestoresTranscriptAndInterruptsActiveTurn(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	first, _ := s.Create("first", "")
+	first, _ := s.Create("first")
 	_ = s.AppendEvent(first.ID, Event{Type: "resume", ResumeID: "thread-one"})
 	_ = s.AppendEvent(first.ID, Event{Type: "message", MessageID: "item-1", Message: "answer"})
 	_, _ = s.UpdateStatus(first.ID, StatusSucceeded, "")
-	second, _ := s.CreateTurn(first.SessionID, "follow up", "")
+	second, _ := s.CreateTurn(first.SessionID, "follow up")
 	_, _ = s.UpdateStatus(second.ID, StatusRunning, "")
 	restored, err := OpenStore(path)
 	if err != nil {
@@ -168,7 +165,7 @@ func TestRestartRestoresTranscriptAndInterruptsActiveTurn(t *testing.T) {
 	if turns[1].Status != StatusFailed || turns[1].Error == nil {
 		t.Fatalf("interrupted turn: %+v", turns[1])
 	}
-	next, err := restored.CreateTurn(session.ID, "continue after restart", "")
+	next, err := restored.CreateTurn(session.ID, "continue after restart")
 	if err != nil || next.ResumeID != "thread-one" {
 		t.Fatalf("restart continuation: %+v %v", next, err)
 	}
@@ -180,7 +177,7 @@ func TestRestartRestoresTranscriptAndInterruptsActiveTurn(t *testing.T) {
 
 func TestPersistenceFailureDoesNotAcknowledgeOrMutateHistory(t *testing.T) {
 	s := NewStore()
-	tk, _ := s.Create("first", "")
+	tk, _ := s.Create("first")
 	before, _, _, _ := s.Session(tk.SessionID)
 	s.path = filepath.Join(t.TempDir(), "not-a-directory", "state.json")
 	if err := os.WriteFile(filepath.Dir(s.path), []byte("blocked"), 0600); err != nil {
@@ -196,7 +193,7 @@ func TestPersistenceFailureDoesNotAcknowledgeOrMutateHistory(t *testing.T) {
 	if _, err := s.UpdateStatus(tk.ID, StatusSucceeded, ""); err == nil {
 		t.Fatal("must not mark a turn successful when saving fails")
 	}
-	if _, err := s.Create("unsaved new session", ""); err == nil || len(s.ListSessions(nil)) != 1 {
+	if _, err := s.Create("unsaved new session"); err == nil || len(s.ListSessions(nil)) != 1 {
 		t.Fatal("failed create changed the session list")
 	}
 }
@@ -227,7 +224,7 @@ func TestActivitiesUpsertAndSurviveRestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	tk, _ := s.Create("click", "")
+	tk, _ := s.Create("click")
 	start := Activity{ID: "item_1", Kind: ActivityTool, Status: ActivityRunning, Title: "Screenshot", Images: nil}
 	if err := s.AppendEvent(tk.ID, Event{Type: "activity", Activity: &start}); err != nil {
 		t.Fatal(err)
@@ -263,7 +260,7 @@ func TestActivitiesUpsertAndSurviveRestart(t *testing.T) {
 
 func TestDebugLogsAreCapped(t *testing.T) {
 	s := NewStore()
-	tk, _ := s.Create("chatty", "")
+	tk, _ := s.Create("chatty")
 	for range logLimit + 50 {
 		_ = s.AppendEvent(tk.ID, Event{Type: "log", Message: "line"})
 	}
@@ -299,11 +296,11 @@ func TestMigratesThreadIDsAndRunner(t *testing.T) {
 	if session.Runner != LegacyRunner || session.ResumeID != "th-1" || tasks[0].ResumeID != "th-1" || tasks[0].Runner != LegacyRunner {
 		t.Fatalf("not migrated: %+v %+v", session, tasks[0])
 	}
-	next, err := s.CreateTurn("s1", "continue", "")
+	next, err := s.CreateTurn("s1", "continue")
 	if err != nil || next.ResumeID != "th-1" || next.Runner != LegacyRunner {
 		t.Fatalf("continuation %+v err %v", next, err)
 	}
-	if _, err := s.CreateTurnWith("s1", "x", "", TurnOptions{Runner: "claude"}); err != ErrSessionBusy {
+	if _, err := s.CreateTurnWith("s1", "x", TurnOptions{Runner: "claude"}); err != ErrSessionBusy {
 		t.Fatalf("busy session: %v", err)
 	}
 	saved, _ := os.ReadFile(path)
@@ -314,12 +311,12 @@ func TestMigratesThreadIDsAndRunner(t *testing.T) {
 
 func TestSessionsArePinnedToTheirRunner(t *testing.T) {
 	s := NewStore()
-	first, err := s.CreateTurnWith("", "hi", "", TurnOptions{Runner: "claude"})
+	first, err := s.CreateTurnWith("", "hi", TurnOptions{Runner: "claude"})
 	if err != nil || first.Runner != "claude" {
 		t.Fatalf("%+v %v", first, err)
 	}
 	_, _ = s.UpdateStatus(first.ID, StatusSucceeded, "")
-	if _, err := s.CreateTurnWith(first.SessionID, "again", "", TurnOptions{Runner: "codex"}); err != ErrRunnerMismatch {
+	if _, err := s.CreateTurnWith(first.SessionID, "again", TurnOptions{Runner: "codex"}); err != ErrRunnerMismatch {
 		t.Fatalf("switched runner: %v", err)
 	}
 	if r, _ := s.SessionRunner(first.SessionID); r != "claude" {
@@ -330,7 +327,7 @@ func TestSessionsArePinnedToTheirRunner(t *testing.T) {
 func TestQuestionsLifecycleAndRestart(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "state.json")
 	s, _ := OpenStore(path)
-	tk, _ := s.Create("book a flight", "")
+	tk, _ := s.Create("book a flight")
 	if _, err := s.AddQuestion(tk.ID, Question{Kind: QuestionAsk, Text: "Which airline?"}); err != ErrInvalidTransition {
 		t.Fatalf("queued turn accepted a question: %v", err)
 	}

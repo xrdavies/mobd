@@ -19,14 +19,15 @@ import (
 
 // Config is shared by foreground and launchd-managed servers.
 type Config struct {
-	ControlSocket        string        `json:"controlSocket"`
-	ListenAddr           string        `json:"listen"`
-	CodexBin             string        `json:"codexBin"`
-	CodexWorkDir         string        `json:"workdir"`
-	MobMCPCommand        string        `json:"mcpCommand"`
-	MobMCPArgs           []string      `json:"mcpArgs"`
-	SharedSecret         string        `json:"sharedSecret,omitempty"`
-	VNCViewURL           string        `json:"vncViewUrl"`
+	ControlSocket string   `json:"controlSocket"`
+	ListenAddr    string   `json:"listen"`
+	CodexBin      string   `json:"codexBin"`
+	CodexWorkDir  string   `json:"workdir"`
+	MobMCPCommand string   `json:"mcpCommand"`
+	MobMCPArgs    []string `json:"mcpArgs"`
+	SharedSecret  string   `json:"sharedSecret,omitempty"`
+	// Removed with the VNC relay (the live desktop is /stream now); accepted so older configs load.
+	RemovedVNCViewURL    string        `json:"vncViewUrl,omitempty"`
 	StatePath            string        `json:"statePath"`
 	CORSOrigins          []string      `json:"corsOrigins"`
 	MaxRunning           int           `json:"maxRunning"`
@@ -42,7 +43,7 @@ type Config struct {
 	ClaudePermissions    string        `json:"claudePermissions"`
 	ClaudeSettingSources string        `json:"claudeSettingSources"`
 	QuestionTimeout      time.Duration `json:"-"`
-	VNCAddr              string        `json:"vncAddr"`
+	RemovedVNCAddr       string        `json:"vncAddr,omitempty"`
 }
 
 // JSON uses Go duration strings so user configs and service snapshots share a format.
@@ -128,8 +129,8 @@ func Load(args []string) (Config, string, error) {
 		// Keep existing history visible when upgrading from environment-only releases.
 		StatePath:   filepath.Join(stateDir, "mob", "state.json"),
 		CORSOrigins: []string{"http://localhost:1420", "http://127.0.0.1:1420", "tauri://localhost", "http://tauri.localhost"},
-		MaxRunning:  1, VNCAddr: "127.0.0.1:5900",
-		Runners: []string{"codex", "claude"}, DefaultRunner: "codex",
+		MaxRunning:  1,
+		Runners:     []string{"codex", "claude"}, DefaultRunner: "codex",
 		CodexMode: "app-server", CodexPermissions: "bypass",
 		ClaudeBin: "claude", ClaudeModels: []string{"opus", "sonnet", "haiku"},
 		ClaudePermissions: "bypass", ClaudeSettingSources: "project",
@@ -155,8 +156,8 @@ func Load(args []string) (Config, string, error) {
 		"MOBD_CONTROL_SOCKET": &cfg.ControlSocket,
 		"MOBD_LISTEN":         &cfg.ListenAddr, "MOBD_CODEX_BIN": &cfg.CodexBin,
 		"MOBD_CODEX_WORKDIR": &cfg.CodexWorkDir, "MOBD_MOB_MCP_COMMAND": &cfg.MobMCPCommand,
-		"MOBD_SHARED_SECRET": &cfg.SharedSecret, "MOBD_VNC_VIEW_URL": &cfg.VNCViewURL,
-		"MOBD_STATE_PATH": &cfg.StatePath, "MOBD_DATA_DIR": &cfg.DataDir, "MOBD_VNC_ADDR": &cfg.VNCAddr,
+		"MOBD_SHARED_SECRET": &cfg.SharedSecret,
+		"MOBD_STATE_PATH":    &cfg.StatePath, "MOBD_DATA_DIR": &cfg.DataDir,
 		"MOBD_CODEX_MODE": &cfg.CodexMode, "MOBD_CODEX_PERMISSIONS": &cfg.CodexPermissions,
 		"MOBD_DEFAULT_RUNNER": &cfg.DefaultRunner, "MOBD_CLAUDE_BIN": &cfg.ClaudeBin,
 		"MOBD_CLAUDE_WORKDIR": &cfg.ClaudeWorkDir, "MOBD_CLAUDE_PERMISSIONS": &cfg.ClaudePermissions,
@@ -254,7 +255,7 @@ func Load(args []string) (Config, string, error) {
 	if !enabled[cfg.DefaultRunner] {
 		return cfg, path, errors.New("defaultRunner must be an enabled runner")
 	}
-	for name, addr := range map[string]string{"listen": cfg.ListenAddr, "vncAddr": cfg.VNCAddr} {
+	for name, addr := range map[string]string{"listen": cfg.ListenAddr} {
 		_, port, err := net.SplitHostPort(addr)
 		n, parseErr := strconv.Atoi(port)
 		if err != nil || parseErr != nil || n < 1 || n > 65535 {
@@ -295,7 +296,7 @@ func Init(path string) error {
 	if err != nil {
 		return err
 	}
-	_, writeErr := file.WriteString("{\n  \"listen\": \"0.0.0.0:8080\",\n  \"maxRunning\": 1,\n  \"vncAddr\": \"127.0.0.1:5900\"\n}\n")
+	_, writeErr := file.WriteString("{\n  \"listen\": \"0.0.0.0:8080\",\n  \"maxRunning\": 1\n}\n")
 	closeErr := file.Close()
 	return errors.Join(writeErr, closeErr)
 }

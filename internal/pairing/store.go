@@ -29,7 +29,7 @@ var (
 
 const InvitationTTL = 10 * time.Minute
 
-// TicketTTL bounds a VNC ticket: long enough to open one WebSocket, too short to reuse from logs.
+// TicketTTL bounds a WebSocket ticket: long enough to open one WebSocket, too short to reuse from logs.
 const TicketTTL = 30 * time.Second
 
 const maxTicketsPerClient = 8
@@ -276,7 +276,7 @@ func (s *Store) Begin(parent context.Context, token, method, path string) (conte
 	return s.begin(parent, found, method, path)
 }
 
-// IssueTicket returns a single-use secret that authenticates one GET /vnc for clientID.
+// IssueTicket returns a single-use secret that authenticates one GET /stream/ws for clientID.
 // Browser WebSockets cannot send Authorization, so the long-lived token never goes in a URL.
 func (s *Store) IssueTicket(clientID string) (string, time.Time, error) {
 	s.mu.Lock()
@@ -294,14 +294,14 @@ func (s *Store) IssueTicket(clientID string) (string, time.Time, error) {
 		}
 	}
 	if pending >= maxTicketsPerClient {
-		return "", time.Time{}, errors.New("too many pending VNC tickets")
+		return "", time.Time{}, errors.New("too many pending WebSocket tickets")
 	}
 	secret, expires := random(), now.Add(TicketTTL)
 	s.tickets[hash(secret)] = ticket{clientID: clientID, expires: expires}
 	return secret, expires, nil
 }
 
-// BeginTicket consumes a VNC ticket and registers the request like Begin, so revocation still interrupts it.
+// BeginTicket consumes a WebSocket ticket and registers the request like Begin, so revocation still interrupts it.
 func (s *Store) BeginTicket(parent context.Context, secret, method, path string) (context.Context, func(), error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

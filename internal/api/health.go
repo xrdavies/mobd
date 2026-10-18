@@ -16,7 +16,7 @@ import (
 // APIVersion is advertised on /health; clients gate features on it.
 const APIVersion = 3
 
-var features = []string{"queue", "activities", "sessionAdmin", "events", "screen", "uploads", "taskOptions", "vncProxy", "runners", "questions", "steer", "pairing", "vncTicket", "stream", "streamResize"}
+var features = []string{"queue", "activities", "sessionAdmin", "events", "screen", "uploads", "taskOptions", "runners", "questions", "steer", "pairing", "stream", "streamResize"}
 
 // check is one readiness item; Unknown means mobd cannot tell yet.
 type check struct {
@@ -53,11 +53,10 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	def, _ := s.runners.Get(s.runners.Default())
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok": true, "service": "mobd", "apiVersion": APIVersion,
-		"vncViewUrl": s.cfg.VNCViewURL, "runner": s.runners.Default(), "runners": runners, "mobMcp": s.cfg.MobMCPCommand,
+		"runner": s.runners.Default(), "runners": runners, "mobMcp": s.cfg.MobMCPCommand,
 		"maxRunning": max(s.cfg.MaxRunning, 1), "features": features,
 		// models/efforts describe the default runner (API v3 clients read these).
 		"models": def.Info().Models, "efforts": def.Info().Efforts, "checks": checks,
-		"vncSessions":    s.vncSessions.Load(),
 		"streamSessions": s.streams.Count(),
 	})
 }
@@ -80,10 +79,6 @@ func (s *Server) readiness(ctx context.Context) map[string]check {
 	}
 	checks["accessibility"], checks["screenRecording"] = permissionChecks()
 	checks["display"] = displayCheck()
-	checks["vnc"] = dialCheck(ctx, s.vncAddr())
-	if !checks["vnc"].OK {
-		checks["vnc"] = check{Detail: s.vncAddr() + " unreachable; turn on Screen Sharing in System Settings > General > Sharing"}
-	}
 	s.health.at, s.health.checks = time.Now(), checks
 	return checks
 }

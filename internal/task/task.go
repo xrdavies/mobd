@@ -40,7 +40,6 @@ type Task struct {
 	StartedAt      *time.Time `json:"startedAt,omitempty"`
 	FinishedAt     *time.Time `json:"finishedAt,omitempty"`
 	Error          *string    `json:"error"`
-	VNCViewURL     string     `json:"vncViewUrl,omitempty"`
 	// Waiting is true while the turn waits for the user to answer a question.
 	Waiting bool `json:"waiting,omitempty"`
 	// QueuePosition is computed on read (1-based) while the task waits for the desktop.

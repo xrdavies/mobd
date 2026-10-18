@@ -20,7 +20,7 @@ Use screenshot to observe the screen, then click/type_text/key to act.
 Coordinates for click are in points (logical pixels); see screenshot metadata
 for scale_factor on Retina displays.
 Requires macOS Accessibility + Screen Recording for the launching host.
-Human VNC viewers must stay viewOnly — do not use this server for remote human input.
+Human control of the desktop goes through the live view (/stream); do not use this server for remote human input.
 `
 
 // Desktop is the actuation surface; tests substitute a fake.
