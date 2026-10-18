@@ -76,7 +76,7 @@ func New(cfg config.Config, store *task.Store, auth *pairing.Store, runners ...r
 		tokens: make(map[string]string), waiters: make(map[string]chan struct{}),
 	}
 	streams, err := stream.NewManager(stream.Config{
-		Start: desktop.StartStream, KeepAwake: desktop.KeepAwake,
+		Start: desktop.StartStream, KeepAwake: desktop.KeepAwake, KeepAwakeAfter: 30 * time.Second,
 		Display: func() (desktop.Display, error) {
 			d, err := desktop.Current().Displays()
 			if err != nil || len(d) == 0 {

@@ -313,3 +313,22 @@ func TestWebSocketStartsLowerAndResizes(t *testing.T) {
 	}
 	t.Fatal("an oversized resize was not reported")
 }
+
+// The display stays awake for a while after a session ends, so a reconnect at the lock screen
+// does not find it asleep.
+func TestDisplayStaysAwakeAfterTheSession(t *testing.T) {
+	h := harnessWith(t, func(c *Config) { c.KeepAwakeAfter = 300 * time.Millisecond })
+	a, err := h.m.Open("desk", Request{Quality: "auto"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if h.awake.Load() != 1 {
+		t.Fatalf("awake %d while open", h.awake.Load())
+	}
+	h.m.Close("desk", a.Session)
+	time.Sleep(100 * time.Millisecond)
+	if h.awake.Load() != 1 {
+		t.Fatal("display released at once")
+	}
+	waitFor(t, "display released after the delay", func() bool { return h.awake.Load() == 0 })
+}

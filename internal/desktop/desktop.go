@@ -41,11 +41,12 @@ var ErrScreenUnavailable = errors.New("screen unavailable")
 // unavailable explains a capture that found no display, using the current display state.
 func unavailable() error {
 	st, err := current.State()
+	// A sleeping display is checked first: it is the reason capture stops, even at the lock screen.
 	switch {
-	case err == nil && st.Locked:
-		return fmt.Errorf("%w: the office computer is locked; unlock it, or turn off automatic locking on a dedicated office Mac", ErrScreenUnavailable)
 	case err == nil && st.Asleep:
 		return fmt.Errorf("%w: the office computer's display is asleep", ErrScreenUnavailable)
+	case err == nil && st.Locked:
+		return fmt.Errorf("%w: the office computer is locked; unlock it, or turn off automatic locking on a dedicated office Mac", ErrScreenUnavailable)
 	}
 	return fmt.Errorf("%w: no display to capture", ErrScreenUnavailable)
 }

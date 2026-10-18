@@ -81,6 +81,10 @@ type Config struct {
 	Start     func(context.Context, desktop.StreamOptions) (desktop.Stream, error)
 	Display   func() (desktop.Display, error)
 	KeepAwake func(reason string) (func(), error)
+	// KeepAwakeAfter holds the display awake this long after a session ends. At the lock screen
+	// macOS sleeps the display within seconds of the last assertion going away, so a reconnect
+	// (new quality, network change, the app reopening the view) would find it asleep and fail.
+	KeepAwakeAfter time.Duration
 	// Attach ties a session to its client: the context ends when the client is revoked.
 	Attach func(parent context.Context, clientID string) (context.Context, func(), error)
 	// NewInput gives a session control of the desktop; nil makes sessions view-only.
@@ -255,6 +259,9 @@ func (s *session) start(offer string, opts desktop.StreamOptions) (string, error
 	// Wake the display first: capture finds no display while it sleeps.
 	if release, err := s.m.cfg.KeepAwake("mobd live desktop"); err == nil {
 		s.release = release
+		if after := s.m.cfg.KeepAwakeAfter; after > 0 {
+			s.release = func() { time.AfterFunc(after, release) }
+		}
 	} else if !errors.Is(err, desktop.ErrUnsupported) {
 		log.Printf("stream %s: %v", s.id, err)
 	}
