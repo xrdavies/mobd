@@ -33,7 +33,7 @@ func (m *Manager) Doctor(ctx context.Context) []desktop.DoctorCheck {
 			out = append(out, desktop.DoctorCheck{Name: p.check, OK: true, Detail: path})
 		}
 	}
-	out = append(out, m.cgroupCheck(ctx), m.displayCheck())
+	out = append(out, m.cgroupCheck(ctx), m.displayCheck(), m.encoderCheck())
 	res := m.Resources()
 	mem, disk := desktop.MemoryCheck(res.Memory), desktop.DiskCheck(res.Disk)
 	out = append(out,
@@ -102,6 +102,19 @@ func (m *Manager) cgroupCheck(ctx context.Context) desktop.DoctorCheck {
 	}
 	c.OK, c.Detail = true, "cgroup v2, freezer via "+how+" (user manager)"
 	return c
+}
+
+// encoderCheck names the encoder the live view uses.
+func (m *Manager) encoderCheck() desktop.DoctorCheck {
+	if len(m.opts.Encoders) == 0 {
+		return desktop.DoctorCheck{Name: "encoder", Detail: "no H.264 encoder: the live desktop is off",
+			Fix: "sudo apt install gstreamer1.0-plugins-bad (OpenH264) or a VA-API driver"}
+	}
+	var names []string
+	for _, e := range m.opts.Encoders {
+		names = append(names, e.Name+" ("+e.Detail+")")
+	}
+	return desktop.DoctorCheck{Name: "encoder", OK: true, Detail: strings.Join(names, ", ")}
 }
 
 func (m *Manager) displayCheck() desktop.DoctorCheck {

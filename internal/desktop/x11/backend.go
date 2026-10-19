@@ -8,7 +8,7 @@ import (
 	"github.com/xrdavies/mobd/internal/desktop"
 )
 
-// later answers what X11 does not do yet (StartStream: phase 3) as the unsupported backend.
+// later is the unsupported backend, for any method X11 does not define.
 type later = desktop.Backend
 
 // Backend is X11 as a desktop.Backend.

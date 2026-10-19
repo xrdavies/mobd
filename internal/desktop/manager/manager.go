@@ -20,6 +20,7 @@ import (
 
 	"github.com/xrdavies/mobd/internal/cgroup"
 	"github.com/xrdavies/mobd/internal/desktop"
+	"github.com/xrdavies/mobd/internal/desktop/gst"
 	"github.com/xrdavies/mobd/internal/proc"
 	"github.com/xrdavies/mobd/internal/sysd"
 )
@@ -39,6 +40,8 @@ type Options struct {
 	SleepAfter time.Duration
 	// SleepCPU is the CPU use (fraction of one core) under which a desktop counts as idle.
 	SleepCPU float64
+	// Encoders are the probed H.264 encoders for the live view, best first.
+	Encoders []gst.Factory
 	// Memory and Disk: below the warning a level is low, below the floor no new desktop starts.
 	Memory  MemoryLimits
 	Disk    DiskLimits

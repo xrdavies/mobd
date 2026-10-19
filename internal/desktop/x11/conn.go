@@ -17,10 +17,11 @@ import (
 	"github.com/jezek/xgb/xfixes"
 	"github.com/jezek/xgb/xproto"
 	"github.com/jezek/xgb/xtest"
+	"github.com/xrdavies/mobd/internal/desktop/gst"
 )
 
 // subtractEvery bounds how often screen changes are acknowledged, so a playing video costs a
-// couple of events a second, not one per frame.
+// couple of events a second, not one per frame; a running stream acknowledges at its frame rate.
 const subtractEvery = 500 * time.Millisecond
 
 // Options configure a connection.
@@ -32,6 +33,8 @@ type Options struct {
 	// Launch starts an application on this display (the manager's apps cgroup); nil disables
 	// OpenApp.
 	Launch func(argv []string) (pid int, err error)
+	// Encoders are the probed H.264 encoders, best first; none disables StartStream.
+	Encoders []gst.Factory
 }
 
 // X11 is one connection to an X display.
@@ -47,6 +50,8 @@ type X11 struct {
 
 	onChange func()
 	dirty    atomic.Bool
+	changes  atomic.Uint64 // screen changes acknowledged so far, for streams
+	fastAck  atomic.Int64  // acknowledge every this many ns while a stream runs; 0 = subtractEvery
 
 	// Input (input.go): one sender at a time, the keyboard mapping, wheel remainders.
 	inputMu          sync.Mutex
@@ -58,8 +63,13 @@ type X11 struct {
 	clipMu sync.Mutex
 	clip   clipboard
 	launch func(argv []string) (int, error)
-	done   chan struct{}
-	once   sync.Once
+
+	// Streams (stream.go).
+	encoders []gst.Factory
+	streamMu sync.Mutex
+	streams  map[*stream]bool
+	done     chan struct{}
+	once     sync.Once
 }
 
 // Open connects to the display through the first socket in addrs that answers ("@/tmp/.X11-unix/X101"
@@ -98,7 +108,7 @@ func Open(ctx context.Context, name string, addrs []string, cookie []byte, opts 
 		nc.Close()
 		return nil, fmt.Errorf("X display %s: %w", name, ctx.Err())
 	}
-	x := &X11{c: c, name: name, scale: max(opts.Scale, 1), onChange: opts.OnChange, launch: opts.Launch, done: make(chan struct{})}
+	x := &X11{c: c, name: name, scale: max(opts.Scale, 1), onChange: opts.OnChange, launch: opts.Launch, encoders: opts.Encoders, done: make(chan struct{})}
 	if err := x.setup(); err != nil {
 		c.Close()
 		return nil, fmt.Errorf("X display %s: %w", name, err)
@@ -163,15 +173,17 @@ func (x *X11) events() {
 // acknowledge subtracts the damage seen so the server reports the next change, and tells the
 // owner the screen changed.
 func (x *X11) acknowledge() {
-	t := time.NewTicker(subtractEvery)
-	defer t.Stop()
 	// A new damage object reports once at first; that is no change.
 	first := true
 	for {
+		every := subtractEvery
+		if fast := time.Duration(x.fastAck.Load()); fast > 0 {
+			every = fast
+		}
 		select {
 		case <-x.done:
 			return
-		case <-t.C:
+		case <-time.After(every):
 		}
 		if !x.dirty.Swap(false) {
 			first = false
@@ -182,6 +194,7 @@ func (x *X11) acknowledge() {
 			first = false
 			continue
 		}
+		x.changes.Add(1)
 		if x.onChange != nil {
 			x.onChange()
 		}

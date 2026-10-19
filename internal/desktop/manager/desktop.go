@@ -557,7 +557,7 @@ func (s source) Display() (desktop.Display, error) {
 }
 
 func (s source) StartStream(ctx context.Context, opts desktop.StreamOptions) (desktop.Stream, error) {
-	return nil, desktop.ErrUnsupported
+	return guarded{s.d}.StartStream(ctx, opts)
 }
 
 // Hold wakes the desktop for a viewer and keeps it awake until release.

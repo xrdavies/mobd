@@ -29,7 +29,7 @@ type xconn interface {
 // openX11 connects to display n with its cookie; onChange hears of screen changes, launch
 // starts the apps the agent opens.
 func (m *Manager) openX11(ctx context.Context, n int, cookie []byte, scale int, onChange func(), launch func([]string) (int, error)) (xconn, error) {
-	x, err := x11.Open(ctx, ":"+strconv.Itoa(n), xSockets(m.tmp, n), cookie, x11.Options{Scale: scale, OnChange: onChange, Launch: launch})
+	x, err := x11.Open(ctx, ":"+strconv.Itoa(n), xSockets(m.tmp, n), cookie, x11.Options{Scale: scale, OnChange: onChange, Launch: launch, Encoders: m.opts.Encoders})
 	if err != nil {
 		return nil, err
 	}

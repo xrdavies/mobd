@@ -14,12 +14,21 @@ import (
 // Capture reads the whole screen. Xvfb draws the pointer in software and GetImage leaves it
 // out, so frames have no cursor.
 func (x *X11) Capture(ctx context.Context) (*image.RGBA, error) {
-	if err := x.alive(); err != nil {
+	pix, stride, err := x.captureRaw(ctx)
+	if err != nil {
 		return nil, err
+	}
+	return toRGBA(pix, x.width, x.height, stride)
+}
+
+// captureRaw reads the screen as the server keeps it: BGRX rows of stride bytes.
+func (x *X11) captureRaw(ctx context.Context) ([]byte, int, error) {
+	if err := x.alive(); err != nil {
+		return nil, 0, err
 	}
 	setup := xproto.Setup(x.c)
 	if setup.ImageByteOrder != xproto.ImageOrderLSBFirst {
-		return nil, errors.New("X image: most significant byte first is not supported")
+		return nil, 0, errors.New("X image: most significant byte first is not supported")
 	}
 	bpp, pad := 0, 0
 	for _, f := range setup.PixmapFormats {
@@ -28,7 +37,7 @@ func (x *X11) Capture(ctx context.Context) (*image.RGBA, error) {
 		}
 	}
 	if bpp != 32 {
-		return nil, fmt.Errorf("X image: depth %d at %d bits per pixel is not supported", x.depth, bpp)
+		return nil, 0, fmt.Errorf("X image: depth %d at %d bits per pixel is not supported", x.depth, bpp)
 	}
 	type result struct {
 		r   *xproto.GetImageReply
@@ -44,16 +53,19 @@ func (x *X11) Capture(ctx context.Context) (*image.RGBA, error) {
 	select {
 	case r = <-ch:
 	case <-ctx.Done():
-		return nil, ctx.Err()
+		return nil, 0, ctx.Err()
 	case <-x.done:
-		return nil, errClosed
+		return nil, 0, errClosed
 	}
 	if r.err != nil {
-		return nil, fmt.Errorf("X GetImage: %w", r.err)
+		return nil, 0, fmt.Errorf("X GetImage: %w", r.err)
 	}
 	if r.r == nil {
-		return nil, errClosed
+		return nil, 0, errClosed
 	}
 	stride := (x.width*bpp + pad - 1) / pad * pad / 8
-	return toRGBA(r.r.Data, x.width, x.height, stride)
+	if len(r.r.Data) < stride*x.height {
+		return nil, 0, fmt.Errorf("X image: %d bytes for %dx%d", len(r.r.Data), x.width, x.height)
+	}
+	return r.r.Data, stride, nil
 }

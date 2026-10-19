@@ -11,6 +11,7 @@ import (
 	"github.com/xrdavies/mobd/internal/cgroup"
 	"github.com/xrdavies/mobd/internal/config"
 	"github.com/xrdavies/mobd/internal/desktop"
+	"github.com/xrdavies/mobd/internal/desktop/gst"
 	"github.com/xrdavies/mobd/internal/desktop/manager"
 	"github.com/xrdavies/mobd/internal/proc"
 	"github.com/xrdavies/mobd/internal/sysd"
@@ -41,7 +42,7 @@ func newProvider(cfg config.Config, store *task.Store) desktop.Provider {
 		DataDir: filepath.Join(cfg.DataDir, "desktops"), RuntimeDir: manager.RuntimeDir(cfg.DataDir),
 		Size: [2]int{w, h}, Scale: cfg.DesktopScale, Layout: cfg.DesktopKeyboardLayout,
 		DisplayBase: cfg.DesktopDisplayBase, MaxDesktops: cfg.MaxDesktops, Version: version,
-		SleepAfter: cfg.DesktopSleepAfter, SleepCPU: cfg.DesktopSleepCPU,
+		SleepAfter: cfg.DesktopSleepAfter, SleepCPU: cfg.DesktopSleepCPU, Encoders: probeEncoders(),
 		Memory:  manager.MemoryLimits{WarnPercent: cfg.MemoryWarnPercent, FloorPercent: cfg.MemoryFloorPercent},
 		Disk:    manager.DiskLimits{WarnPercent: cfg.DiskWarnPercent, WarnBytes: int64(cfg.DiskWarnBytes), FloorBytes: int64(cfg.DiskFloorBytes)},
 		Systemd: sd, Cgroups: cgroup.New(cgroup.DefaultRoot), Spawner: proc.Exec{},
@@ -100,14 +101,28 @@ func offlineDoctor(ctx context.Context, cfg config.Config) []desktop.DoctorCheck
 		DataDir: filepath.Join(cfg.DataDir, "desktops"), RuntimeDir: manager.RuntimeDir(cfg.DataDir),
 		Size: [2]int{w, h}, Scale: cfg.DesktopScale, Layout: cfg.DesktopKeyboardLayout, DisplayBase: cfg.DesktopDisplayBase,
 		MaxDesktops: cfg.MaxDesktops, Systemd: sd, Cgroups: cgroup.New(cgroup.DefaultRoot), Spawner: proc.Exec{},
-		Memory: manager.MemoryLimits{WarnPercent: cfg.MemoryWarnPercent, FloorPercent: cfg.MemoryFloorPercent},
-		Disk:   manager.DiskLimits{WarnPercent: cfg.DiskWarnPercent, WarnBytes: int64(cfg.DiskWarnBytes), FloorBytes: int64(cfg.DiskFloorBytes)},
+		Encoders: probeEncoders(),
+		Memory:   manager.MemoryLimits{WarnPercent: cfg.MemoryWarnPercent, FloorPercent: cfg.MemoryFloorPercent},
+		Disk:     manager.DiskLimits{WarnPercent: cfg.DiskWarnPercent, WarnBytes: int64(cfg.DiskWarnBytes), FloorBytes: int64(cfg.DiskFloorBytes)},
 	})
 	if err != nil {
 		return []desktop.DoctorCheck{{Name: "desktops", Detail: err.Error()}}
 	}
 	defer m.Shutdown()
 	return m.Doctor(ctx)
+}
+
+// probeEncoders finds the H.264 encoders for the live view (a second or two, once).
+func probeEncoders() []gst.Factory {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	encoders := gst.Probe(ctx)
+	if len(encoders) == 0 {
+		log.Printf("live desktop: no H.264 encoder (install gstreamer1.0-plugins-bad with OpenH264)")
+	} else {
+		log.Printf("live desktop: encoder %s (%s)", encoders[0].Name, encoders[0].Detail)
+	}
+	return encoders
 }
 
 // noManager stands in for the systemd user manager when it cannot be reached.

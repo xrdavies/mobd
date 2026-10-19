@@ -387,7 +387,7 @@ func desktopLogs(socket, session, component string, lines int, followLog bool) e
 // doctorLabels name the checks as people know the programs.
 var doctorLabels = map[string]string{
 	"xvfb": "Xvfb", "windowManager": "openbox", "dbus": "dbus-daemon", "keyboard": "setxkbmap",
-	"cgroup": "cgroup v2", "display": "desktops", "oomd": "systemd-oomd",
+	"cgroup": "cgroup v2", "display": "desktops", "oomd": "systemd-oomd", "encoder": "encoder",
 }
 
 func doctor(socket string) error {
