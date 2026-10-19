@@ -1,6 +1,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -43,6 +44,7 @@ func newProvider(cfg config.Config, store *task.Store) desktop.Provider {
 		Size: [2]int{w, h}, Scale: cfg.DesktopScale, Layout: cfg.DesktopKeyboardLayout,
 		DisplayBase: cfg.DesktopDisplayBase, MaxDesktops: cfg.MaxDesktops, Version: version,
 		SleepAfter: cfg.DesktopSleepAfter, SleepCPU: cfg.DesktopSleepCPU, Encoders: probeEncoders(),
+		SeedDir: cmp.Or(cfg.DesktopBrowserSeed, filepath.Join(cfg.DataDir, "seed")),
 		Memory:  manager.MemoryLimits{WarnPercent: cfg.MemoryWarnPercent, FloorPercent: cfg.MemoryFloorPercent},
 		Disk:    manager.DiskLimits{WarnPercent: cfg.DiskWarnPercent, WarnBytes: int64(cfg.DiskWarnBytes), FloorBytes: int64(cfg.DiskFloorBytes)},
 		Systemd: sd, Cgroups: cgroup.New(cgroup.DefaultRoot), Spawner: proc.Exec{},

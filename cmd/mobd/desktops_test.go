@@ -101,6 +101,13 @@ func (f *fakeDesktops) CloseAllDesktops(_ context.Context, r desktop.CloseReason
 	return len(f.list), nil
 }
 func (f *fakeDesktops) DesktopDoctor(context.Context) []desktop.DoctorCheck { return f.checks }
+func (f *fakeDesktops) SeedDesktop(id string) error {
+	f.record("seed " + id)
+	if strings.HasPrefix(id, "51b9") {
+		return errors.New("close the browser in this conversation first")
+	}
+	return nil
+}
 
 // fakeService records what the CLI asks of the background service.
 type fakeService struct {
@@ -193,6 +200,13 @@ func TestDesktopsListWakeDoctor(t *testing.T) {
 	}
 	if f.out.String() != "51b9e2f4 running on :103\n" {
 		t.Errorf("wake %q", f.out)
+	}
+	f.out.Reset()
+	if err := run([]string{"desktops", "seed", "9f2c", "--socket", f.socket}); err != nil || !strings.Contains(f.out.String(), "9f2c41d0 are now the seed") {
+		t.Errorf("seed: %v %q", err, f.out)
+	}
+	if err := run([]string{"desktops", "seed", "51b9", "--socket", f.socket}); err == nil || !strings.Contains(err.Error(), "close the browser") {
+		t.Errorf("seed with a browser open: %v", err)
 	}
 	f.desktops.checks = []desktop.DoctorCheck{
 		{Name: "xvfb", OK: true, Detail: "/usr/bin/Xvfb"},

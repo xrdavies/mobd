@@ -13,7 +13,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
-	"strconv"
 	"sync"
 	"syscall"
 	"time"
@@ -40,6 +39,9 @@ type Options struct {
 	SleepAfter time.Duration
 	// SleepCPU is the CPU use (fraction of one core) under which a desktop counts as idle.
 	SleepCPU float64
+	// SeedDir holds the browser profiles new conversations start from (desktopBrowserSeed, else
+	// <dataDir>/seed); "" disables seeding.
+	SeedDir string
 	// Encoders are the probed H.264 encoders for the live view, best first.
 	Encoders *gst.Encoders
 	// Memory and Disk: below the warning a level is low, below the floor no new desktop starts.
@@ -92,6 +94,7 @@ type Manager struct {
 	statfs       func(path string) (free, total int64, err error)
 	oomdActive   func() bool
 	lingering    func() (bool, string)
+	locale       []string // LANG, LC_* for desktops and turns
 }
 
 var _ desktop.Provider = (*Manager)(nil)
@@ -124,6 +127,7 @@ func New(opts Options) (*Manager, error) {
 	}
 	m.xready = func(ctx context.Context, n int, cookie []byte) error { return xHandshake(ctx, m.tmp, n, cookie) }
 	m.openX = m.openX11
+	m.locale = machineLocale("/etc/default/locale", "/etc/locale.conf")
 	// Levels are known before the first turn is scheduled.
 	m.sampleMemory()
 	m.sampleDisk(false)
@@ -382,10 +386,7 @@ func (r *reservation) Turn(desktop.Desktop) (desktop.TurnEnv, error) {
 		return desktop.TurnEnv{}, desktop.ErrNoDesktop
 	}
 	return desktop.TurnEnv{
-		Env: []string{
-			"DISPLAY=:" + strconv.Itoa(rec.Display), "XAUTHORITY=" + rec.XAuthority,
-			"DBUS_SESSION_BUS_ADDRESS=" + rec.Bus, "MOB_DESKTOP=" + d.dir,
-		},
+		Env:         d.agentEnv(rec),
 		Cgroup:      filepath.Join(r.m.opts.Cgroups.Path(rec.Cgroup), "turn"),
 		OOMScoreAdj: runnerOOMScoreAdj,
 	}, nil

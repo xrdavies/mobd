@@ -31,6 +31,11 @@ type Provider interface {
 	Shutdown()
 }
 
+// Seeder is a Provider whose browser profiles can seed new conversations (Linux).
+type Seeder interface {
+	Seed(sessionID string) error
+}
+
 // Reservation holds a turn's place on its desktop between scheduling and the end of the turn.
 type Reservation interface {
 	// Turn returns the environment for the session's runner; called after Ensure.
@@ -177,6 +182,10 @@ type Event struct {
 var (
 	// ErrNoDesktop: the session has no desktop (yet, or any more).
 	ErrNoDesktop = errors.New("the conversation has no desktop yet; it starts with the next turn")
+	// ErrBrowserRunning: a browser still has the conversation's profile open.
+	ErrBrowserRunning = errors.New("close the browser in this conversation first")
+	// ErrNoProfile: the conversation never ran a browser.
+	ErrNoProfile = errors.New("this conversation has no browser profile yet; open a browser in it first")
 	// ErrDesktopAsleep: the desktop must be woken before it can be driven.
 	ErrDesktopAsleep = errors.New("the conversation's desktop is asleep")
 )

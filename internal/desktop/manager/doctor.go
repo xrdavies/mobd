@@ -33,7 +33,7 @@ func (m *Manager) Doctor(ctx context.Context) []desktop.DoctorCheck {
 			out = append(out, desktop.DoctorCheck{Name: p.check, OK: true, Detail: path})
 		}
 	}
-	out = append(out, m.cgroupCheck(ctx), m.displayCheck(), m.encoderCheck())
+	out = append(out, m.cgroupCheck(ctx), m.displayCheck(), m.encoderCheck(), m.browserCheck())
 	res := m.Resources()
 	mem, disk := desktop.MemoryCheck(res.Memory), desktop.DiskCheck(res.Disk)
 	out = append(out,
@@ -71,7 +71,7 @@ func (m *Manager) Checks(ctx context.Context) map[string]desktop.Check {
 	checks := map[string]desktop.Check{}
 	for _, c := range m.Doctor(ctx) {
 		switch c.Name {
-		case "memory", "disk", "oomd", "linger", "locale":
+		case "memory", "disk", "oomd", "linger", "locale", "browsers":
 			continue
 		}
 		detail := c.Detail

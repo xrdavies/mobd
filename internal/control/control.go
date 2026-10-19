@@ -81,6 +81,7 @@ type Desktops interface {
 	CloseDesktop(ctx context.Context, id string, reason desktop.CloseReason) error
 	CloseAllDesktops(ctx context.Context, reason desktop.CloseReason) (int, error)
 	DesktopDoctor(ctx context.Context) []desktop.DoctorCheck
+	SeedDesktop(id string) error
 }
 
 // Deps are what the management routes act on; Desktops may be nil (tests).
@@ -220,6 +221,17 @@ func desktopRoutes(mux *http.ServeMux, d Desktops) {
 			return
 		}
 		reply(w, 200, map[string]int{"closed": n})
+	})
+	mux.HandleFunc("POST /desktops/{id}/seed", func(w http.ResponseWriter, r *http.Request) {
+		id, ok := resolve(w, r)
+		if !ok {
+			return
+		}
+		if err := d.SeedDesktop(id); err != nil {
+			fail(w, err)
+			return
+		}
+		reply(w, 200, map[string]string{"sessionId": id})
 	})
 	mux.HandleFunc("GET /doctor", func(w http.ResponseWriter, r *http.Request) {
 		reply(w, 200, map[string]any{"checks": d.DesktopDoctor(r.Context())})

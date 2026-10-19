@@ -169,6 +169,9 @@ func (d *desk) start(ctx context.Context) (err error) {
 	if err := os.MkdirAll(d.dir, 0700); err != nil {
 		return err
 	}
+	if err := d.prepareEnv(); err != nil {
+		return d.fail(record{}, fmt.Errorf("browser wrappers: %w", err))
+	}
 	paths := map[string]string{}
 	for _, p := range programs {
 		path, err := m.look(p.name)
@@ -197,7 +200,7 @@ func (d *desk) start(ctx context.Context) (err error) {
 		Version: recordVersion, SessionID: d.sid, State: desktop.StateStarting,
 		Unit: unitName(d.sid), PIDs: map[string]int{},
 		Width: m.opts.Size[0], Height: m.opts.Size[1], Scale: m.opts.Scale,
-		Layout: m.opts.Layout, Locale: os.Getenv("LANG"), BootID: m.bootID(), MobdVersion: m.opts.Version,
+		Layout: m.opts.Layout, Locale: localeValue(m.locale), BootID: m.bootID(), MobdVersion: m.opts.Version,
 		StartedAt: &now, LastUsedAt: &now, Crashes: prev.Crashes,
 	}
 	d.mu.Lock()
@@ -328,7 +331,7 @@ func (d *desk) start(ctx context.Context) (err error) {
 		}
 		return err
 	}
-	env := childEnv(append(display, "DBUS_SESSION_BUS_ADDRESS="+rec.Bus)...)
+	env := childEnv(append(append(display, "DBUS_SESSION_BUS_ADDRESS="+rec.Bus), m.locale...)...)
 
 	// Keyboard layout: a wrong layout is worth a log line, not a failed desktop.
 	kb, err := d.spawn("setxkbmap", proc.Spec{
@@ -385,7 +388,7 @@ func (d *desk) startWM(rec record, path string, logf, sessionFD *os.File) (*chil
 		return nil, err
 	}
 	return d.spawn("openbox", proc.Spec{
-		Path: path, Args: []string{"--config-file", rc}, Env: childEnv(rec.env()...),
+		Path: path, Args: []string{"--config-file", rc}, Env: childEnv(d.agentEnv(rec)...),
 		Stdout: logf, Stderr: logf, NewSession: true, CgroupDir: sessionFD,
 	})
 }

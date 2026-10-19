@@ -166,6 +166,9 @@ func (d *desk) adopt(rec record, state desktop.DesktopState) error {
 		}
 		procs[name] = c
 	}
+	if err := d.prepareEnv(); err != nil {
+		log.Printf("desktop %s: browser wrappers: %v", d.sid, err)
+	}
 	d.mu.Lock()
 	d.done, d.err, d.procs = make(chan struct{}), nil, procs
 	d.mu.Unlock()

@@ -86,8 +86,15 @@ func (d *desk) launch(argv []string) (int, error) {
 		return 0, err
 	}
 	defer l.Close()
+	// A desktop entry names the browser itself (Exec=/usr/bin/google-chrome-stable): use the
+	// conversation's wrapper instead.
+	if w := filepath.Join(d.binDir(), filepath.Base(argv[0])); w != argv[0] {
+		if fi, err := os.Stat(w); err == nil && fi.Mode().IsRegular() {
+			argv = append([]string{w}, argv[1:]...)
+		}
+	}
 	pid, wait, err := d.m.opts.Spawner.Start(proc.Spec{
-		Path: argv[0], Args: argv[1:], Env: childEnv(append(rec.env(), "MOB_DESKTOP="+d.dir)...), Dir: d.dir,
+		Path: argv[0], Args: argv[1:], Env: childEnv(d.agentEnv(rec)...), Dir: d.dir,
 		Stdout: l.File, Stderr: l.File, NewSession: true, CgroupDir: apps, OOMScoreAdj: appOOMScoreAdj,
 	})
 	if err != nil {

@@ -161,6 +161,34 @@ func (s *Server) CloseAllDesktops(ctx context.Context, reason desktop.CloseReaso
 	return n, errors.Join(errs...)
 }
 
+// SeedDesktop makes a conversation's browser profiles the seed for new conversations.
+func (s *Server) SeedDesktop(id string) error {
+	seeder, ok := s.desktops.(desktop.Seeder)
+	if !ok {
+		return &DesktopError{http.StatusNotImplemented, "", "this office computer has one shared desktop"}
+	}
+	if _, ok := s.store.SessionTitle(id); !ok {
+		return errSessionNotFound
+	}
+	switch err := seeder.Seed(id); {
+	case errors.Is(err, desktop.ErrBrowserRunning):
+		return &DesktopError{http.StatusConflict, "browser_running", err.Error()}
+	case errors.Is(err, desktop.ErrNoProfile):
+		return &DesktopError{http.StatusConflict, "no_profile", err.Error()}
+	default:
+		return err
+	}
+}
+
+// handleSeedDesktop: POST /desktops/{id}/seed.
+func (s *Server) handleSeedDesktop(w http.ResponseWriter, r *http.Request) {
+	if err := s.SeedDesktop(r.PathValue("id")); err != nil {
+		writeDesktopErr(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 // DesktopDoctor checks what desktops need (`mobd desktops doctor`); nil without per-session
 // desktops.
 func (s *Server) DesktopDoctor(ctx context.Context) []desktop.DoctorCheck {

@@ -38,6 +38,7 @@ const desktopsUsage = `usage: mobd desktops list
        mobd desktops wake SESSION
        mobd desktops logs SESSION [--component xvfb|dbus|openbox|apps|all] [-n LINES] [-f]
        mobd desktops doctor
+       mobd desktops seed SESSION
 SESSION is a conversation ID or a unique prefix of at least 4 characters. All take --socket PATH.`
 
 // sharedDesktop is what desktop commands say where conversations share one desktop.
@@ -163,7 +164,7 @@ func desktopsCommand(args []string) error {
 	action, args := args[0], args[1:]
 	var session string
 	switch action {
-	case "close", "wake", "logs":
+	case "close", "wake", "logs", "seed":
 		if len(args) == 0 || strings.HasPrefix(args[0], "-") {
 			return errors.New(desktopsUsage)
 		}
@@ -213,6 +214,19 @@ func desktopsCommand(args []string) error {
 		return desktopLogs(socket, session, *component, *lines, *followLog)
 	case "doctor":
 		return doctor(socket)
+	case "seed":
+		var reply struct {
+			SessionID string `json:"sessionId"`
+		}
+		err := control.CallTimeout(socket, 2*time.Minute, "POST", "/desktops/"+url.PathEscape(session)+"/seed", nil, &reply)
+		if errors.Is(err, control.ErrNotRunning) {
+			return errors.New("mobd is not running; start it with mobd start")
+		}
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(cliOut, "The browser profiles of %s are now the seed; new conversations start logged in.\n", short(reply.SessionID))
+		return nil
 	}
 	return nil
 }

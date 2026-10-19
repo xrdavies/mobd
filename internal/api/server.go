@@ -161,6 +161,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /desktops", s.handleListDesktops)
 	mux.HandleFunc("POST /desktops/{id}", s.handleOpenDesktop)
 	mux.HandleFunc("DELETE /desktops/{id}", s.handleCloseDesktop)
+	mux.HandleFunc("POST /desktops/{id}/seed", s.handleSeedDesktop)
 	mux.HandleFunc("POST /uploads", s.handleUpload)
 	mux.HandleFunc("GET /artifacts/{id}", s.handleArtifact)
 	// The VNC relay was replaced by the live desktop stream; old clients get a readable error.
