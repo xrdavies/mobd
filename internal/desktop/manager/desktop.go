@@ -487,8 +487,8 @@ func (d *desk) Source() desktop.Source      { return source{d} }
 func (d *desk) Backend() (desktop.Backend, error) {
 	switch d.State() {
 	case desktop.StateRunning:
-		if x := d.conn(); x != nil {
-			return guarded{d, x}, nil
+		if d.conn() != nil {
+			return guarded{d}, nil
 		}
 	case desktop.StateAsleep:
 		return nil, desktop.ErrDesktopAsleep
@@ -552,7 +552,9 @@ func (s source) StartStream(ctx context.Context, opts desktop.StreamOptions) (de
 
 // Hold wakes the desktop for a viewer and keeps it awake until release.
 func (s source) Hold(reason string) (func(), error) { return s.d.hold(reason) }
-func (s source) NewInput() *desktop.Input           { return desktop.On(desktop.Current()).NewInput() }
+
+// NewInput is a viewer's input on this desktop's X server.
+func (s source) NewInput() *desktop.Input { return desktop.On(guarded{s.d}).NewInput() }
 
 func (s source) Done() <-chan struct{} {
 	s.d.mu.Lock()

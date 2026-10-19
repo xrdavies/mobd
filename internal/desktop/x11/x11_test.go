@@ -21,6 +21,9 @@ import (
 	"github.com/xrdavies/mobd/internal/desktop"
 )
 
+// xauthPath is the cookie file of the last Xvfb started.
+var xauthPath string
+
 // xvfb starts a real Xvfb on display n with a fresh cookie; the test skips without Xvfb.
 func xvfb(t *testing.T, n int) (addrs []string, cookie []byte) {
 	t.Helper()
@@ -37,6 +40,7 @@ func xvfb(t *testing.T, n int) (addrs []string, cookie []byte) {
 	field([]byte(strconv.Itoa(n)))
 	field([]byte("MIT-MAGIC-COOKIE-1"))
 	field(cookie)
+	xauthPath = auth
 	if err := os.WriteFile(auth, b.Bytes(), 0600); err != nil {
 		t.Fatal(err)
 	}

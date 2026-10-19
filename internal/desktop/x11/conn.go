@@ -16,6 +16,7 @@ import (
 	"github.com/jezek/xgb/damage"
 	"github.com/jezek/xgb/xfixes"
 	"github.com/jezek/xgb/xproto"
+	"github.com/jezek/xgb/xtest"
 )
 
 // subtractEvery bounds how often screen changes are acknowledged, so a playing video costs a
@@ -43,8 +44,14 @@ type X11 struct {
 
 	onChange func()
 	dirty    atomic.Bool
-	done     chan struct{}
-	once     sync.Once
+
+	// Input (input.go): one sender at a time, the keyboard mapping, wheel remainders.
+	inputMu          sync.Mutex
+	km               *keymap
+	mapStale         atomic.Bool
+	scrollX, scrollY float64
+	done             chan struct{}
+	once             sync.Once
 }
 
 // Open connects to the display through the first socket in addrs that answers ("@/tmp/.X11-unix/X101"
@@ -103,6 +110,9 @@ func (x *X11) setup() error {
 	if _, err := xfixes.QueryVersion(x.c, 5, 0).Reply(); err != nil {
 		return fmt.Errorf("XFIXES: %w", err)
 	}
+	if err := xtest.Init(x.c); err != nil {
+		return fmt.Errorf("XTEST: %w", err)
+	}
 	if err := damage.Init(x.c); err != nil {
 		return fmt.Errorf("DAMAGE: %w", err)
 	}
@@ -126,8 +136,11 @@ func (x *X11) events() {
 		if ev == nil && err == nil {
 			return
 		}
-		if _, ok := ev.(damage.NotifyEvent); ok {
+		switch ev.(type) {
+		case damage.NotifyEvent:
 			x.dirty.Store(true)
+		case xproto.MappingNotifyEvent:
+			x.mapStale.Store(true)
 		}
 	}
 }

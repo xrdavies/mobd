@@ -178,61 +178,81 @@ func (d *desk) xLost(done chan struct{}, x xconn) bool {
 }
 
 // guarded is the desktop's backend for callers: every X call holds the ops read lock, so
-// freezing and closing wait for calls in flight.
-type guarded struct {
-	d *desk
-	x xconn
+// freezing and closing wait for calls in flight, and goes to the connection of that moment
+// (it may have been reopened); without one it fails with ErrNoDesktop.
+type guarded struct{ d *desk }
+
+// with runs f on the current connection under the ops read lock.
+func (g guarded) with(f func(x xconn) error) error {
+	g.d.ops.RLock()
+	defer g.d.ops.RUnlock()
+	x := g.d.conn()
+	if x == nil {
+		if g.d.State() == desktop.StateAsleep {
+			return desktop.ErrDesktopAsleep
+		}
+		return desktop.ErrNoDesktop
+	}
+	return f(x)
 }
 
-func (g guarded) Name() string { return g.x.Name() }
-func (g guarded) Permissions() (desktop.Permissions, error) {
-	return g.x.Permissions()
+func (guarded) Name() string { return "x11" }
+func (guarded) Permissions() (desktop.Permissions, error) {
+	return desktop.Permissions{Accessibility: true, ScreenRecording: true}, nil
 }
-func (g guarded) RequestPermissions() {}
-func (g guarded) Displays() ([]desktop.Display, error) {
-	g.d.ops.RLock()
-	defer g.d.ops.RUnlock()
-	return g.x.Displays()
+func (guarded) RequestPermissions()              {}
+func (guarded) KeepAwake(string) (func(), error) { return func() {}, nil }
+func (g guarded) Remote() desktop.RemoteInput    { return guardedRemote(g) }
+func (g guarded) Displays() (d []desktop.Display, err error) {
+	err = g.with(func(x xconn) error { d, err = x.Displays(); return err })
+	return d, err
 }
-func (g guarded) Snapshot(ctx context.Context, opts desktop.SnapshotOptions) (desktop.Image, error) {
-	g.d.ops.RLock()
-	defer g.d.ops.RUnlock()
-	return g.x.Snapshot(ctx, opts)
+func (g guarded) Snapshot(ctx context.Context, opts desktop.SnapshotOptions) (img desktop.Image, err error) {
+	err = g.with(func(x xconn) error { img, err = x.Snapshot(ctx, opts); return err })
+	return img, err
 }
-func (g guarded) State() (desktop.DisplayState, error) {
-	g.d.ops.RLock()
-	defer g.d.ops.RUnlock()
-	return g.x.State()
+func (g guarded) State() (st desktop.DisplayState, err error) {
+	err = g.with(func(x xconn) error { st, err = x.State(); return err })
+	return st, err
 }
-func (g guarded) StartStream(ctx context.Context, opts desktop.StreamOptions) (desktop.Stream, error) {
-	g.d.ops.RLock()
-	defer g.d.ops.RUnlock()
-	return g.x.StartStream(ctx, opts)
+func (g guarded) StartStream(ctx context.Context, opts desktop.StreamOptions) (s desktop.Stream, err error) {
+	err = g.with(func(x xconn) error { s, err = x.StartStream(ctx, opts); return err })
+	return s, err
 }
-func (g guarded) KeepAwake(reason string) (func(), error) { return g.x.KeepAwake(reason) }
-func (g guarded) Remote() desktop.RemoteInput             { return g.x.Remote() }
-func (g guarded) Click(x, y float64, right bool, count int) error {
-	g.d.ops.RLock()
-	defer g.d.ops.RUnlock()
-	return g.x.Click(x, y, right, count)
+func (g guarded) Click(px, py float64, right bool, count int) error {
+	return g.with(func(x xconn) error { return x.Click(px, py, right, count) })
 }
 func (g guarded) Key(key string, mods []string) error {
-	g.d.ops.RLock()
-	defer g.d.ops.RUnlock()
-	return g.x.Key(key, mods)
+	return g.with(func(x xconn) error { return x.Key(key, mods) })
 }
 func (g guarded) Paste(ctx context.Context, text string) error {
-	g.d.ops.RLock()
-	defer g.d.ops.RUnlock()
-	return g.x.Paste(ctx, text)
+	return g.with(func(x xconn) error { return x.Paste(ctx, text) })
 }
-func (g guarded) ListWindows(onScreen bool) ([]desktop.Window, error) {
-	g.d.ops.RLock()
-	defer g.d.ops.RUnlock()
-	return g.x.ListWindows(onScreen)
+func (g guarded) ListWindows(onScreen bool) (w []desktop.Window, err error) {
+	err = g.with(func(x xconn) error { w, err = x.ListWindows(onScreen); return err })
+	return w, err
 }
-func (g guarded) OpenApp(ctx context.Context, target string) (string, error) {
-	g.d.ops.RLock()
-	defer g.d.ops.RUnlock()
-	return g.x.OpenApp(ctx, target)
+func (g guarded) OpenApp(ctx context.Context, target string) (out string, err error) {
+	err = g.with(func(x xconn) error { out, err = x.OpenApp(ctx, target); return err })
+	return out, err
+}
+
+// guardedRemote is a viewer's input on the current connection, under the ops read lock.
+type guardedRemote guarded
+
+func (g guardedRemote) Mouse(kind desktop.MouseKind, px, py float64, b desktop.Button, held [3]bool, clicks int, mods desktop.Modifiers) error {
+	return guarded(g).with(func(x xconn) error { return x.Remote().Mouse(kind, px, py, b, held, clicks, mods) })
+}
+func (g guardedRemote) KeyCode(code string, down bool, mods desktop.Modifiers) error {
+	return guarded(g).with(func(x xconn) error { return x.Remote().KeyCode(code, down, mods) })
+}
+func (g guardedRemote) Unicode(text string, mods desktop.Modifiers) error {
+	return guarded(g).with(func(x xconn) error { return x.Remote().Unicode(text, mods) })
+}
+func (g guardedRemote) Scroll(px, py, dx, dy float64, mods desktop.Modifiers) error {
+	return guarded(g).with(func(x xconn) error { return x.Remote().Scroll(px, py, dx, dy, mods) })
+}
+func (g guardedRemote) Cursor() (cx, cy float64, err error) {
+	err = guarded(g).with(func(x xconn) error { cx, cy, err = x.Remote().Cursor(); return err })
+	return cx, cy, err
 }

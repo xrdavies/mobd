@@ -176,3 +176,39 @@ func TestReattachOpensX(t *testing.T) {
 		t.Errorf("X refused at re-attach: %+v", rec)
 	}
 }
+
+// A backend or input taken before the X connection was reopened uses the new connection.
+func TestBackendFollowsReconnect(t *testing.T) {
+	f := newFixture(t)
+	d, err := f.m.Ensure(context.Background(), sid, "turn")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := d.Backend()
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := f.lastX()
+	first.Close()
+	deadline := time.Now().Add(5 * time.Second)
+	for f.lastX() == first && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	f.lastX().paint(0x30)
+	waitForLock(t, f.m.desks[sid])
+	if img, err := b.Snapshot(context.Background(), desktop.SnapshotOptions{Format: "png"}); err != nil || img.Width != 64 {
+		t.Fatalf("snapshot after reconnect: %v", err)
+	}
+	if b.Name() != "x11" {
+		t.Errorf("Name %q", b.Name())
+	}
+	if err := f.m.Close(context.Background(), sid, desktop.CloseUser); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.Snapshot(context.Background(), desktop.SnapshotOptions{}); !errors.Is(err, desktop.ErrNoDesktop) {
+		t.Errorf("after close: %v", err)
+	}
+	if err := d.Source().NewInput().Key("KeyA", true); !errors.Is(err, desktop.ErrNoDesktop) {
+		t.Errorf("input after close: %v", err)
+	}
+}
