@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"testing"
 	"time"
 )
@@ -138,12 +139,19 @@ func TestDefaultsAndNoDotEnv(t *testing.T) {
 
 func TestStateAndMCP(t *testing.T) {
 	cfg := loadTest(t, `{}`)
-	dir, err := os.UserConfigDir()
+	// macOS and Windows keep the user config directory, where existing history lives;
+	// Linux keeps data under XDG_DATA_HOME.
+	dir, err := dataHome()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.StatePath != filepath.Join(dir, "mob", "state.json") {
-		t.Fatal("existing history path changed")
+	if cfg.StatePath != filepath.Join(dir, "state.json") {
+		t.Fatal("history path changed")
+	}
+	if runtime.GOOS != "linux" {
+		if config, _ := os.UserConfigDir(); dir != filepath.Join(config, "mob") {
+			t.Fatal("existing history path changed")
+		}
 	}
 	if !cfg.UsesBuiltinMCP() {
 		t.Fatal("missing builtin MCP")

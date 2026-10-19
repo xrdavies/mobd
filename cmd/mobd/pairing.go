@@ -11,12 +11,13 @@ import (
 	"time"
 
 	qrcode "github.com/skip2/go-qrcode"
+	"github.com/xrdavies/mobd/internal/config"
 	"github.com/xrdavies/mobd/internal/control"
 	"github.com/xrdavies/mobd/internal/pairing"
 )
 
 func manage(command string, args []string) error {
-	socket, err := control.DefaultPath()
+	socket, err := config.ControlSocketDefault()
 	if err != nil {
 		return err
 	}

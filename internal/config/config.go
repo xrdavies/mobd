@@ -13,8 +13,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/xrdavies/mobd/internal/control"
 )
 
 // Config is shared by foreground and launchd-managed servers.
@@ -49,6 +47,22 @@ type Config struct {
 	ClaudeSettingSources string        `json:"claudeSettingSources"`
 	QuestionTimeout      time.Duration `json:"-"`
 	RemovedVNCAddr       string        `json:"vncAddr,omitempty"`
+
+	// Desktops (desktop.go). Linux only, except desktopMode; inert until the Linux desktop manager.
+	DesktopMode           string        `json:"desktopMode"`
+	DesktopSleepAfter     time.Duration `json:"-"`
+	DesktopSleepCPU       float64       `json:"desktopSleepCPU"`
+	DesktopSize           string        `json:"desktopSize"`
+	DesktopScale          int           `json:"desktopScale"`
+	DesktopKeyboardLayout string        `json:"desktopKeyboardLayout"`
+	DesktopDisplayBase    int           `json:"desktopDisplayBase"`
+	MaxDesktops           int           `json:"maxDesktops"`
+	MemoryWarnPercent     int           `json:"memoryWarnPercent"`
+	MemoryFloorPercent    int           `json:"memoryFloorPercent"`
+	DiskWarnPercent       int           `json:"diskWarnPercent"`
+	DiskWarnBytes         Bytes         `json:"diskWarnBytes"`
+	DiskFloorBytes        Bytes         `json:"diskFloorBytes"`
+	DesktopBrowserSeed    string        `json:"desktopBrowserSeed,omitempty"`
 }
 
 // JSON uses Go duration strings so user configs and service snapshots share a format.
@@ -56,15 +70,17 @@ func (c Config) MarshalJSON() ([]byte, error) {
 	type plain Config
 	return json.Marshal(struct {
 		plain
-		QuestionTimeout string `json:"questionTimeout"`
-	}{plain(c), c.QuestionTimeout.String()})
+		QuestionTimeout   string `json:"questionTimeout"`
+		DesktopSleepAfter string `json:"desktopSleepAfter"`
+	}{plain(c), c.QuestionTimeout.String(), c.DesktopSleepAfter.String()})
 }
 
 func (c *Config) UnmarshalJSON(data []byte) error {
 	type plain Config
 	value := struct {
 		*plain
-		QuestionTimeout *string `json:"questionTimeout"`
+		QuestionTimeout   *string `json:"questionTimeout"`
+		DesktopSleepAfter *string `json:"desktopSleepAfter"`
 	}{plain: (*plain)(c)}
 	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.DisallowUnknownFields()
@@ -78,15 +94,19 @@ func (c *Config) UnmarshalJSON(data []byte) error {
 		}
 		c.QuestionTimeout = duration
 	}
+	if value.DesktopSleepAfter != nil {
+		duration, err := time.ParseDuration(*value.DesktopSleepAfter)
+		if err != nil {
+			return fmt.Errorf("desktopSleepAfter: %w", err)
+		}
+		c.DesktopSleepAfter = duration
+	}
 	return nil
 }
 
 func DefaultPath() (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(home, ".mobd", "config.json"), nil
+	dir, err := Dir()
+	return filepath.Join(dir, "config.json"), err
 }
 
 // Load applies defaults, JSON, exported environment, then command-line flags.
@@ -125,22 +145,23 @@ func Load(args []string) (Config, string, error) {
 	if err != nil {
 		return Config{}, path, err
 	}
-	stateDir, err := os.UserConfigDir()
+	stateDir, err := dataHome()
 	if err != nil {
 		return Config{}, path, err
 	}
 	cfg := Config{
 		ListenAddr: ":8080", StreamPort: 9527, CodexBin: "codex", CodexWorkDir: cwd,
 		// Keep existing history visible when upgrading from environment-only releases.
-		StatePath:   filepath.Join(stateDir, "mob", "state.json"),
+		StatePath:   filepath.Join(stateDir, "state.json"),
 		CORSOrigins: []string{"http://localhost:1420", "http://127.0.0.1:1420", "tauri://localhost", "http://tauri.localhost"},
-		MaxRunning:  1,
+		MaxRunning:  maxRunningUnset,
 		Runners:     []string{"codex", "claude"}, DefaultRunner: "codex",
 		CodexMode: "app-server", CodexPermissions: "bypass",
 		ClaudeBin: "claude", ClaudeModels: []string{"opus", "sonnet", "haiku"},
 		ClaudePermissions: "bypass", ClaudeSettingSources: "project",
 		QuestionTimeout: 30 * time.Minute,
 	}
+	defaultDesktop(&cfg)
 	data, err := os.ReadFile(path)
 	if err == nil {
 		dec := json.NewDecoder(bytes.NewReader(data))
@@ -192,6 +213,9 @@ func Load(args []string) (Config, string, error) {
 			}
 		}
 	}
+	if err := desktopEnv(&cfg); err != nil {
+		return cfg, path, err
+	}
 	if value, ok := os.LookupEnv("MOBD_STREAM_PORT"); ok {
 		cfg.StreamPort, err = strconv.Atoi(value)
 		if err != nil {
@@ -230,7 +254,7 @@ func Load(args []string) (Config, string, error) {
 		return cfg, path, errors.New("sharedSecret/MOBD_SHARED_SECRET is no longer supported; remove it and pair clients with mobd link (history is preserved)")
 	}
 	if cfg.ControlSocket == "" {
-		cfg.ControlSocket, err = control.DefaultPath()
+		cfg.ControlSocket, err = ControlSocketDefault()
 		if err != nil {
 			return cfg, path, err
 		}
@@ -239,11 +263,17 @@ func Load(args []string) (Config, string, error) {
 	if err != nil {
 		return cfg, path, err
 	}
+	if cfg.MaxRunning == maxRunningUnset {
+		cfg.MaxRunning = defaultMaxRunning(cfg)
+	}
 	if cfg.MaxRunning < 1 {
 		return cfg, path, errors.New("maxRunning must be positive")
 	}
 	if cfg.QuestionTimeout <= 0 {
 		return cfg, path, errors.New("questionTimeout must be positive")
+	}
+	if err := validateDesktop(&cfg); err != nil {
+		return cfg, path, err
 	}
 	if cfg.CodexMode != "app-server" && cfg.CodexMode != "exec" {
 		return cfg, path, errors.New("codexMode must be app-server or exec")
@@ -310,7 +340,8 @@ func Init(path string) error {
 	if err != nil {
 		return err
 	}
-	_, writeErr := file.WriteString("{\n  \"listen\": \"0.0.0.0:8080\",\n  \"maxRunning\": 1\n}\n")
+	// maxRunning is left out so the per-OS default applies.
+	_, writeErr := file.WriteString("{\n  \"listen\": \"0.0.0.0:8080\"\n}\n")
 	closeErr := file.Close()
 	return errors.Join(writeErr, closeErr)
 }

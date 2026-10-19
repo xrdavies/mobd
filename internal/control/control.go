@@ -18,11 +18,6 @@ import (
 	"github.com/xrdavies/mobd/internal/pairing"
 )
 
-func DefaultPath() (string, error) {
-	home, err := os.UserHomeDir()
-	return filepath.Join(home, ".mobd", "run", "control.sock"), err
-}
-
 // Listen holds a lock while replacing stale sockets after a crash.
 func Listen(path string) (net.Listener, func(), error) {
 	dir := filepath.Dir(path)
