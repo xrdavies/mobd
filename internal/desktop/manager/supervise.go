@@ -208,6 +208,7 @@ func (d *desk) turnEnded(taskID string) {
 		rec.LastUsedAt = &now
 		d.commit(rec)
 	}
+	d.touch()
 	d.mu.Lock()
 	stop := d.stopAfterTurn
 	d.stopAfterTurn = false

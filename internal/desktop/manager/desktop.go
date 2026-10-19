@@ -45,6 +45,13 @@ type desk struct {
 	// stopAfterTurn: the desktop crashed during a turn, whose runner still lives in the scope;
 	// the scope stops when the turn ends.
 	stopAfterTurn bool
+	// Sleep (sleep.go): viewers holding it awake, when every signal last went quiet, the last
+	// cpu.stat sample, and freezes that failed.
+	viewers        int
+	idleSince      time.Time
+	cpuPrev        time.Duration
+	cpuAt          time.Time
+	freezeFailures int
 }
 
 // child is a process the desktop started.
@@ -342,6 +349,7 @@ func (d *desk) start(ctx context.Context) (err error) {
 
 	rec.State = desktop.StateRunning
 	d.commit(rec)
+	d.rebase()
 	log.Printf("desktop %s: running on :%d (%s)", d.sid, n, rec.Unit)
 	go d.supervise(d.run())
 	return nil
@@ -421,8 +429,17 @@ func (d *desk) close(ctx context.Context, reason desktop.CloseReason) error {
 	case "", desktop.StateClosed, desktop.StateFailed:
 		return nil
 	}
+	asleep := rec.State == desktop.StateAsleep || rec.State == desktop.StateWaking
 	rec.State = desktop.StateClosing
 	d.commit(rec)
+	if asleep && rec.Cgroup != "" {
+		// Frozen processes would sit out SIGTERM until systemd's timeout.
+		tctx, cancel := context.WithTimeout(ctx, freezeTimeout)
+		if err := d.thawLocked(tctx, rec); err != nil {
+			log.Printf("desktop %s: thaw before close: %v", d.sid, err)
+		}
+		cancel()
+	}
 	if rec.Unit != "" {
 		if err := d.m.opts.Systemd.StopUnit(ctx, rec.Unit); err != nil {
 			return fmt.Errorf("close desktop: %w", err)
@@ -483,6 +500,9 @@ func (d *desk) Info() desktop.Info {
 	if r.Turn != nil {
 		info.ActiveTaskID = r.Turn.TaskID
 	}
+	d.mu.Lock()
+	info.Viewers = d.viewers
+	d.mu.Unlock()
 	return info
 }
 
@@ -501,8 +521,9 @@ func (s source) StartStream(ctx context.Context, opts desktop.StreamOptions) (de
 	return nil, desktop.ErrUnsupported
 }
 
-func (s source) Hold(string) (func(), error) { return nil, desktop.ErrUnsupported }
-func (s source) NewInput() *desktop.Input    { return desktop.On(desktop.Current()).NewInput() }
+// Hold wakes the desktop for a viewer and keeps it awake until release.
+func (s source) Hold(reason string) (func(), error) { return s.d.hold(reason) }
+func (s source) NewInput() *desktop.Input           { return desktop.On(desktop.Current()).NewInput() }
 
 func (s source) Done() <-chan struct{} {
 	s.d.mu.Lock()

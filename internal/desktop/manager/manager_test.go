@@ -214,6 +214,7 @@ func newFixture(t *testing.T) *fixture {
 	}
 	sd.OnStop = func(unit, _ string) error { sp.stopUnit(unit); return nil }
 	cg.OnKill = func(pid int) { _ = sp.kill(pid) }
+	sd.OnFreeze = func(_, group string, frozen bool) error { return cg.FreezeDirect(cg.Path(group), frozen) }
 	f := &fixture{sd: sd, cg: cg, sp: sp, root: root, events: make(chan desktop.Event, 100)}
 	f.m = f.newManager(t, nil)
 	f.m.Subscribe(func(e desktop.Event) { f.events <- e })

@@ -166,6 +166,7 @@ func (d *desk) adopt(rec record, state desktop.DesktopState) error {
 	d.mu.Unlock()
 	rec.State, rec.Reason = state, ""
 	d.commit(rec)
+	d.rebase()
 	log.Printf("desktop %s: re-attached on :%d (%s)", d.sid, rec.Display, state)
 	go d.supervise(d.run())
 	return nil

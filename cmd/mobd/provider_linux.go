@@ -40,6 +40,7 @@ func newProvider(cfg config.Config, store *task.Store) desktop.Provider {
 		DataDir: filepath.Join(cfg.DataDir, "desktops"), RuntimeDir: manager.RuntimeDir(cfg.DataDir),
 		Size: [2]int{w, h}, Scale: cfg.DesktopScale, Layout: cfg.DesktopKeyboardLayout,
 		DisplayBase: cfg.DesktopDisplayBase, MaxDesktops: cfg.MaxDesktops, Version: version,
+		SleepAfter: cfg.DesktopSleepAfter, SleepCPU: cfg.DesktopSleepCPU,
 		Systemd: sd, Cgroups: cgroup.New(cgroup.DefaultRoot), Spawner: proc.Exec{},
 		Sessions: sessions{store},
 	})
@@ -54,5 +55,7 @@ func newProvider(cfg config.Config, store *task.Store) desktop.Provider {
 		// Desktops it could not judge keep running; new turns still get desktops.
 		log.Printf("re-attach desktops: %v", err)
 	}
+	// Sleep runs until Shutdown.
+	go m.Run(context.Background())
 	return m
 }

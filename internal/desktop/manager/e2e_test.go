@@ -312,3 +312,99 @@ func TestRealRestart(t *testing.T) {
 		t.Errorf("unit after the crash: %+v", st)
 	}
 }
+
+// TestRealSleep: a busy process keeps the desktop awake; once idle it freezes, a counter in it
+// stops, waking resumes it, and closing an asleep desktop does not wait on frozen processes.
+func TestRealSleep(t *testing.T) {
+	sd, ctx := realUser(t)
+	root := t.TempDir()
+	m := realManager(t, sd, root)
+	defer m.Shutdown()
+	m.opts.SleepAfter, m.opts.SleepCPU = 300*time.Millisecond, 0.3
+	id := strings.Repeat("f", 32)
+	defer m.Remove(context.Background(), id)
+	if _, err := m.Ensure(ctx, id, "test"); err != nil {
+		t.Fatal(err)
+	}
+	rec := m.desks[id].record()
+	apps := filepath.Join(cgroup.DefaultRoot, rec.Cgroup, "apps")
+	inApps := func(name string, args ...string) *exec.Cmd {
+		cmd := exec.Command(name, args...)
+		cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+		dir, err := proc.IntoCgroup(cmd, apps)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer dir.Close()
+		if err := cmd.Start(); err != nil {
+			t.Fatal(err)
+		}
+		go cmd.Wait()
+		return cmd
+	}
+	ticks := filepath.Join(root, "ticks")
+	inApps("sh", "-c", `while :; do echo x >> "$0"; sleep 0.05; done`, ticks)
+	busy := inApps("sh", "-c", "yes > /dev/null")
+	size := func() int64 {
+		fi, err := os.Stat(ticks)
+		if err != nil {
+			return 0
+		}
+		return fi.Size()
+	}
+	tick := func() { time.Sleep(400 * time.Millisecond); m.sleepIdle(ctx) }
+	m.sleepIdle(ctx)
+	for range 3 {
+		tick()
+	}
+	if st := m.desks[id].State(); st != desktop.StateRunning {
+		t.Fatalf("slept while busy: %s", st)
+	}
+	_ = syscall.Kill(-busy.Process.Pid, syscall.SIGKILL)
+	tick() // the busy period
+	tick()
+	if st := m.desks[id].State(); st != desktop.StateAsleep {
+		t.Fatalf("not asleep when idle: %s", st)
+	}
+	if st, _ := sd.UnitState(ctx, rec.Unit); st.FreezerState != "frozen" {
+		t.Errorf("unit %+v", st)
+	}
+	a := size()
+	time.Sleep(500 * time.Millisecond)
+	if size() != a {
+		t.Error("counter grew while asleep")
+	}
+	if _, err := m.Ensure(ctx, id, "test"); err != nil {
+		t.Fatal(err)
+	}
+	a = size()
+	time.Sleep(500 * time.Millisecond)
+	if size() == a {
+		t.Error("counter did not resume after waking")
+	}
+	r, _, _ := m.Reserve(id)
+	d, _ := m.Get(id)
+	env, _ := r.Turn(d)
+	r.Release()
+	cmd := exec.CommandContext(ctx, "xdpyinfo")
+	cmd.Env = append(os.Environ(), env.Env...)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Errorf("xdpyinfo after waking: %v\n%s", err, out)
+	}
+
+	m.sleepIdle(ctx)
+	tick()
+	if st := m.desks[id].State(); st != desktop.StateAsleep {
+		t.Fatalf("not asleep again: %s", st)
+	}
+	start := time.Now()
+	if err := m.Close(ctx, id, desktop.CloseUser); err != nil {
+		t.Fatal(err)
+	}
+	if took := time.Since(start); took > 5*time.Second {
+		t.Errorf("closing an asleep desktop took %v", took)
+	}
+	if st, _ := sd.UnitState(ctx, rec.Unit); st.ActiveState != "inactive" {
+		t.Errorf("unit after close: %+v", st)
+	}
+}

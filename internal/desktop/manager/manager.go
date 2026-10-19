@@ -35,10 +35,14 @@ type Options struct {
 	Layout      string // desktopKeyboardLayout
 	DisplayBase int    // desktopDisplayBase
 	MaxDesktops int    // maxDesktops; 0 means no limit
-	Version     string // mobd's, recorded with each desktop
-	Systemd     sysd.Client
-	Cgroups     cgroup.FS
-	Spawner     proc.Spawner
+	// SleepAfter puts a desktop idle this long to sleep; 0 never does.
+	SleepAfter time.Duration
+	// SleepCPU is the CPU use (fraction of one core) under which a desktop counts as idle.
+	SleepCPU float64
+	Version  string // mobd's, recorded with each desktop
+	Systemd  sysd.Client
+	Cgroups  cgroup.FS
+	Spawner  proc.Spawner
 	// Sessions tells Attach which conversations still exist; nil keeps every desktop.
 	Sessions SessionLookup
 }
@@ -73,6 +77,7 @@ type Manager struct {
 	bootID       func() string
 	now          func() time.Time
 	startTimeout time.Duration
+	sleepTick    time.Duration
 }
 
 var _ desktop.Provider = (*Manager)(nil)
@@ -99,7 +104,7 @@ func New(opts Options) (*Manager, error) {
 		tmp: "/tmp", look: exec.LookPath, busReady: dialReady, kill: killPID,
 		killGroup: func(pgid int) error { return proc.KillGroup(pgid, syscall.SIGKILL) },
 		watch:     proc.Watch, owns: inCgroup, bootID: bootID,
-		now: time.Now, startTimeout: startTimeout,
+		now: time.Now, startTimeout: startTimeout, sleepTick: sleepTick,
 	}
 	m.xready = func(ctx context.Context, n int, cookie []byte) error { return xHandshake(ctx, m.tmp, n, cookie) }
 	go m.deliver()
@@ -209,17 +214,21 @@ func (m *Manager) Ensure(ctx context.Context, sid, why string) (desktop.Desktop,
 	if err := d.lock(ctx); err != nil {
 		return nil, err
 	}
-	switch d.State() {
-	case desktop.StateRunning:
+	if d.State() == desktop.StateRunning {
 		d.unlock()
 		return d, nil
-	case desktop.StateAsleep, desktop.StateWaking:
-		d.unlock()
-		return nil, errors.New("waking a desktop is not supported yet")
 	}
 	result := make(chan error, 1)
 	go func() {
 		defer d.unlock()
+		switch d.State() {
+		case desktop.StateAsleep, desktop.StateWaking:
+			// A desktop that does not wake is closed; the caller gets a new one.
+			if d.wakeLocked(context.Background()) == nil {
+				result <- nil
+				return
+			}
+		}
 		result <- d.start(context.Background())
 	}()
 	select {

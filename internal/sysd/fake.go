@@ -16,6 +16,9 @@ type Fake struct {
 	// OnStart and OnStop run with the unit's ControlGroup, to create or empty its cgroup.
 	OnStart func(unit, controlGroup string, pids []int) error
 	OnStop  func(unit, controlGroup string) error
+	// OnFreeze runs with the unit's ControlGroup on Freeze (true) and Thaw (false), so a fake
+	// cgroup can follow.
+	OnFreeze func(unit, controlGroup string, frozen bool) error
 	// Fail makes the next calls of an operation ("start", "stop", "freeze", "thaw", "state")
 	// fail with the error, until it is deleted.
 	Fail map[string]error
@@ -112,6 +115,9 @@ func (f *Fake) freeze(op, unit, state string) error {
 		return fmt.Errorf("%s %s: unit not active", op, unit)
 	}
 	s.FreezerState = state
+	if f.OnFreeze != nil {
+		return f.OnFreeze(unit, s.ControlGroup, state == "frozen")
+	}
 	return nil
 }
 
