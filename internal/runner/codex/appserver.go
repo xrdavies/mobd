@@ -162,7 +162,7 @@ func (r *Runner) startAppServer(ctx context.Context, t *task.Task, opts runner.O
 	err = cli.Run(runCtx, cli.Command{
 		Name: "codex", Path: path, Args: append([]string{"app-server"}, r.mcpConfig(opts)...),
 		Dir: r.cfg.CodexWorkDir, Env: append(os.Environ(), opts.Env...), Stdin: stdinR,
-		Cgroup: opts.Cgroup, OOMScoreAdj: opts.OOMScoreAdj,
+		Cgroup: opts.Cgroup, OOMScoreAdj: opts.OOMScoreAdj, Started: opts.Started,
 	}, at, emit)
 	_ = stdinR.Close()
 	if ctx.Err() != nil {

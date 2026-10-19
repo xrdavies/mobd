@@ -34,6 +34,7 @@ type FS interface {
 	Populated(dir string) (bool, error)         // cgroup.events populated
 	Frozen(dir string) (bool, error)            // cgroup.events frozen
 	FreezeDirect(dir string, on bool) error     // cgroup.freeze, fallback when FreezeUnit fails
+	Kill(dir string) error                      // SIGKILL to the subtree: cgroup.kill, else each pid
 }
 
 // New returns the hierarchy mounted at root (DefaultRoot, or a temp directory in tests).
@@ -102,6 +103,29 @@ func (fsys) FreezeDirect(dir string, on bool) error {
 		v = "1"
 	}
 	return write(filepath.Join(dir, "cgroup.freeze"), v)
+}
+
+func (fsys) Kill(dir string) error {
+	err := write(filepath.Join(dir, "cgroup.kill"), "1")
+	if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	// Before Linux 5.14: signal what is there now; a frozen or racing fork can slip through.
+	return filepath.WalkDir(dir, func(p string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() || d.Name() != "cgroup.procs" {
+			return err
+		}
+		b, err := os.ReadFile(p)
+		if err != nil {
+			return err
+		}
+		for _, f := range strings.Fields(string(b)) {
+			if pid, err := strconv.Atoi(f); err == nil {
+				_ = syscall.Kill(pid, syscall.SIGKILL)
+			}
+		}
+		return nil
+	})
 }
 
 // write writes an interface file in one write(2), as the kernel expects.

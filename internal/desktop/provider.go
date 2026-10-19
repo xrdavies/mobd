@@ -35,6 +35,9 @@ type Provider interface {
 type Reservation interface {
 	// Turn returns the environment for the session's runner; called after Ensure.
 	Turn(d Desktop) (TurnEnv, error)
+	// Running records the turn's runner (task ID, process group), so a mobd restarted after a
+	// crash can stop a runner left behind.
+	Running(taskID string, pgid int)
 	// Release ends the turn or drops an unused reservation. It is idempotent.
 	Release()
 }
@@ -215,6 +218,7 @@ func (noDesktops) Shutdown()                                                 {}
 type noReservation struct{}
 
 func (noReservation) Turn(Desktop) (TurnEnv, error) { return TurnEnv{}, nil }
+func (noReservation) Running(string, int)           {}
 func (noReservation) Release()                      {}
 
 type sharedDesktop struct{ b Backend }

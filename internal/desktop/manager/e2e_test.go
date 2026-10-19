@@ -7,7 +7,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -33,14 +35,7 @@ func TestRealDesktop(t *testing.T) {
 	}
 	defer sd.Close()
 	root := t.TempDir()
-	m, err := New(Options{
-		DataDir: filepath.Join(root, "desktops"), RuntimeDir: filepath.Join(os.Getenv("XDG_RUNTIME_DIR"), "mobd-test"),
-		Size: [2]int{1280, 800}, Scale: 1, Layout: "us", DisplayBase: 150, Version: "test",
-		Systemd: sd, Cgroups: cgroup.New(cgroup.DefaultRoot), Spawner: proc.Exec{},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	m := realManager(t, sd, root)
 	defer m.Shutdown()
 	id := strings.Repeat("e", 32)
 	defer m.Remove(context.Background(), id)
@@ -115,5 +110,205 @@ func TestRealDesktop(t *testing.T) {
 	}
 	if !displayFree("/tmp", rec.Display) {
 		t.Errorf(":%d still in use", rec.Display)
+	}
+}
+
+func realManager(t *testing.T, sd sysd.Client, root string) *Manager {
+	t.Helper()
+	m, err := New(Options{
+		DataDir: filepath.Join(root, "desktops"), RuntimeDir: filepath.Join(os.Getenv("XDG_RUNTIME_DIR"), "mobd-test"),
+		Size: [2]int{1280, 800}, Scale: 1, Layout: "us", DisplayBase: 150, Version: "test",
+		Systemd: sd, Cgroups: cgroup.New(cgroup.DefaultRoot), Spawner: proc.Exec{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return m
+}
+
+func realUser(t *testing.T) (sysd.Client, context.Context) {
+	t.Helper()
+	if os.Getenv("MOBD_DESKTOP_TEST") != "1" {
+		t.Skip("set MOBD_DESKTOP_TEST=1 to start a real desktop")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	t.Cleanup(cancel)
+	sd, err := sysd.User(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { sd.Close() })
+	return sd, ctx
+}
+
+// startRunner starts a stand-in runner (its own process group) in the turn's cgroup.
+func startRunner(t *testing.T, env desktop.TurnEnv) *exec.Cmd {
+	t.Helper()
+	cmd := exec.Command("sleep", "300")
+	proc.NewGroup(cmd)
+	dir, err := proc.IntoCgroup(cmd, env.Cgroup)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer dir.Close()
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	return cmd
+}
+
+func waitRealState(t *testing.T, m *Manager, id string, want desktop.DesktopState) record {
+	t.Helper()
+	deadline := time.Now().Add(15 * time.Second)
+	for {
+		m.mu.Lock()
+		d := m.desks[id]
+		m.mu.Unlock()
+		if d != nil && d.State() == want {
+			return d.record()
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("desktop %s never became %s", id, want)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+// Killing Xvfb mid-turn closes the desktop as crashed; the runner lives until its turn ends.
+func TestRealCrashMidTurn(t *testing.T) {
+	sd, ctx := realUser(t)
+	m := realManager(t, sd, t.TempDir())
+	defer m.Shutdown()
+	id := strings.Repeat("c", 32)
+	defer m.Remove(context.Background(), id)
+	r, _, _ := m.Reserve(id)
+	d, err := m.Ensure(ctx, id, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	env, err := r.Turn(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner := startRunner(t, env)
+	defer runner.Process.Kill()
+	r.Running("task-c", runner.Process.Pid)
+	rec := m.desks[id].record()
+	if err := syscall.Kill(rec.PIDs["xvfb"], syscall.SIGKILL); err != nil {
+		t.Fatal(err)
+	}
+	if got := waitRealState(t, m, id, desktop.StateClosed); got.Reason != "crashed" {
+		t.Errorf("record %+v", got)
+	}
+	time.Sleep(200 * time.Millisecond)
+	for _, name := range []string{"dbus", "openbox"} {
+		if pidAlive(rec.PIDs[name]) {
+			t.Errorf("%s survived the crash", name)
+		}
+	}
+	if !pidAlive(runner.Process.Pid) {
+		t.Fatal("the crash killed the runner")
+	}
+	r.Release()
+	exited := make(chan error, 1)
+	go func() { exited <- runner.Wait() }()
+	select {
+	case <-exited:
+	case <-time.After(10 * time.Second):
+		t.Fatal("runner still alive after its turn ended")
+	}
+	if st, _ := sd.UnitState(ctx, rec.Unit); st.ActiveState != "inactive" {
+		t.Errorf("unit after the turn: %+v", st)
+	}
+}
+
+// TestRealRestart: a mobd killed with SIGKILL leaves its desktop and runner; the next one
+// re-attaches the desktop, kills the runner and supervises the processes it did not start.
+func TestRealRestart(t *testing.T) {
+	id := strings.Repeat("d", 32)
+	if os.Getenv("MOBD_E2E_ROLE") == "first" {
+		// The mobd that is killed: start a desktop and a runner, report, wait for SIGKILL.
+		sd, ctx := realUser(t)
+		m := realManager(t, sd, os.Getenv("MOBD_E2E_ROOT"))
+		r, _, _ := m.Reserve(id)
+		d, err := m.Ensure(ctx, id, "test")
+		if err != nil {
+			t.Fatal(err)
+		}
+		env, err := r.Turn(d)
+		if err != nil {
+			t.Fatal(err)
+		}
+		runner := startRunner(t, env)
+		r.Running("task-d", runner.Process.Pid)
+		if err := os.WriteFile(filepath.Join(os.Getenv("MOBD_E2E_ROOT"), "ready"), []byte(strconv.Itoa(runner.Process.Pid)), 0600); err != nil {
+			t.Fatal(err)
+		}
+		select {}
+	}
+	sd, ctx := realUser(t)
+	root := t.TempDir()
+	first := exec.Command(os.Args[0], "-test.run", "^TestRealRestart$")
+	first.Env = append(os.Environ(), "MOBD_E2E_ROLE=first", "MOBD_E2E_ROOT="+root)
+	first.Stdout, first.Stderr = os.Stderr, os.Stderr
+	if err := first.Start(); err != nil {
+		t.Fatal(err)
+	}
+	var runner int
+	deadline := time.Now().Add(30 * time.Second)
+	for runner == 0 {
+		if b, err := os.ReadFile(filepath.Join(root, "ready")); err == nil {
+			runner, _ = strconv.Atoi(string(b))
+		} else if time.Now().After(deadline) {
+			first.Process.Kill()
+			t.Fatal("first mobd never got ready")
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if err := first.Process.Signal(syscall.SIGKILL); err != nil {
+		t.Fatal(err)
+	}
+	_ = first.Wait()
+	if !pidAlive(runner) {
+		t.Fatal("runner died with the first mobd")
+	}
+
+	m := realManager(t, sd, root)
+	defer m.Shutdown()
+	defer m.Remove(context.Background(), id)
+	if err := m.Attach(ctx); err != nil {
+		t.Fatal(err)
+	}
+	rec := waitRealState(t, m, id, desktop.StateRunning)
+	if rec.Turn != nil {
+		t.Errorf("turn still recorded: %+v", rec.Turn)
+	}
+	for i := 0; pidAlive(runner); i++ {
+		if i > 100 {
+			t.Fatal("orphaned runner survived the restart")
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	r, _, _ := m.Reserve(id)
+	d, err := m.Ensure(ctx, id, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	env, _ := r.Turn(d)
+	cmd := exec.CommandContext(ctx, "xdpyinfo")
+	cmd.Env = append(os.Environ(), env.Env...)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Errorf("xdpyinfo after re-attach: %v\n%s", err, out)
+	}
+	r.Release()
+	// The new mobd notices Xvfb dying although it is not its child.
+	if err := syscall.Kill(rec.PIDs["xvfb"], syscall.SIGKILL); err != nil {
+		t.Fatal(err)
+	}
+	if got := waitRealState(t, m, id, desktop.StateClosed); got.Reason != "crashed" {
+		t.Errorf("record %+v", got)
+	}
+	if st, _ := sd.UnitState(ctx, rec.Unit); st.ActiveState != "inactive" {
+		t.Errorf("unit after the crash: %+v", st)
 	}
 }

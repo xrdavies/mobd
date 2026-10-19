@@ -15,6 +15,7 @@ import (
 	"slices"
 	"strconv"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/xrdavies/mobd/internal/cgroup"
@@ -38,6 +39,13 @@ type Options struct {
 	Systemd     sysd.Client
 	Cgroups     cgroup.FS
 	Spawner     proc.Spawner
+	// Sessions tells Attach which conversations still exist; nil keeps every desktop.
+	Sessions SessionLookup
+}
+
+// SessionLookup is the API's conversation store as the manager sees it.
+type SessionLookup interface {
+	Session(id string) (title string, exists bool)
 }
 
 // Manager implements desktop.Provider with one desktop per session.
@@ -59,6 +67,10 @@ type Manager struct {
 	xready       func(ctx context.Context, display int, cookie []byte) error
 	busReady     func(ctx context.Context, path string) error
 	kill         func(pid int) error
+	killGroup    func(pgid int) error
+	watch        func(ctx context.Context, pid int) (<-chan struct{}, error)
+	owns         func(pid int, controlGroup string) bool
+	bootID       func() string
 	now          func() time.Time
 	startTimeout time.Duration
 }
@@ -85,6 +97,8 @@ func New(opts Options) (*Manager, error) {
 		opts: opts, desks: map[string]*desk{}, reserved: map[*reservation]bool{},
 		events: make(chan desktop.Event, 64), quit: make(chan struct{}),
 		tmp: "/tmp", look: exec.LookPath, busReady: dialReady, kill: killPID,
+		killGroup: func(pgid int) error { return proc.KillGroup(pgid, syscall.SIGKILL) },
+		watch:     proc.Watch, owns: inCgroup, bootID: bootID,
 		now: time.Now, startTimeout: startTimeout,
 	}
 	m.xready = func(ctx context.Context, n int, cookie []byte) error { return xHandshake(ctx, m.tmp, n, cookie) }
@@ -305,8 +319,9 @@ func (m *Manager) Reserve(sid string) (desktop.Reservation, desktop.QueueReason,
 }
 
 type reservation struct {
-	m   *Manager
-	sid string
+	m    *Manager
+	sid  string
+	task string // set by Running; guarded by m.mu
 }
 
 // runnerOOMScoreAdj makes the kernel kill a runaway agent before the desktop it works on.
@@ -335,8 +350,25 @@ func (r *reservation) Turn(desktop.Desktop) (desktop.TurnEnv, error) {
 	}, nil
 }
 
+func (r *reservation) Running(taskID string, pgid int) {
+	r.m.mu.Lock()
+	r.task = taskID
+	d := r.m.desks[r.sid]
+	r.m.mu.Unlock()
+	if d != nil {
+		d.turnStarted(taskID, pgid)
+	}
+}
+
+// Release is called under the API lock, so the record is updated in the background.
 func (r *reservation) Release() {
 	r.m.mu.Lock()
 	delete(r.m.reserved, r)
+	task := r.task
+	r.task = ""
+	d := r.m.desks[r.sid]
 	r.m.mu.Unlock()
+	if d != nil && task != "" {
+		go d.turnEnded(task)
+	}
 }

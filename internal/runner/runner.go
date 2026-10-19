@@ -41,6 +41,8 @@ type Options struct {
 	Cgroup string
 	// OOMScoreAdj is set on the agent process (and inherited by what it starts); 0 leaves it.
 	OOMScoreAdj int
+	// Started is told the agent process's pid (its process group) once it runs; nil ignores it.
+	Started func(pid int)
 }
 
 // AskFunc asks the user; kind is task.QuestionAsk or task.QuestionApproval.

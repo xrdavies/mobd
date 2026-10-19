@@ -21,6 +21,8 @@ type Fake struct {
 	FS
 	root     string
 	NoMemory bool // new cgroups get no memory.current, as without the memory controller
+	// OnKill is called for each process Kill ends, so a fake spawner can end it too.
+	OnKill func(pid int)
 
 	mu sync.Mutex
 }
@@ -136,6 +138,34 @@ func (f *Fake) FreezeDirect(dir string, on bool) error {
 		return err
 	}
 	return f.refresh()
+}
+
+// Kill ends every process in dir's subtree.
+func (f *Fake) Kill(dir string) error {
+	f.mu.Lock()
+	dirs, err := f.cgroups()
+	var pids []int
+	for _, d := range dirs {
+		if err == nil && (d == dir || strings.HasPrefix(d, dir+string(filepath.Separator))) {
+			var p []int
+			if p, err = procs(d); err == nil {
+				pids = append(pids, p...)
+			}
+		}
+	}
+	f.mu.Unlock()
+	if err != nil {
+		return err
+	}
+	for _, pid := range pids {
+		if err := f.Exit(pid); err != nil {
+			return err
+		}
+		if f.OnKill != nil {
+			f.OnKill(pid)
+		}
+	}
+	return nil
 }
 
 func (f *Fake) SetCPU(dir string, usage time.Duration) error {

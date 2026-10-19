@@ -298,6 +298,17 @@ func (s *Store) setReasonsLocked(reasons map[string]string) {
 	}
 }
 
+// SessionTitle returns a session's title and whether it exists.
+func (s *Store) SessionTitle(id string) (string, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	session, ok := s.data.Sessions[id]
+	if !ok {
+		return "", false
+	}
+	return session.Title, true
+}
+
 // ListSessions returns summaries (no messages): pinned first, then most recent.
 // archived selects archived sessions; nil returns all.
 func (s *Store) ListSessions(archived *bool) []*Session {

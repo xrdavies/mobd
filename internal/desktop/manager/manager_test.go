@@ -39,16 +39,19 @@ type fakeProc struct {
 	name, unit string
 	once       sync.Once
 	done       chan error
+	gone       chan struct{}
 }
 
-func (p *fakeProc) stop(err error) { p.once.Do(func() { p.done <- err; close(p.done) }) }
+func (p *fakeProc) stop(err error) {
+	p.once.Do(func() { p.done <- err; close(p.done); close(p.gone) })
+}
 
 func (s *fakeSpawner) Start(spec proc.Spec) (int, func() error, error) {
 	name := filepath.Base(spec.Path)
 	s.mu.Lock()
 	s.next++
 	pid := 50000 + s.next
-	p := &fakeProc{name: name, done: make(chan error, 1)}
+	p := &fakeProc{name: name, done: make(chan error, 1), gone: make(chan struct{})}
 	s.procs[pid] = p
 	s.specs = append(s.specs, spec)
 	var exitText *string
@@ -104,6 +107,48 @@ func (s *fakeSpawner) stopUnit(unit string) {
 	s.mu.Unlock()
 	for _, pid := range pids {
 		_ = s.kill(pid)
+	}
+}
+
+func (s *fakeSpawner) proc(pid int) *fakeProc {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.procs[pid]
+}
+
+func (s *fakeSpawner) watch(_ context.Context, pid int) (<-chan struct{}, error) {
+	if p := s.proc(pid); p != nil {
+		return p.gone, nil
+	}
+	gone := make(chan struct{})
+	close(gone)
+	return gone, nil
+}
+
+// owns: the process lives and belongs to the unit of controlGroup.
+func (s *fakeSpawner) owns(pid int, controlGroup string) bool {
+	p := s.proc(pid)
+	if p == nil || p.unit == "" || !strings.HasSuffix(controlGroup, "/"+p.unit) {
+		return false
+	}
+	select {
+	case <-p.gone:
+		return false
+	default:
+		return true
+	}
+}
+
+func (s *fakeSpawner) alivePID(pid int) bool {
+	p := s.proc(pid)
+	if p == nil {
+		return false
+	}
+	select {
+	case <-p.gone:
+		return false
+	default:
+		return true
 	}
 }
 
@@ -168,16 +213,26 @@ func newFixture(t *testing.T) *fixture {
 		return nil
 	}
 	sd.OnStop = func(unit, _ string) error { sp.stopUnit(unit); return nil }
+	cg.OnKill = func(pid int) { _ = sp.kill(pid) }
+	f := &fixture{sd: sd, cg: cg, sp: sp, root: root, events: make(chan desktop.Event, 100)}
+	f.m = f.newManager(t, nil)
+	f.m.Subscribe(func(e desktop.Event) { f.events <- e })
+	return f
+}
+
+// newManager is a manager over the fixture's fakes, like a mobd (re)started on the machine.
+func (f *fixture) newManager(t *testing.T, sessions SessionLookup) *Manager {
+	t.Helper()
 	m, err := New(Options{
-		DataDir: filepath.Join(root, "desktops"), RuntimeDir: filepath.Join(root, "run"),
+		DataDir: filepath.Join(f.root, "desktops"), RuntimeDir: filepath.Join(f.root, "run"),
 		Size: [2]int{1280, 800}, Scale: 1, Layout: "de", DisplayBase: 100, Version: "test",
-		Systemd: sd, Cgroups: cg, Spawner: sp,
+		Systemd: f.sd, Cgroups: f.cg, Spawner: f.sp, Sessions: sessions,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(m.Shutdown)
-	m.tmp = filepath.Join(root, "tmp")
+	m.tmp = filepath.Join(f.root, "tmp")
 	if err := os.MkdirAll(m.tmp, 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -193,10 +248,12 @@ func newFixture(t *testing.T) *fixture {
 	}
 	m.xready = func(ctx context.Context, _ int, _ []byte) error { return ready(ctx) }
 	m.busReady = func(ctx context.Context, _ string) error { return ready(ctx) }
-	m.kill = sp.kill
-	f := &fixture{m: m, sd: sd, cg: cg, sp: sp, root: root, events: make(chan desktop.Event, 100)}
-	m.Subscribe(func(e desktop.Event) { f.events <- e })
-	return f
+	m.kill = f.sp.kill
+	m.killGroup = f.sp.kill
+	m.watch = f.sp.watch
+	m.owns = f.sp.owns
+	m.bootID = func() string { return "boot-1" }
+	return m
 }
 
 func (f *fixture) states(t *testing.T, until desktop.DesktopState) []desktop.DesktopState {

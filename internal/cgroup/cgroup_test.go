@@ -247,3 +247,41 @@ func TestFakeUsage(t *testing.T) {
 		t.Errorf("NoMemory: %v", err)
 	}
 }
+
+func TestKillFallsBackToSignals(t *testing.T) {
+	dir := t.TempDir()
+	writeFiles(t, dir, map[string]string{"cgroup.procs": ""}) // no cgroup.kill: before 5.14
+	if err := New("/").Kill(dir); err != nil {
+		t.Fatal(err)
+	}
+	writeFiles(t, dir, map[string]string{"cgroup.kill": ""})
+	if err := New("/").Kill(dir); err != nil {
+		t.Fatal(err)
+	}
+	if got := read(t, filepath.Join(dir, "cgroup.kill")); got != "1" {
+		t.Errorf("cgroup.kill = %q", got)
+	}
+}
+
+func TestFakeKill(t *testing.T) {
+	f := NewFake(t.TempDir())
+	scope := f.Path("/s.scope")
+	for _, d := range []string{filepath.Join(scope, "session"), filepath.Join(scope, "turn")} {
+		if err := f.Create(d); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_ = f.Move(filepath.Join(scope, "session"), 1)
+	_ = f.Move(filepath.Join(scope, "turn"), 2)
+	var killed []int
+	f.OnKill = func(pid int) { killed = append(killed, pid) }
+	if err := f.Kill(filepath.Join(scope, "session")); err != nil {
+		t.Fatal(err)
+	}
+	if len(killed) != 1 || killed[0] != 1 {
+		t.Errorf("killed %v", killed)
+	}
+	if pop, _ := f.Populated(filepath.Join(scope, "turn")); !pop {
+		t.Error("Kill reached a sibling")
+	}
+}

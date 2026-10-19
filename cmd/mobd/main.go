@@ -235,7 +235,7 @@ func serve(cfg config.Config) error {
 	if _, err := runner.NewRegistry(cfg.DefaultRunner, runners...); err != nil {
 		return fmt.Errorf("defaultRunner: %w", err)
 	}
-	desktops := newProvider(cfg)
+	desktops := newProvider(cfg, store)
 	if desktops != nil {
 		// Desktops outlive mobd; the next one finds them.
 		defer desktops.Shutdown()

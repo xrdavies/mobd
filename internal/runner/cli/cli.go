@@ -38,6 +38,8 @@ type Command struct {
 	Cgroup string
 	// OOMScoreAdj is written for the process after it starts (Linux); 0 leaves it.
 	OOMScoreAdj int
+	// Started is told the pid, which is also the process group, once the process runs.
+	Started func(pid int)
 }
 
 // MaxLine bounds one stdout/stderr line (agents print large JSON events).
@@ -93,6 +95,9 @@ func Run(ctx context.Context, c Command, p Parser, emit runner.EmitFunc) error {
 			_ = cmd.Wait()
 			return fmt.Errorf("start %s: %w", c.Name, err)
 		}
+	}
+	if c.Started != nil {
+		c.Started(cmd.Process.Pid)
 	}
 
 	var wg sync.WaitGroup

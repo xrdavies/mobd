@@ -43,6 +43,10 @@ func (r scriptedReservation) Turn(d desktop.Desktop) (desktop.TurnEnv, error) {
 	return desktop.TurnEnv{Env: []string{"MOB_TEST_DISPLAY=" + d.(scriptedDesktop).sid[:6]}}, nil
 }
 
+func (r scriptedReservation) Running(taskID string, pgid int) {
+	r.p.record("running " + r.sid)
+}
+
 func (r scriptedReservation) Release() {
 	r.p.mu.Lock()
 	r.p.released++

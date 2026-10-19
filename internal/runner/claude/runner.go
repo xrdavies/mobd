@@ -70,7 +70,7 @@ func (r *Runner) Start(ctx context.Context, t *task.Task, opts runner.Options, e
 	}
 	return cli.Run(ctx, cli.Command{
 		Name: "claude", Path: path, Args: r.buildArgs(t, opts), Dir: r.cfg.ClaudeWorkDir, Env: env, Stdin: bytes.NewReader(stdin),
-		Cgroup: opts.Cgroup, OOMScoreAdj: opts.OOMScoreAdj,
+		Cgroup: opts.Cgroup, OOMScoreAdj: opts.OOMScoreAdj, Started: opts.Started,
 	}, newParser(emit, opts.SaveImage), emit)
 }
 

@@ -198,6 +198,14 @@ func (s *Server) runOptions(t *task.Task, env desktop.TurnEnv) runner.Options {
 			return s.ask(ctx, t.ID, askRequest{Kind: kind, Text: text, Details: details})
 		},
 		Env: env.Env, Cgroup: env.Cgroup, OOMScoreAdj: env.OOMScoreAdj,
+		Started: func(pid int) {
+			s.mu.Lock()
+			r := s.reservations[t.ID]
+			s.mu.Unlock()
+			if r != nil {
+				r.Running(t.ID, pid)
+			}
+		},
 	}
 	// mobd mcp drives the desktop through mobd serve: the conversation's own desktop on Linux,
 	// and on macOS the process holding the Screen Recording grant (a mobd mcp started by an

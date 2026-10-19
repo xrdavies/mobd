@@ -32,3 +32,11 @@ func (g *Group) Kill() error {
 
 // Close releases the group's resources; nothing to do on Unix.
 func (g *Group) Close() error { return nil }
+
+// KillGroup signals every process in the process group pgid.
+func KillGroup(pgid int, sig syscall.Signal) error {
+	if pgid <= 1 {
+		return syscall.EINVAL
+	}
+	return syscall.Kill(-pgid, sig)
+}

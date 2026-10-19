@@ -40,13 +40,18 @@ type desk struct {
 	done  chan struct{} // closed when the current run of the desktop ends
 	err   error         // why it ended
 	procs map[string]*child
+	// wmRestarts are the times openbox was restarted, for the limit of 5 a minute.
+	wmRestarts []time.Time
+	// stopAfterTurn: the desktop crashed during a turn, whose runner still lives in the scope;
+	// the scope stops when the turn ends.
+	stopAfterTurn bool
 }
 
 // child is a process the desktop started.
 type child struct {
 	pid    int
-	exited chan struct{}
-	err    error // set before exited closes
+	exited <-chan struct{}
+	err    error // set before exited closes (processes this mobd started)
 }
 
 func (c *child) gone() bool {
@@ -112,10 +117,11 @@ func (d *desk) spawn(name string, s proc.Spec) (*child, error) {
 	if err != nil {
 		return nil, fmt.Errorf("start %s: %w", name, err)
 	}
-	c := &child{pid: pid, exited: make(chan struct{})}
+	exited := make(chan struct{})
+	c := &child{pid: pid, exited: exited}
 	go func() {
 		c.err = wait()
-		close(c.exited)
+		close(exited)
 	}()
 	d.mu.Lock()
 	d.procs[name] = c
@@ -175,7 +181,7 @@ func (d *desk) start(ctx context.Context) (err error) {
 		Version: recordVersion, SessionID: d.sid, State: desktop.StateStarting,
 		Unit: unitName(d.sid), PIDs: map[string]int{},
 		Width: m.opts.Size[0], Height: m.opts.Size[1], Scale: m.opts.Scale,
-		Layout: m.opts.Layout, Locale: os.Getenv("LANG"), BootID: bootID(), MobdVersion: m.opts.Version,
+		Layout: m.opts.Layout, Locale: os.Getenv("LANG"), BootID: m.bootID(), MobdVersion: m.opts.Version,
 		StartedAt: &now, LastUsedAt: &now, Crashes: prev.Crashes,
 	}
 	d.mu.Lock()
@@ -328,15 +334,7 @@ func (d *desk) start(ctx context.Context) (err error) {
 	delete(d.procs, "setxkbmap")
 	d.mu.Unlock()
 
-	// The window manager.
-	rc := filepath.Join(rec.RuntimeDir, "rc.xml")
-	if err := os.WriteFile(rc, openboxRC, 0600); err != nil {
-		return err
-	}
-	wm, err := d.spawn("openbox", proc.Spec{
-		Path: paths["openbox"], Args: []string{"--config-file", rc}, Env: env,
-		Stdout: logs["openbox"].File, Stderr: logs["openbox"].File, NewSession: true, CgroupDir: sessionFD,
-	})
+	wm, err := d.startWM(rec, paths["openbox"], logs["openbox"].File, sessionFD)
 	if err != nil {
 		return err
 	}
@@ -345,7 +343,33 @@ func (d *desk) start(ctx context.Context) (err error) {
 	rec.State = desktop.StateRunning
 	d.commit(rec)
 	log.Printf("desktop %s: running on :%d (%s)", d.sid, n, rec.Unit)
+	go d.supervise(d.run())
 	return nil
+}
+
+// startWM starts openbox in session/ with a fresh rc.xml.
+func (d *desk) startWM(rec record, path string, logf, sessionFD *os.File) (*child, error) {
+	rc := filepath.Join(rec.RuntimeDir, "rc.xml")
+	if err := os.WriteFile(rc, openboxRC, 0600); err != nil {
+		return nil, err
+	}
+	return d.spawn("openbox", proc.Spec{
+		Path: path, Args: []string{"--config-file", rc}, Env: childEnv(rec.env()...),
+		Stdout: logf, Stderr: logf, NewSession: true, CgroupDir: sessionFD,
+	})
+}
+
+// env is how a process reaches the desktop: its display, cookie and bus.
+func (r record) env() []string {
+	return []string{"DISPLAY=:" + strconv.Itoa(r.Display), "XAUTHORITY=" + r.XAuthority, "DBUS_SESSION_BUS_ADDRESS=" + r.Bus}
+}
+
+// run is the current run's done channel: it tells a supervisor or crash report of an earlier
+// run from the current one.
+func (d *desk) run() chan struct{} {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.done
 }
 
 // fail records a start that failed before anything ran.
