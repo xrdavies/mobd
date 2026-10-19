@@ -36,14 +36,14 @@ func newProvider(cfg config.Config, store *task.Store) desktop.Provider {
 	sd, err := sysd.User(ctx)
 	if err != nil {
 		log.Printf("conversation desktops unavailable: %v", err)
-		return desktop.Unavailable(fmt.Errorf("the conversation's desktop needs the systemd user manager: %w", err))
+		return desktop.Unavailable(fmt.Errorf("the conversation's desktop needs the systemd user manager (enable linger: sudo loginctl enable-linger $USER): %w", err))
 	}
 	w, h := cfg.DesktopDimensions()
 	m, err := manager.New(manager.Options{
 		DataDir: filepath.Join(cfg.DataDir, "desktops"), RuntimeDir: manager.RuntimeDir(cfg.DataDir),
 		Size: [2]int{w, h}, Scale: cfg.DesktopScale, Layout: cfg.DesktopKeyboardLayout,
 		DisplayBase: cfg.DesktopDisplayBase, MaxDesktops: cfg.MaxDesktops, Version: version,
-		SleepAfter: cfg.DesktopSleepAfter, SleepCPU: cfg.DesktopSleepCPU, Encoders: probeEncoders(),
+		SleepAfter: cfg.DesktopSleepAfter, SleepCPU: cfg.DesktopSleepCPU, Encoders: probeEncoders(true),
 		SeedDir: cmp.Or(cfg.DesktopBrowserSeed, filepath.Join(cfg.DataDir, "seed")),
 		Memory:  manager.MemoryLimits{WarnPercent: cfg.MemoryWarnPercent, FloorPercent: cfg.MemoryFloorPercent},
 		Disk:    manager.DiskLimits{WarnPercent: cfg.DiskWarnPercent, WarnBytes: int64(cfg.DiskWarnBytes), FloorBytes: int64(cfg.DiskFloorBytes)},
@@ -103,7 +103,7 @@ func offlineDoctor(ctx context.Context, cfg config.Config) []desktop.DoctorCheck
 		DataDir: filepath.Join(cfg.DataDir, "desktops"), RuntimeDir: manager.RuntimeDir(cfg.DataDir),
 		Size: [2]int{w, h}, Scale: cfg.DesktopScale, Layout: cfg.DesktopKeyboardLayout, DisplayBase: cfg.DesktopDisplayBase,
 		MaxDesktops: cfg.MaxDesktops, Systemd: sd, Cgroups: cgroup.New(cgroup.DefaultRoot), Spawner: proc.Exec{},
-		Encoders: probeEncoders(),
+		Encoders: probeEncoders(false),
 		Memory:   manager.MemoryLimits{WarnPercent: cfg.MemoryWarnPercent, FloorPercent: cfg.MemoryFloorPercent},
 		Disk:     manager.DiskLimits{WarnPercent: cfg.DiskWarnPercent, WarnBytes: int64(cfg.DiskWarnBytes), FloorBytes: int64(cfg.DiskFloorBytes)},
 	})
@@ -114,11 +114,15 @@ func offlineDoctor(ctx context.Context, cfg config.Config) []desktop.DoctorCheck
 	return m.Doctor(ctx)
 }
 
-// probeEncoders finds the H.264 encoders for the live view (a second or two, once).
-func probeEncoders() *gst.Encoders {
+// probeEncoders finds the H.264 encoders for the live view (a second or two, once); mobd
+// serve logs which one it uses.
+func probeEncoders(logIt bool) *gst.Encoders {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	encoders := gst.Probe(ctx)
+	if !logIt {
+		return gst.NewEncoders(encoders)
+	}
 	if len(encoders) == 0 {
 		log.Printf("live desktop: no H.264 encoder (install gstreamer1.0-plugins-bad with OpenH264)")
 	} else {

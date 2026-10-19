@@ -91,8 +91,9 @@ func (m *Manager) cgroupCheck(ctx context.Context) desktop.DoctorCheck {
 	}
 	v, err := m.opts.Systemd.Version(ctx)
 	if err != nil {
-		c.Detail = "cgroup v2; systemd user manager: " + err.Error()
-		c.Fix = "loginctl enable-linger"
+		c.Detail = "cgroup v2; " + err.Error()
+		_, user := m.lingering()
+		c.Fix = "sudo loginctl enable-linger " + user
 		return c
 	}
 	major, _ := strconv.Atoi(strings.SplitN(v, ".", 2)[0])

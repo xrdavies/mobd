@@ -10,7 +10,7 @@ function fixture(t) {
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const assets = join(root, 'assets'), output = join(root, 'output');
   mkdirSync(assets);
-  for (const name of ['mobd_1.2.3_darwin_arm64.tar.gz']) {
+  for (const name of ['mobd_1.2.3_darwin_arm64.tar.gz', 'mobd_1.2.3_linux_amd64.tar.gz', 'mobd_1.2.3_amd64.deb', 'mobd_1.2.3_linux_arm64.tar.gz', 'mobd_1.2.3_arm64.deb']) {
     writeFileSync(join(assets, name), `fixture ${name}`);
   }
   const manifests = prepareDistribution(assets, output, { version: '1.2.3', base: 'https://download.example.com', team: 'A123456789', date: '2026-10-14T00:00:00Z', notes: 'New release' });
@@ -37,6 +37,14 @@ test('manifests agree with payloads, pin the installer identity', t => {
   assert.match(platform.url, /\/mobd\/v1.2.3\/mobd_1.2.3_darwin_arm64.tar.gz$/);
   assert.equal(platform.sha256, sha256(readFileSync(join(output, 'mobd/v1.2.3/mobd_1.2.3_darwin_arm64.tar.gz'))));
   assert.equal(manifests.mobd.download.url, platform.url);
+  for (const [key, arch] of [['linux-x86_64', 'amd64'], ['linux-aarch64', 'arm64']]) {
+    const linux = manifests.mobd.platforms[key];
+    assert.match(linux.url, new RegExp(`/mobd_1.2.3_linux_${arch}.tar.gz$`));
+    assert.equal(linux.sha256, sha256(readFileSync(join(output, `mobd/v1.2.3/mobd_1.2.3_linux_${arch}.tar.gz`))));
+    assert.match(linux.deb.url, new RegExp(`/mobd_1.2.3_${arch}.deb$`));
+    assert.equal(linux.deb.sha256, sha256(readFileSync(join(output, `mobd/v1.2.3/mobd_1.2.3_${arch}.deb`))));
+  }
+  assert.equal(readFileSync(join(output, 'mobd/v1.2.3/SHA256SUMS'), 'utf8').split('\n').filter(Boolean).length, 5);
   const installer = readFileSync(join(output, 'mobd/v1.2.3/install.sh'), 'utf8');
   assert.ok(installer.includes("download_base='https://download.example.com'"));
   assert.ok(installer.includes("apple_team='A123456789'"));

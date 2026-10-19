@@ -1,4 +1,4 @@
-name: Release mobd macOS arm64
+name: Release mobd (macOS arm64, Linux amd64 and arm64)
 on:
   push:
     tags: ['v*']
@@ -103,7 +103,7 @@ jobs:
           COPYFILE_DISABLE=1 tar -czf "release-assets/mobd_${RELEASE_VERSION}_darwin_arm64.tar.gz" -C dist/mobd mobd LICENSE README.md
       - uses: actions/upload-artifact@v7
         with:
-          name: mobd-release
+          name: mobd-release-darwin
           path: release-assets/*
           if-no-files-found: error
       - name: Remove signing keychain
@@ -111,8 +111,52 @@ jobs:
         env:
           SIGNING_KEYCHAIN: ${{ steps.signing.outputs.keychain }}
         run: security delete-keychain "$SIGNING_KEYCHAIN"
+  # Built on Ubuntu 22.04 for the glibc floor (2.35); GStreamer is linked from the system.
+  linux:
+    needs: prepare
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-22.04
+            arch: amd64
+          - runner: ubuntu-22.04-arm
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
+    env:
+      CGO_ENABLED: '1'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.prepare.outputs.commit }}
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Build dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq dpkg-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
+            gstreamer1.0-plugins-base gstreamer1.0-plugins-bad gstreamer1.0-libav xvfb xterm x11-xkb-utils
+      - name: Test, build and package
+        env:
+          RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
+          ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          go vet ./...
+          go test ./...
+          go build -trimpath -ldflags "-s -w -X main.version=$RELEASE_VERSION" -o dist/mobd ./cmd/mobd
+          test "$(dist/mobd --version)" = "mobd $RELEASE_VERSION"
+          packaging/linux/build.sh "$RELEASE_VERSION" "$ARCH" dist/mobd release-assets
+          dpkg-deb --info "release-assets/mobd_${RELEASE_VERSION}_${ARCH}.deb"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: mobd-release-linux-${{ matrix.arch }}
+          path: release-assets/*
+          if-no-files-found: error
   release:
-    needs: [prepare, mobd]
+    needs: [prepare, mobd, linux]
     runs-on: ubuntu-24.04
     environment: release
     permissions:
@@ -120,7 +164,8 @@ jobs:
     steps:
       - uses: actions/download-artifact@v8
         with:
-          name: mobd-release
+          pattern: mobd-release-*
+          merge-multiple: true
           path: release-assets
       - name: Create draft release
         env:

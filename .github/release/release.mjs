@@ -28,7 +28,9 @@ export function prepareDistribution(assets, output, options) {
   if (!Number.isFinite(Date.parse(options.date))) throw Error('Missing release publication date');
   const prefix = `mobd/v${v}`;
   const stem = `mobd_${v}_darwin_arm64`;
-  const names = [`${stem}.tar.gz`];
+  // Linux: tarballs for install.sh, Debian packages for apt.
+  const linux = { 'linux-x86_64': 'amd64', 'linux-aarch64': 'arm64' };
+  const names = [`${stem}.tar.gz`, ...Object.values(linux).flatMap(arch => [`mobd_${v}_linux_${arch}.tar.gz`, `mobd_${v}_${arch}.deb`])];
   const put = (key, data) => {
     mkdirSync(dirname(join(output, key)), { recursive: true });
     writeFileSync(join(output, key), data);
@@ -41,11 +43,15 @@ export function prepareDistribution(assets, output, options) {
     put(`${prefix}/${name}`, data);
   }
   const payload = `${stem}.tar.gz`;
-  const platform = { url: `${base}/${prefix}/${payload}`, sha256: hashes[payload] };
+  const asset = name => ({ url: `${base}/${prefix}/${name}`, sha256: hashes[name] });
+  const platforms = { 'darwin-aarch64': asset(payload) };
+  for (const [key, arch] of Object.entries(linux)) {
+    platforms[key] = { ...asset(`mobd_${v}_linux_${arch}.tar.gz`), deb: asset(`mobd_${v}_${arch}.deb`) };
+  }
   const download = payload;
   const manifest = {
     version: v, notes: options.notes || `mobd ${v}`, pub_date: options.date,
-    platforms: { 'darwin-aarch64': platform },
+    platforms,
     download: { url: `${base}/${prefix}/${download}`, sha256: hashes[download] },
     checksums_url: `${base}/${prefix}/SHA256SUMS`,
   };

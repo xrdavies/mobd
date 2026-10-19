@@ -4,7 +4,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { sha256 } from './release.mjs';
+import { prepareDistribution, sha256 } from './release.mjs';
 
 function fixture(t) {
   const root = mkdtempSync(join(tmpdir(), 'mob-installer-test-'));
@@ -67,4 +67,43 @@ test('running daemon, invalid versions and unsupported arguments never install',
   assert.match(f.run({}, ['--version', '../../bad']).stderr, /Invalid stable version/);
   assert.match(f.run({}, ['--install-dir', 'relative']).stderr, /absolute path/);
   assert.equal(existsSync(f.installed), false);
+});
+
+// The Linux branch reads release.json as release.mjs writes it.
+test('installer on Linux picks the architecture and verifies its checksum', t => {
+  const root = mkdtempSync(join(tmpdir(), 'mob-installer-linux-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const bin = join(root, 'bin'), home = join(root, 'home'), assets = join(root, 'assets'), out = join(root, 'out'), payload = join(root, 'payload');
+  for (const dir of [bin, home, assets, payload]) mkdirSync(dir);
+  const script = (name, contents) => writeFileSync(join(bin, name), `#!/bin/sh\n${contents}\n`, { mode: 0o755 });
+  script('id', 'echo 1000');
+  script('uname', '[ "$1" = -s ] && echo Linux || echo "${TEST_ARCH:-x86_64}"');
+  script('systemctl', 'exit 1');
+  script('pgrep', 'exit 1');
+  script('codesign', 'echo "codesign must not run on Linux" >&2; exit 1');
+  script('sha256sum', 'shasum -a 256 "$@"');
+  writeFileSync(join(payload, 'LICENSE'), 'license');
+  writeFileSync(join(payload, 'README.md'), 'readme');
+  for (const arch of ['amd64', 'arm64']) {
+    writeFileSync(join(payload, 'mobd'), `#!/bin/sh\necho "mobd 1.2.3"\necho ${arch} > "$HOME/arch"\n`, { mode: 0o755 });
+    execFileSync('tar', ['-czf', join(assets, `mobd_1.2.3_linux_${arch}.tar.gz`), '-C', payload, 'mobd', 'LICENSE', 'README.md'], { env: { ...process.env, COPYFILE_DISABLE: '1' } });
+    writeFileSync(join(assets, `mobd_1.2.3_${arch}.deb`), 'deb');
+  }
+  writeFileSync(join(assets, 'mobd_1.2.3_darwin_arm64.tar.gz'), 'mac');
+  const manifest = prepareDistribution(assets, out, { version: '1.2.3', base: 'https://download.example.com', team: 'A123456789', date: '2026-10-14T00:00:00Z' }).mobd;
+  const downloads = join(out, 'mobd/v1.2.3');
+  writeFileSync(join(downloads, 'latest.json'), JSON.stringify(manifest, null, 2) + '\n');
+  script('curl', `while [ "$#" -gt 0 ]; do case "$1" in https://*) url="$1" ;; -o) shift; dest="$1" ;; esac; shift; done\ncp "${downloads}/\${url##*/}" "$dest"`);
+  const installer = join(downloads, 'install.sh');
+  const run = (extra = {}) => spawnSync('sh', [installer], { encoding: 'utf8', env: { ...process.env, HOME: home, PATH: `${bin}:${process.env.PATH}`, ...extra } });
+  for (const [machine, arch] of [['x86_64', 'amd64'], ['aarch64', 'arm64']]) {
+    const result = run({ TEST_ARCH: machine });
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /sudo apt install xvfb openbox/);
+    execFileSync(join(home, '.local/bin/mobd'), { env: { ...process.env, HOME: home } });
+    assert.equal(readFileSync(join(home, 'arch'), 'utf8').trim(), arch);
+  }
+  writeFileSync(join(downloads, 'mobd_1.2.3_linux_arm64.tar.gz'), 'corrupt');
+  assert.match(run({ TEST_ARCH: 'aarch64' }).stderr, /Checksum mismatch/);
+  assert.match(run({ TEST_ARCH: 'riscv64' }).stderr, /x86_64 and arm64/);
 });

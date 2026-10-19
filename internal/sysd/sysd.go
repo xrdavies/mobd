@@ -56,7 +56,7 @@ func User(ctx context.Context) (Client, error) {
 	}
 	sock := filepath.Join(runtime, "systemd", "private")
 	if _, err := os.Stat(sock); err != nil {
-		return nil, fmt.Errorf("systemd user manager not running (enable linger: loginctl enable-linger): %w", err)
+		return nil, fmt.Errorf("systemd user manager not running (no login session and no linger): %w", err)
 	}
 	// ctx bounds connecting only: a connection dialled with dbus.WithContext closes when that
 	// context ends, and this one lives as long as mobd.
