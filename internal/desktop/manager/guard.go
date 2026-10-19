@@ -181,6 +181,16 @@ func (d *desk) sampleMemory() {
 	}
 }
 
+// sampleUsage reads a desktop's memory and directory size right after it starts or is
+// re-attached, so lists do not show zero until the next tick.
+func (d *desk) sampleUsage() {
+	d.sampleMemory()
+	n := dirSize(d.dir)
+	d.mu.Lock()
+	d.diskBytes = n
+	d.mu.Unlock()
+}
+
 // pss sums the proportional set size of the processes in a cgroup, for machines without the
 // memory controller delegated to the user manager.
 func (m *Manager) pss(scope string) (int64, error) {

@@ -87,6 +87,7 @@ type Manager struct {
 	procRoot     string // /proc
 	statfs       func(path string) (free, total int64, err error)
 	oomdActive   func() bool
+	lingering    func() (bool, string)
 }
 
 var _ desktop.Provider = (*Manager)(nil)
@@ -115,7 +116,7 @@ func New(opts Options) (*Manager, error) {
 		watch:     proc.Watch, owns: inCgroup, bootID: bootID,
 		now: time.Now, startTimeout: startTimeout, sleepTick: sleepTick,
 		memoryTick: memoryTick, diskTick: diskTick,
-		procRoot: "/proc", statfs: statfs, oomdActive: oomdActive,
+		procRoot: "/proc", statfs: statfs, oomdActive: oomdActive, lingering: lingering,
 	}
 	m.xready = func(ctx context.Context, n int, cookie []byte) error { return xHandshake(ctx, m.tmp, n, cookie) }
 	// Levels are known before the first turn is scheduled.

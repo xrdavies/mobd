@@ -354,6 +354,7 @@ func (d *desk) start(ctx context.Context) (err error) {
 	d.rebase()
 	log.Printf("desktop %s: running on :%d (%s)", d.sid, n, rec.Unit)
 	go d.supervise(d.run())
+	go d.sampleUsage()
 	return nil
 }
 
@@ -491,9 +492,19 @@ func (d *desk) Snapshot(ctx context.Context, opts desktop.SnapshotOptions) (desk
 }
 
 func (d *desk) Info() desktop.Info {
-	r := d.record()
+	info := d.record().info()
+	info.SessionID = d.sid
+	d.mu.Lock()
+	info.Viewers = d.viewers
+	info.MemoryBytes, info.DiskBytes = d.memBytes, d.diskBytes
+	d.mu.Unlock()
+	return info
+}
+
+// info is what the record says about the desktop.
+func (r record) info() desktop.Info {
 	info := desktop.Info{
-		SessionID: d.sid, Width: r.Width, Height: r.Height, Scale: float64(r.Scale),
+		SessionID: r.SessionID, Width: r.Width, Height: r.Height, Scale: float64(r.Scale),
 		State: r.State, Reason: r.Reason, StartedAt: r.StartedAt, LastUsedAt: r.LastUsedAt,
 	}
 	if r.Display > 0 && r.State != desktop.StateClosed && r.State != desktop.StateFailed {
@@ -502,10 +513,6 @@ func (d *desk) Info() desktop.Info {
 	if r.Turn != nil {
 		info.ActiveTaskID = r.Turn.TaskID
 	}
-	d.mu.Lock()
-	info.Viewers = d.viewers
-	info.MemoryBytes, info.DiskBytes = d.memBytes, d.diskBytes
-	d.mu.Unlock()
 	return info
 }
 

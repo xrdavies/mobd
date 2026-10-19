@@ -8,9 +8,9 @@ import (
 	"time"
 )
 
-// follow prints the last n lines of path, then what is appended, like tail -n n -F: it
+// Follow prints the last n lines of path, then what is appended, like tail -n n -F: it
 // reopens the file when it is replaced or truncated. It returns only on error.
-func follow(path string, n int, w io.Writer) error {
+func Follow(path string, n int, w io.Writer) error {
 	f, err := os.Open(path)
 	if err != nil {
 		return err
@@ -39,6 +39,16 @@ func follow(path string, n int, w io.Writer) error {
 			f = next
 		}
 	}
+}
+
+// Tail prints the last n lines of path.
+func Tail(path string, n int, w io.Writer) error {
+	f, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	return lastLines(f, n, w)
 }
 
 // lastLines writes the last n lines of f and leaves f at its end.

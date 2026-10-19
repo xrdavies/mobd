@@ -12,6 +12,16 @@ type Checker interface {
 	Checks(ctx context.Context) map[string]Check
 }
 
+// DoctorCheck is one item of `mobd desktops doctor`: what was found and how to fix it. Warn
+// marks a problem that blocks nothing.
+type DoctorCheck struct {
+	Name   string `json:"name"`
+	OK     bool   `json:"ok"`
+	Warn   bool   `json:"warn,omitempty"`
+	Detail string `json:"detail"`
+	Fix    string `json:"fix,omitempty"`
+}
+
 // Check is one readiness item; Unknown means it cannot be told yet.
 type Check struct {
 	OK      bool

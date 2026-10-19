@@ -3,10 +3,12 @@
 package manager
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -17,41 +19,51 @@ import (
 // minFreezeSystemd is the first systemd with FreezeUnit; older ones freeze through cgroup.freeze.
 const minFreezeSystemd = 246
 
-// DoctorCheck is one item of `mobd desktops doctor`: what was found and how to fix it.
-type DoctorCheck struct {
-	Name   string `json:"name"`
-	OK     bool   `json:"ok"`
-	Detail string `json:"detail"`
-	Fix    string `json:"fix,omitempty"`
-}
-
 // Doctor checks what desktops need: the programs, cgroup v2 and the freezer, memory, disk, and
 // systemd-oomd (which may kill a whole desktop under memory pressure).
-func (m *Manager) Doctor(ctx context.Context) []DoctorCheck {
-	var out []DoctorCheck
+func (m *Manager) Doctor(ctx context.Context) []desktop.DoctorCheck {
+	var out []desktop.DoctorCheck
 	for _, p := range []struct{ check, name, pkg string }{
 		{"xvfb", "Xvfb", "xvfb"}, {"windowManager", "openbox", "openbox"},
 		{"dbus", "dbus-daemon", "dbus"}, {"keyboard", "setxkbmap", "x11-xkb-utils"},
 	} {
 		if path, err := m.look(p.name); err != nil {
-			out = append(out, DoctorCheck{Name: p.check, Detail: p.name + " not found", Fix: "sudo apt install " + p.pkg})
+			out = append(out, desktop.DoctorCheck{Name: p.check, Detail: p.name + " not found", Fix: "sudo apt install " + p.pkg})
 		} else {
-			out = append(out, DoctorCheck{Name: p.check, OK: true, Detail: path})
+			out = append(out, desktop.DoctorCheck{Name: p.check, OK: true, Detail: path})
 		}
 	}
 	out = append(out, m.cgroupCheck(ctx), m.displayCheck())
 	res := m.Resources()
 	mem, disk := desktop.MemoryCheck(res.Memory), desktop.DiskCheck(res.Disk)
 	out = append(out,
-		DoctorCheck{Name: "memory", OK: mem.OK, Detail: mem.Detail},
-		DoctorCheck{Name: "disk", OK: disk.OK, Detail: disk.Detail + " in " + res.Disk.Path})
+		desktop.DoctorCheck{Name: "memory", OK: mem.OK, Detail: mem.Detail},
+		desktop.DoctorCheck{Name: "disk", OK: disk.OK, Detail: disk.Detail + " in " + res.Disk.Path})
 	if m.oomdActive() {
-		out = append(out, DoctorCheck{Name: "oomd", Detail: "systemd-oomd is active and may close a whole desktop under memory pressure",
+		out = append(out, desktop.DoctorCheck{Name: "oomd", Warn: true, Detail: "active: may close a whole desktop under memory pressure",
 			Fix: "see docs/linux.md#memory; adding swap or zram also helps"})
 	} else {
-		out = append(out, DoctorCheck{Name: "oomd", OK: true, Detail: "systemd-oomd not active"})
+		out = append(out, desktop.DoctorCheck{Name: "oomd", OK: true, Detail: "not active"})
 	}
+	if lingering, user := m.lingering(); lingering {
+		out = append(out, desktop.DoctorCheck{Name: "linger", OK: true, Detail: "enabled for " + user})
+	} else {
+		out = append(out, desktop.DoctorCheck{Name: "linger", Warn: true, Detail: "off: desktops and mobd stop at logout",
+			Fix: "sudo loginctl enable-linger " + user})
+	}
+	locale := cmp.Or(os.Getenv("LC_ALL"), os.Getenv("LANG"), "C")
+	out = append(out, desktop.DoctorCheck{Name: "locale", OK: true, Detail: locale + ", keyboard " + m.opts.Layout})
 	return out
+}
+
+// lingering reports whether systemd keeps the user's manager running without a login.
+func lingering() (bool, string) {
+	u, err := user.Current()
+	if err != nil {
+		return false, "me"
+	}
+	_, err = os.Stat(filepath.Join("/var/lib/systemd/linger", u.Username))
+	return err == nil, u.Username
 }
 
 // Checks are the /health items (desktop.Checker); memory and disk are read live by the API.
@@ -59,7 +71,7 @@ func (m *Manager) Checks(ctx context.Context) map[string]desktop.Check {
 	checks := map[string]desktop.Check{}
 	for _, c := range m.Doctor(ctx) {
 		switch c.Name {
-		case "memory", "disk", "oomd":
+		case "memory", "disk", "oomd", "linger", "locale":
 			continue
 		}
 		detail := c.Detail
@@ -71,8 +83,8 @@ func (m *Manager) Checks(ctx context.Context) map[string]desktop.Check {
 	return checks
 }
 
-func (m *Manager) cgroupCheck(ctx context.Context) DoctorCheck {
-	c := DoctorCheck{Name: "cgroup"}
+func (m *Manager) cgroupCheck(ctx context.Context) desktop.DoctorCheck {
+	c := desktop.DoctorCheck{Name: "cgroup"}
 	if _, err := os.Stat(filepath.Join(m.opts.Cgroups.Path("/"), "cgroup.controllers")); err != nil {
 		c.Detail, c.Fix = "cgroup v2 not mounted", "boot with the unified cgroup hierarchy (systemd.unified_cgroup_hierarchy=1)"
 		return c
@@ -92,7 +104,7 @@ func (m *Manager) cgroupCheck(ctx context.Context) DoctorCheck {
 	return c
 }
 
-func (m *Manager) displayCheck() DoctorCheck {
+func (m *Manager) displayCheck() desktop.DoctorCheck {
 	count, asleep := 0, 0
 	for _, info := range m.List() {
 		if live(info.State) || info.State == desktop.StateStarting {
@@ -106,7 +118,11 @@ func (m *Manager) displayCheck() DoctorCheck {
 	if m.opts.MaxDesktops > 0 {
 		limit = fmt.Sprintf("cap %d", m.opts.MaxDesktops)
 	}
-	return DoctorCheck{Name: "display", OK: true, Detail: fmt.Sprintf("%d desktops (%d asleep), %s", count, asleep, limit)}
+	desktops := "desktops"
+	if count == 1 {
+		desktops = "desktop"
+	}
+	return desktop.DoctorCheck{Name: "display", OK: true, Detail: fmt.Sprintf("%d %s (%d asleep), %s", count, desktops, asleep, limit)}
 }
 
 // oomdActive reports whether systemd-oomd runs on this machine.

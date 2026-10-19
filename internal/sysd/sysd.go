@@ -58,22 +58,42 @@ func User(ctx context.Context) (Client, error) {
 	if _, err := os.Stat(sock); err != nil {
 		return nil, fmt.Errorf("systemd user manager not running (enable linger: loginctl enable-linger): %w", err)
 	}
-	c, err := sd.NewConnection(func() (*dbus.Conn, error) {
-		conn, err := dbus.Dial("unix:path="+sock, dbus.WithContext(ctx))
-		if err != nil {
-			return nil, err
-		}
-		// A direct connection to systemd: EXTERNAL auth by uid, no Hello.
-		if err := conn.Auth([]dbus.Auth{dbus.AuthExternal(strconv.Itoa(os.Getuid()))}); err != nil {
-			conn.Close()
-			return nil, err
-		}
-		return conn, nil
-	})
-	if err != nil {
-		return nil, fmt.Errorf("systemd user manager: %w", err)
+	// ctx bounds connecting only: a connection dialled with dbus.WithContext closes when that
+	// context ends, and this one lives as long as mobd.
+	type result struct {
+		c   *sd.Conn
+		err error
 	}
-	return &client{c: c}, nil
+	done := make(chan result, 1)
+	go func() {
+		c, err := sd.NewConnection(func() (*dbus.Conn, error) {
+			conn, err := dbus.Dial("unix:path=" + sock)
+			if err != nil {
+				return nil, err
+			}
+			// A direct connection to systemd: EXTERNAL auth by uid, no Hello.
+			if err := conn.Auth([]dbus.Auth{dbus.AuthExternal(strconv.Itoa(os.Getuid()))}); err != nil {
+				conn.Close()
+				return nil, err
+			}
+			return conn, nil
+		})
+		done <- result{c, err}
+	}()
+	select {
+	case r := <-done:
+		if r.err != nil {
+			return nil, fmt.Errorf("systemd user manager: %w", r.err)
+		}
+		return &client{c: r.c}, nil
+	case <-ctx.Done():
+		go func() {
+			if r := <-done; r.c != nil {
+				r.c.Close()
+			}
+		}()
+		return nil, fmt.Errorf("systemd user manager: %w", ctx.Err())
+	}
 }
 
 type client struct{ c *sd.Conn }

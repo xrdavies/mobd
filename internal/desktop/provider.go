@@ -120,6 +120,7 @@ const (
 // Info describes a desktop for GET /desktops and mobd desktops list.
 type Info struct {
 	SessionID    string       `json:"sessionId"`
+	Title        string       `json:"title,omitempty"`   // the conversation's, filled in by the API
 	Display      string       `json:"display,omitempty"` // ":101"
 	Width        int          `json:"width"`             // points
 	Height       int          `json:"height"`

@@ -21,6 +21,8 @@ import (
 type Manager interface {
 	Start(cfg config.Config, args []string, login bool) error
 	Stop() error // stops the service and disables login startup
+	// Uninstall stops the service and removes its definition; settings and data stay.
+	Uninstall() error
 	Status() error
 	Logs() error // follows LogPath
 	SavedArgs() ([]string, error)

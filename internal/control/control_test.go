@@ -37,7 +37,7 @@ func TestPrivateManagementLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer auth.Close()
-	srv := &http.Server{Handler: Handler(auth)}
+	srv := &http.Server{Handler: Handler(Deps{Pairing: auth})}
 	go srv.Serve(ln)
 	defer srv.Close()
 	var health map[string]any

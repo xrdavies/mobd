@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"path/filepath"
@@ -61,3 +62,63 @@ func newProvider(cfg config.Config, store *task.Store) desktop.Provider {
 	go m.Run(context.Background())
 	return m
 }
+
+// desktopsSupported: Linux gives conversations desktops of their own.
+const desktopsSupported = true
+
+func offlineList(cfg config.Config) ([]desktop.Info, error) {
+	return manager.ListOffline(filepath.Join(cfg.DataDir, "desktops"))
+}
+
+func offlineClose(ctx context.Context, cfg config.Config, ids []string, reason desktop.CloseReason) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	sd, err := sysd.User(ctx)
+	if err != nil {
+		return err
+	}
+	defer sd.Close()
+	var errs []error
+	for _, id := range ids {
+		errs = append(errs, manager.CloseOffline(ctx, filepath.Join(cfg.DataDir, "desktops"), sd, cgroup.New(cgroup.DefaultRoot), id, reason))
+	}
+	return errors.Join(errs...)
+}
+
+// offlineDoctor runs the checks without mobd, so they also explain why it cannot start desktops.
+func offlineDoctor(ctx context.Context, cfg config.Config) []desktop.DoctorCheck {
+	var sd sysd.Client
+	if c, err := sysd.User(ctx); err == nil {
+		sd = c
+		defer c.Close()
+	} else {
+		sd = noManager{err}
+	}
+	w, h := cfg.DesktopDimensions()
+	m, err := manager.New(manager.Options{
+		DataDir: filepath.Join(cfg.DataDir, "desktops"), RuntimeDir: manager.RuntimeDir(cfg.DataDir),
+		Size: [2]int{w, h}, Scale: cfg.DesktopScale, Layout: cfg.DesktopKeyboardLayout, DisplayBase: cfg.DesktopDisplayBase,
+		MaxDesktops: cfg.MaxDesktops, Systemd: sd, Cgroups: cgroup.New(cgroup.DefaultRoot), Spawner: proc.Exec{},
+		Memory: manager.MemoryLimits{WarnPercent: cfg.MemoryWarnPercent, FloorPercent: cfg.MemoryFloorPercent},
+		Disk:   manager.DiskLimits{WarnPercent: cfg.DiskWarnPercent, WarnBytes: int64(cfg.DiskWarnBytes), FloorBytes: int64(cfg.DiskFloorBytes)},
+	})
+	if err != nil {
+		return []desktop.DoctorCheck{{Name: "desktops", Detail: err.Error()}}
+	}
+	defer m.Shutdown()
+	return m.Doctor(ctx)
+}
+
+// noManager stands in for the systemd user manager when it cannot be reached.
+type noManager struct{ err error }
+
+func (n noManager) StartScope(context.Context, string, []int, string) error { return n.err }
+func (n noManager) StopUnit(context.Context, string) error                  { return n.err }
+func (n noManager) Freeze(context.Context, string) error                    { return n.err }
+func (n noManager) Thaw(context.Context, string) error                      { return n.err }
+func (n noManager) UnitState(context.Context, string) (sysd.UnitState, error) {
+	return sysd.UnitState{}, n.err
+}
+func (n noManager) Version(context.Context) (string, error) { return "", n.err }
+func (noManager) Close() error                              { return nil }

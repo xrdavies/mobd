@@ -124,19 +124,20 @@ func TestSignalsKeepADesktopAwake(t *testing.T) {
 			return release
 		}},
 		{"cpu", func(f *fixture) func() {
-			busy := true
-			var used time.Duration
-			f.m.opts.Cgroups = cpuFS{f.cg, func() time.Duration {
-				if busy {
-					used += 10 * time.Second // a sixth of a core over a minute
-				}
-				return used
-			}}
-			return func() { busy = false }
+			f.busy = true
+			return func() { f.busy = false }
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f, c := sleepyFixture(t)
+			// CPU use comes from the busy flag; only the sleep loop (this goroutine) reads it.
+			var used time.Duration
+			f.m.opts.Cgroups = cpuFS{f.cg, func() time.Duration {
+				if f.busy {
+					used += 10 * time.Second // a sixth of a core over a minute
+				}
+				return used
+			}}
 			if _, err := f.m.Ensure(context.Background(), sid, "turn"); err != nil {
 				t.Fatal(err)
 			}

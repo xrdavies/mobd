@@ -180,6 +180,8 @@ func (s *fakeSpawner) spec(name string) proc.Spec {
 }
 
 type fixture struct {
+	busy bool // CPU use reported by sleep tests' cpuFS
+
 	m      *Manager
 	sd     *sysd.Fake
 	cg     *cgroup.Fake

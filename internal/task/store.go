@@ -298,6 +298,20 @@ func (s *Store) setReasonsLocked(reasons map[string]string) {
 	}
 }
 
+// FindSessions returns the IDs of the sessions starting with prefix, sorted.
+func (s *Store) FindSessions(prefix string) []string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var ids []string
+	for id := range s.data.Sessions {
+		if strings.HasPrefix(id, prefix) {
+			ids = append(ids, id)
+		}
+	}
+	slices.Sort(ids)
+	return ids
+}
+
 // SessionTitle returns a session's title and whether it exists.
 func (s *Store) SessionTitle(id string) (string, bool) {
 	s.mu.RLock()

@@ -105,6 +105,9 @@ func (m *launchd) Stop() error {
 	return nil
 }
 
+// Uninstall: Stop already removes the LaunchAgent.
+func (m *launchd) Uninstall() error { return m.Stop() }
+
 func (m *launchd) Status() error {
 	if !m.loaded() {
 		return errors.New("mobd: stopped")
@@ -112,4 +115,4 @@ func (m *launchd) Status() error {
 	return printStatus(m.dir, m.LoginEnabled())
 }
 
-func (m *launchd) Logs() error { return follow(m.LogPath(), 100, os.Stdout) }
+func (m *launchd) Logs() error { return Follow(m.LogPath(), 100, os.Stdout) }

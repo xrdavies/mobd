@@ -180,7 +180,8 @@ func TestDoctor(t *testing.T) {
 	}
 	f.m.oomdActive = func() bool { return true }
 	f.sd.SystemdVersion = "245.4"
-	checks := map[string]DoctorCheck{}
+	f.m.lingering = func() (bool, string) { return false, "me" }
+	checks := map[string]desktop.DoctorCheck{}
 	for _, c := range f.m.Doctor(context.Background()) {
 		checks[c.Name] = c
 	}
@@ -191,14 +192,17 @@ func TestDoctor(t *testing.T) {
 		t.Errorf("cgroup without cgroup.controllers %+v", c)
 	}
 	_ = os.WriteFile(filepath.Join(f.cg.Path("/"), "cgroup.controllers"), []byte("cpu memory pids\n"), 0644)
-	checks = map[string]DoctorCheck{}
+	checks = map[string]desktop.DoctorCheck{}
 	for _, c := range f.m.Doctor(context.Background()) {
 		checks[c.Name] = c
 	}
 	if c := checks["cgroup"]; !c.OK || !strings.Contains(c.Detail, "cgroup.freeze (systemd 245.4") {
 		t.Errorf("cgroup %+v", c)
 	}
-	if c := checks["oomd"]; c.OK {
+	if c := checks["linger"]; !c.Warn || c.Fix != "sudo loginctl enable-linger me" {
+		t.Errorf("linger %+v", c)
+	}
+	if c := checks["oomd"]; c.OK || !c.Warn {
 		t.Errorf("oomd %+v", c)
 	}
 	if c := checks["memory"]; !c.OK || !strings.Contains(c.Detail, "8.6 GB of 17.2 GB available (50%)") {

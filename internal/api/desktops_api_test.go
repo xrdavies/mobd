@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"slices"
@@ -24,7 +25,7 @@ func TestDesktopsList(t *testing.T) {
 	p.res = desktop.Resources{Memory: desktop.MemoryInfo{Level: desktop.LevelLow, AvailableBytes: 2e9, TotalBytes: 16e9}}
 	rr := doJSON(t, s, http.MethodGet, "/desktops", "")
 	var got struct {
-		Desktops []desktopView
+		Desktops []desktop.Info
 		Memory   desktop.MemoryInfo
 	}
 	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
@@ -151,5 +152,39 @@ func TestHealthWithSessionDesktops(t *testing.T) {
 	_ = json.Unmarshal(rr.Body.Bytes(), &h)
 	if h.Checks["disk"].OK {
 		t.Error("disk check cached")
+	}
+}
+
+func TestDesktopAdmin(t *testing.T) {
+	p := &scripted{}
+	s, _ := dispatchServer(t, p, 1, "")
+	a, _ := s.store.Create("a")
+	if id, err := s.ResolveSession(a.SessionID[:6]); err != nil || id != a.SessionID {
+		t.Errorf("prefix: %q %v", id, err)
+	}
+	if _, err := s.ResolveSession(a.SessionID[:3]); err == nil {
+		t.Error("3-character prefix accepted")
+	}
+	// Two sessions sharing a prefix: ambiguous.
+	b, _ := s.store.Create("b")
+	common := 0
+	for common < len(a.SessionID) && a.SessionID[common] == b.SessionID[common] {
+		common++
+	}
+	if common >= 4 {
+		if _, err := s.ResolveSession(a.SessionID[:common]); err == nil {
+			t.Error("ambiguous prefix accepted")
+		}
+	}
+	p.list = []desktop.Info{{SessionID: a.SessionID, State: desktop.StateRunning}, {SessionID: "0rphan0000", State: desktop.StateAsleep}, {SessionID: "x", State: desktop.StateFailed}}
+	n, err := s.CloseAllDesktops(context.Background(), desktop.CloseStop)
+	if err != nil || n != 2 {
+		t.Errorf("CloseAll %d %v", n, err)
+	}
+	if !slices.Contains(p.Calls(), "close "+a.SessionID+" stop") || !slices.Contains(p.Calls(), "close 0rphan0000 stop") {
+		t.Errorf("calls %q", p.Calls())
+	}
+	if !strings.HasSuffix(s.DesktopsDir(), "/desktops") {
+		t.Error(s.DesktopsDir())
 	}
 }

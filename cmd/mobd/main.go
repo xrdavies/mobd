@@ -36,7 +36,8 @@ const usage = `Usage: mobd <command> [options]
   init       Create ~/.mobd/config.json (never overwrite)
   serve      Run in the foreground (also the default command)
   start      Start the background service (LaunchAgent / systemd user unit); --login starts it at login or boot
-  stop       Stop the background service and disable start at login
+  stop       Stop the background service and disable start at login; on Linux asks whether to
+             close the conversations' desktops (--close-desktops, --keep-desktops)
   restart    Reload configuration and restart; preserve login setting
   status     Show background service address and health
   logs       Follow background service logs
@@ -44,6 +45,8 @@ const usage = `Usage: mobd <command> [options]
   clients    list | revoke CLIENT_ID | delete CLIENT_ID (local management)
   connections  List authenticated active requests and streams
   auth       reset --yes: invalidate all clients and invitations
+  desktops   list | close SESSION | wake SESSION | logs SESSION | doctor (Linux desktops)
+  uninstall  Close every desktop, stop mobd and remove its service; keeps settings and data
   mcp        Run the built-in MCP server over stdio
   --version  Print version
   --help     Show help
@@ -84,6 +87,12 @@ func run(args []string) error {
 	if command == "link" || command == "clients" || command == "connections" || command == "auth" {
 		return manage(command, args)
 	}
+	if command == "desktops" {
+		return desktopsCommand(args)
+	}
+	if command == "uninstall" {
+		return uninstall(args)
+	}
 	if command == "mcp" {
 		if len(args) != 0 {
 			return errors.New("usage: mobd mcp")
@@ -112,26 +121,21 @@ func run(args []string) error {
 		fmt.Println("Created", path)
 		return nil
 	}
-	if command == "status" || command == "logs" || command == "stop" {
+	if command == "stop" {
+		return stop(args)
+	}
+	if command == "status" || command == "logs" {
 		if len(args) != 0 {
 			return fmt.Errorf("%s does not take options", command)
 		}
-		manager, err := service.New()
+		manager, err := newService()
 		if err != nil {
 			return err
 		}
-		switch command {
-		case "status":
+		if command == "status" {
 			return manager.Status()
-		case "logs":
-			return manager.Logs()
-		case "stop":
-			if err := manager.Stop(); err != nil {
-				return err
-			}
-			fmt.Println("mobd stopped; login startup disabled")
-			return nil
 		}
+		return manager.Logs()
 	}
 	if command != "serve" && command != "start" && command != "restart" {
 		return fmt.Errorf("unknown command %q\n%s", command, usage)
@@ -180,6 +184,38 @@ func run(args []string) error {
 		return nil
 	}
 	return serve(cfg)
+}
+
+// stop stops the background service; desktops are kept unless closed with --close-desktops or
+// a "y" at the prompt.
+func stop(args []string) error {
+	socket, err := controlSocket()
+	if err != nil {
+		return err
+	}
+	fs := flag.NewFlagSet("stop", flag.ContinueOnError)
+	fs.StringVar(&socket, "socket", socket, "Running mobd management socket")
+	closeFlag := fs.Bool("close-desktops", false, "Close every conversation's desktop")
+	keepFlag := fs.Bool("keep-desktops", false, "Keep desktops without asking (the default without a terminal)")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() != 0 {
+		return errors.New("usage: mobd stop [--close-desktops | --keep-desktops] [--socket PATH]")
+	}
+	desktops, err := stopDesktops(socket, *closeFlag, *keepFlag)
+	if err != nil {
+		return err
+	}
+	manager, err := newService()
+	if err != nil {
+		return err
+	}
+	if err := manager.Stop(); err != nil {
+		return err
+	}
+	fmt.Fprintf(cliOut, "mobd stopped%s; login startup disabled\n", desktops)
+	return nil
 }
 
 func streamPort(cfg config.Config) string {
@@ -250,7 +286,9 @@ func serve(cfg config.Config) error {
 
 	defer httpSrv.Close()
 
-	adminSrv := &http.Server{Handler: control.Handler(auth), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 10 * time.Second}
+	adminSrv := &http.Server{Handler: control.Handler(control.Deps{Pairing: auth, Desktops: srv}),
+		// Closing every desktop (stop, uninstall) can take a while.
+		ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 5 * time.Minute}
 	defer adminSrv.Close()
 	serveErr := make(chan error, 2)
 	go func() { serveErr <- adminSrv.Serve(management) }()

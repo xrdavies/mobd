@@ -169,6 +169,7 @@ func (d *desk) adopt(rec record, state desktop.DesktopState) error {
 	d.rebase()
 	log.Printf("desktop %s: re-attached on :%d (%s)", d.sid, rec.Display, state)
 	go d.supervise(d.run())
+	go d.sampleUsage()
 	return nil
 }
 

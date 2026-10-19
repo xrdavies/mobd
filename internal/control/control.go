@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/xrdavies/mobd/internal/desktop"
 	"github.com/xrdavies/mobd/internal/filelock"
 	"github.com/xrdavies/mobd/internal/pairing"
 )
@@ -67,8 +68,42 @@ func Listen(path string) (net.Listener, func(), error) {
 	return ln, func() { ln.Close(); unlock() }, nil
 }
 
-func Handler(store *pairing.Store) http.Handler {
+// ErrNotRunning: nothing answers on the control socket.
+var ErrNotRunning = errors.New("contact running mobd")
+
+// Desktops is the running server's desktop administration (api.Server).
+type Desktops interface {
+	PerSessionDesktops() bool
+	DesktopsDir() string
+	ListDesktops() ([]desktop.Info, desktop.Resources)
+	ResolveSession(prefix string) (string, error)
+	OpenDesktop(ctx context.Context, id string) (desktop.Info, error)
+	CloseDesktop(ctx context.Context, id string, reason desktop.CloseReason) error
+	CloseAllDesktops(ctx context.Context, reason desktop.CloseReason) (int, error)
+	DesktopDoctor(ctx context.Context) []desktop.DoctorCheck
+}
+
+// Deps are what the management routes act on; Desktops may be nil (tests).
+type Deps struct {
+	Pairing  *pairing.Store
+	Desktops Desktops
+}
+
+// DesktopList is GET /desktops on the control socket.
+type DesktopList struct {
+	PerSession bool               `json:"perSession"`
+	Dir        string             `json:"dir"`
+	Desktops   []desktop.Info     `json:"desktops"`
+	Memory     desktop.MemoryInfo `json:"memory"`
+	Disk       desktop.DiskInfo   `json:"disk"`
+}
+
+func Handler(deps Deps) http.Handler {
+	store := deps.Pairing
 	mux := http.NewServeMux()
+	if deps.Desktops != nil {
+		desktopRoutes(mux, deps.Desktops)
+	}
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		reply(w, 200, map[string]any{"ok": true, "service": "mobd"})
 	})
@@ -120,6 +155,77 @@ func Handler(store *pairing.Store) http.Handler {
 	return mux
 }
 
+// closeReasons may be given to DELETE /desktops on the control socket.
+var closeReasons = map[string]desktop.CloseReason{
+	"": desktop.CloseUser, "user": desktop.CloseUser, "stop": desktop.CloseStop, "uninstall": desktop.CloseUninstall,
+}
+
+func desktopRoutes(mux *http.ServeMux, d Desktops) {
+	fail := func(w http.ResponseWriter, err error) {
+		status := http.StatusInternalServerError
+		var coded interface{ HTTPStatus() int }
+		if errors.As(err, &coded) {
+			status = coded.HTTPStatus()
+		}
+		reply(w, status, map[string]string{"error": err.Error()})
+	}
+	resolve := func(w http.ResponseWriter, r *http.Request) (string, bool) {
+		id, err := d.ResolveSession(r.PathValue("id"))
+		if err != nil {
+			fail(w, err)
+		}
+		return id, err == nil
+	}
+	mux.HandleFunc("GET /desktops", func(w http.ResponseWriter, r *http.Request) {
+		list, res := d.ListDesktops()
+		reply(w, 200, DesktopList{PerSession: d.PerSessionDesktops(), Dir: d.DesktopsDir(), Desktops: list, Memory: res.Memory, Disk: res.Disk})
+	})
+	mux.HandleFunc("POST /desktops/{id}", func(w http.ResponseWriter, r *http.Request) {
+		id, ok := resolve(w, r)
+		if !ok {
+			return
+		}
+		info, err := d.OpenDesktop(r.Context(), id)
+		if err != nil {
+			fail(w, err)
+			return
+		}
+		reply(w, 200, info)
+	})
+	mux.HandleFunc("DELETE /desktops/{id}", func(w http.ResponseWriter, r *http.Request) {
+		reason, ok := closeReasons[r.URL.Query().Get("reason")]
+		if !ok {
+			reply(w, 400, map[string]string{"error": "reason must be user, stop or uninstall"})
+			return
+		}
+		id, ok := resolve(w, r)
+		if !ok {
+			return
+		}
+		if err := d.CloseDesktop(r.Context(), id, reason); err != nil {
+			fail(w, err)
+			return
+		}
+		reply(w, 200, map[string]string{"sessionId": id})
+	})
+	mux.HandleFunc("DELETE /desktops", func(w http.ResponseWriter, r *http.Request) {
+		reason, ok := closeReasons[r.URL.Query().Get("reason")]
+		if !ok || r.URL.Query().Get("all") != "1" {
+			reply(w, 400, map[string]string{"error": "use ?all=1 and a reason of user, stop or uninstall"})
+			return
+		}
+		n, err := d.CloseAllDesktops(r.Context(), reason)
+		if err != nil {
+			fail(w, err)
+			return
+		}
+		reply(w, 200, map[string]int{"closed": n})
+	})
+	mux.HandleFunc("GET /doctor", func(w http.ResponseWriter, r *http.Request) {
+		reply(w, 200, map[string]any{"checks": d.DesktopDoctor(r.Context())})
+	})
+}
+
 func reply(w http.ResponseWriter, status int, value any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
@@ -128,11 +234,16 @@ func reply(w http.ResponseWriter, status int, value any) {
 }
 
 func Call(socket, method, path string, body any, result any) error {
+	return CallTimeout(socket, 5*time.Second, method, path, body, result)
+}
+
+// CallTimeout is Call for requests that may take longer (starting or closing desktops).
+func CallTimeout(socket string, timeout time.Duration, method, path string, body any, result any) error {
 	data, err := json.Marshal(body)
 	if err != nil {
 		return err
 	}
-	client := &http.Client{Timeout: 5 * time.Second, Transport: &http.Transport{
+	client := &http.Client{Timeout: timeout, Transport: &http.Transport{
 		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 			return (&net.Dialer{}).DialContext(ctx, "unix", socket)
 		},
@@ -145,7 +256,7 @@ func Call(socket, method, path string, body any, result any) error {
 	req.Header.Set("Content-Type", "application/json")
 	res, err := client.Do(req)
 	if err != nil {
-		return fmt.Errorf("contact running mobd via %s: %w", socket, err)
+		return fmt.Errorf("%w via %s: %w", ErrNotRunning, socket, err)
 	}
 	defer res.Body.Close()
 	if res.StatusCode >= 300 {

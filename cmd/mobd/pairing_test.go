@@ -30,7 +30,7 @@ func TestLinkWarnsForHTTPAndStillIssuesUsableInvitation(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer release()
-	server := &http.Server{Handler: control.Handler(auth)}
+	server := &http.Server{Handler: control.Handler(control.Deps{Pairing: auth})}
 	go server.Serve(listener)
 	defer server.Close()
 	for _, address := range []string{"http://192.168.1.20:8080", "http://100.101.102.103:8080", "http://office-mac:8080", "http://[fd00::20]:8080", "http://127.0.0.1:8080", "https://office-mac.example.ts.net"} {

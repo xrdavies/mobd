@@ -121,6 +121,20 @@ func (m *systemd) Stop() error {
 	return nil
 }
 
+// Uninstall stops the unit and removes its file.
+func (m *systemd) Uninstall() error {
+	if err := m.Stop(); err != nil {
+		return err
+	}
+	if err := os.Remove(m.unit); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	if out, err := m.systemctl("daemon-reload"); err != nil {
+		return fmt.Errorf("systemctl --user daemon-reload: %w: %s", err, out)
+	}
+	return nil
+}
+
 func (m *systemd) Status() error {
 	if !m.active() {
 		return errors.New("mobd: stopped")
@@ -128,4 +142,4 @@ func (m *systemd) Status() error {
 	return printStatus(m.dir, m.LoginEnabled())
 }
 
-func (m *systemd) Logs() error { return follow(m.LogPath(), 100, os.Stdout) }
+func (m *systemd) Logs() error { return Follow(m.LogPath(), 100, os.Stdout) }

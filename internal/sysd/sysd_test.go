@@ -113,11 +113,18 @@ func TestUserManager(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	c, err := User(ctx)
+	// The client outlives the context it connected with, as in mobd serve.
+	connectCtx, connected := context.WithTimeout(ctx, 10*time.Second)
+	c, err := User(connectCtx)
+	connected()
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer c.Close()
+	time.Sleep(100 * time.Millisecond)
+	if v, err := c.Version(ctx); err != nil || v == "" {
+		t.Fatalf("after the connect context ended: %q %v", v, err)
+	}
 
 	// A process that appends a line every 50 ms: the file stops growing while it is frozen.
 	out := filepath.Join(t.TempDir(), "ticks")

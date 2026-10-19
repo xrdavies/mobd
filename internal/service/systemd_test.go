@@ -156,6 +156,26 @@ func TestSystemdStopDisablesAndKeepsTheUnit(t *testing.T) {
 	}
 }
 
+func TestSystemdUninstallRemovesTheUnit(t *testing.T) {
+	dir := t.TempDir()
+	unit := filepath.Join(dir, unitName)
+	os.WriteFile(unit, []byte("[Unit]\n"), 0644)
+	fake := &fakeSystemd{}
+	m := &systemd{dir: dir, unit: unit, run: fake.run}
+	if err := m.Uninstall(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(unit); !os.IsNotExist(err) {
+		t.Fatal("unit file left")
+	}
+	if strings.Join(fake.calls, "; ") != "systemctl --user disable --now mobd.service; systemctl --user daemon-reload" {
+		t.Fatal(fake.calls)
+	}
+	if err := m.Uninstall(); err != nil {
+		t.Fatalf("second uninstall: %v", err)
+	}
+}
+
 func TestFollowPrintsTailThenAppendsAndSurvivesRotation(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "mobd.log")
 	var lines []string
@@ -164,7 +184,7 @@ func TestFollowPrintsTailThenAppendsAndSurvivesRotation(t *testing.T) {
 	}
 	os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0600)
 	out := &syncBuffer{}
-	go func() { _ = follow(path, 100, out) }()
+	go func() { _ = Follow(path, 100, out) }()
 	waitText(t, out, lines[149]+"\n")
 	if n := strings.Count(out.String(), "\n"); n != 100 {
 		t.Fatalf("%d lines first", n)
