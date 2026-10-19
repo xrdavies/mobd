@@ -15,9 +15,10 @@ import (
 	"slices"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 	"unicode"
+
+	"github.com/xrdavies/mobd/internal/filelock"
 )
 
 var (
@@ -123,7 +124,7 @@ func Open(path string) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+	if err := filelock.TryLock(lock); err != nil {
 		lock.Close()
 		return nil, fmt.Errorf("authentication state already in use: %w", err)
 	}
@@ -446,7 +447,7 @@ func (s *Store) Close() {
 		c.cancel()
 	}
 	if s.lock != nil {
-		_ = syscall.Flock(int(s.lock.Fd()), syscall.LOCK_UN)
+		_ = filelock.Unlock(s.lock)
 		_ = s.lock.Close()
 	}
 }

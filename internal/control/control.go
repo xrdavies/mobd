@@ -12,9 +12,9 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"syscall"
 	"time"
 
+	"github.com/xrdavies/mobd/internal/filelock"
 	"github.com/xrdavies/mobd/internal/pairing"
 )
 
@@ -29,23 +29,18 @@ func Listen(path string) (net.Listener, func(), error) {
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return nil, nil, err
 	}
-	info, err := os.Lstat(dir)
-	if err != nil {
+	if err := privateDir(dir); err != nil {
 		return nil, nil, err
-	}
-	owner, ok := info.Sys().(*syscall.Stat_t)
-	if !info.IsDir() || info.Mode().Perm()&0077 != 0 || !ok || int(owner.Uid) != os.Getuid() {
-		return nil, nil, errors.New("control socket requires a directory owned by this user with mode 0700")
 	}
 	lock, err := os.OpenFile(path+".lock", os.O_CREATE|os.O_RDWR, 0600)
 	if err != nil {
 		return nil, nil, err
 	}
-	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+	if err := filelock.TryLock(lock); err != nil {
 		lock.Close()
 		return nil, nil, errors.New("mobd management socket is already in use")
 	}
-	unlock := func() { _ = syscall.Flock(int(lock.Fd()), syscall.LOCK_UN); _ = lock.Close() }
+	unlock := func() { _ = filelock.Unlock(lock); _ = lock.Close() }
 	if info, err := os.Lstat(path); err == nil {
 		if info.Mode()&os.ModeSocket == 0 {
 			unlock()
@@ -69,7 +64,7 @@ func Listen(path string) (net.Listener, func(), error) {
 		unlock()
 		return nil, nil, err
 	}
-	if err := os.Chmod(path, 0600); err != nil {
+	if err := privateSocket(path); err != nil {
 		ln.Close()
 		unlock()
 		return nil, nil, err

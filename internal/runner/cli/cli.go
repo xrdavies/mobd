@@ -11,9 +11,9 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
+	"github.com/xrdavies/mobd/internal/proc"
 	"github.com/xrdavies/mobd/internal/runner"
 	"github.com/xrdavies/mobd/internal/task"
 )
@@ -48,8 +48,9 @@ func Run(ctx context.Context, c Command, p Parser, emit runner.EmitFunc) error {
 	cmd.Dir, cmd.Env, cmd.Stdin = c.Dir, c.Env, c.Stdin
 	// Kill the process group so cancelled tools cannot keep output pipes open.
 	// shortcut: hard daemon crashes need an external process supervisor; graceful shutdown cancels this group.
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
+	group := proc.NewGroup(cmd)
+	defer group.Close()
+	cmd.Cancel = group.Kill
 	cmd.WaitDelay = 3 * time.Second
 	stdout, stdoutWriter := io.Pipe()
 	stderr, stderrWriter := io.Pipe()
@@ -68,6 +69,11 @@ func Run(ctx context.Context, c Command, p Parser, emit runner.EmitFunc) error {
 		return err
 	}
 	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("start %s: %w", c.Name, err)
+	}
+	if err := group.Started(); err != nil {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
 		return fmt.Errorf("start %s: %w", c.Name, err)
 	}
 
@@ -97,7 +103,7 @@ func Run(ctx context.Context, c Command, p Parser, emit runner.EmitFunc) error {
 	waitErr := cmd.Wait()
 	if runCtx.Err() != nil || errors.Is(waitErr, exec.ErrWaitDelay) {
 		// The parent has exited now, so it cannot create more children in the group.
-		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		_ = group.Kill()
 	}
 	_ = stdoutWriter.Close()
 	_ = stderrWriter.Close()
