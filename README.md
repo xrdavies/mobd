@@ -84,6 +84,12 @@ make stop
 make serve ARGS='--config ./config.dev.json'
 ```
 
+A plain `make build` is ad-hoc signed, so macOS treats every rebuild as a new app and drops
+its Screen Recording and Accessibility grants. On a Mac you rebuild often, sign dev builds
+with a self-signed code-signing certificate kept in its own keychain
+(`make build SIGN_IDENTITY="mobd dev"`, see `tools/devsign.sh`): grant once, and later
+rebuilds keep the grants.
+
 ### Connect clients
 
 Every client pairs once and then authenticates with its own persistent credential

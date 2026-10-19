@@ -3,6 +3,7 @@
 GO      ?= go
 BIN     ?= bin/mobd
 ARGS    ?=
+SIGN_IDENTITY ?=
 
 .DEFAULT_GOAL := help
 .PHONY: help build test race vet fmt check clean \
@@ -13,8 +14,9 @@ help: ## List targets
 
 ## --- mobd (office Mac) ---
 
-build: ## Build mobd into bin/mobd
+build: ## Build mobd into bin/mobd (SIGN_IDENTITY=... signs it so macOS grants survive rebuilds)
 	$(GO) build -o $(BIN) ./cmd/mobd
+	@if [ -n "$(SIGN_IDENTITY)" ]; then tools/devsign.sh "$(SIGN_IDENTITY)" $(BIN); fi
 
 test: ## Run Go tests
 	$(GO) test ./...
