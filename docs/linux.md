@@ -1,11 +1,11 @@
-# Linux (draft plan, not implemented)
+# Linux
 
-> **Status: draft for review.** Nothing here is implemented. Today only macOS has a desktop
-> backend; Linux compiles a placeholder that returns `ErrUnsupported`
-> (`internal/desktop/backend_linux.go`) and the API answers 501 for `/screen` and `/stream`.
-> Items marked *(to verify)* are behaviour we have not confirmed on real machines.
-> The Windows plan is separate: [Windows](windows.md). The detailed design (packages, interfaces,
-> state machine, API, PR steps) is in [Linux design](linux-design.md).
+> **Status: implemented** (phases 0–4 of the [Linux design](linux-design.md), branch
+> `feat/linux`). This page is the plan the design started from; where the code ended up
+> differently, [As built](linux-design.md#as-built) says so. Items still marked *(to verify)*
+> were not confirmed on real machines. Install and use: [README](../README.md#install--run-office-linux-computer);
+> other distributions: [building on Linux](linux-build.md). The Windows plan is separate:
+> [Windows](windows.md).
 >
 > Decided by the owner: desktops sleep (freeze) when idle and are closed only when the user
 > archives or deletes the conversation or closes its desktop; low memory is reported to the user

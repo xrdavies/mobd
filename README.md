@@ -5,7 +5,11 @@ Office control plane: HTTP task API + Codex and Claude Code runners. The same bi
 Desktop clients connect over HTTP/SSE and the live desktop stream (WebRTC, with a WebSocket fallback). The desktop app lives in
 [xrdavies/mob](https://github.com/xrdavies/mob); this repository builds independently.
 
-Source: Go 1.27+ and Xcode Command Line Tools on macOS. Run `make build`,
+On macOS the agent drives the office Mac's own desktop. On Linux every conversation gets its
+own virtual desktop (Xvfb and openbox) that sleeps when idle; see [Linux](docs/linux.md).
+
+Source: Go 1.27+ and Xcode Command Line Tools on macOS; on Linux a C compiler, `pkg-config` and
+the GStreamer development headers ([building on Linux](docs/linux-build.md)). Run `make build`,
 `make check` (Go vet/tests plus Node.js 24+ distribution tests), or `make race`.
 See [architecture](docs/architecture.md), [API reference](docs/mobd-v3.md)
 and [runners](docs/runners.md).
@@ -70,6 +74,39 @@ when available, and the invoking shell's PATH/workdir. Config edits take effect
 on `restart`. There is one managed service per user. `stop`, `status` and `logs`
 operate on that service, independently of the caller's environment. Logs are in
 `~/.mobd/mobd.log`. Use a stable binary path and stop before replacing the binary.
+
+## Install / run (office Linux computer)
+
+Ubuntu 22.04/24.04 and Debian 12/13 (amd64, arm64) are supported. The `.deb` from the
+[release](https://github.com/xrdavies/mobd/releases) brings Xvfb, openbox, dbus and GStreamer:
+
+```bash
+sudo apt install ./mobd_<version>_amd64.deb
+mobd init && mobd start          # a systemd user service; it enables linger
+mobd desktops doctor             # programs, cgroup v2, encoder, browsers, memory, disk
+```
+
+Or the same installer as on macOS, which puts the tarball's `mobd` in `~/.local/bin` and prints
+the `apt install` line for the packages above. Other distributions:
+[building on Linux](docs/linux-build.md).
+
+- **A desktop per conversation:** its first turn starts it; agents get its `DISPLAY`, bus and a
+  `PATH` whose `google-chrome`, `chromium` and `firefox` use the conversation's own browser
+  profile and `Downloads`. Desktops sleep in the cgroup freezer after `desktopSleepAfter` with no
+  turn, viewer, CPU use or screen change, and wake for the next turn or live view.
+- **Closing:** archiving or deleting a conversation, the apps' "Close desktop", or
+  `mobd desktops close`. `mobd stop` asks whether to close them (`--close-desktops`,
+  `--keep-desktops`); kept desktops re-attach on the next start. `mobd uninstall` (and
+  `apt remove`) closes every desktop and removes the service; data is kept.
+- **CLI:** `mobd desktops list | close | wake | logs | doctor | seed`. `seed SESSION` makes that
+  conversation's browser profiles (log in to sites there first, then close the browser) the
+  start of every new conversation's profile.
+- **Memory and disk:** below `memoryFloorPercent` or `diskFloorBytes` no new desktop starts;
+  turns of conversations with a desktop still run. `/health`, `GET /desktops` and SSE report it.
+- **Live view:** H.264 from VA-API, NVENC or OpenH264 in software through GStreamer. Allow UDP
+  `streamPort` in the firewall (`sudo ufw allow 9527/udp`) or use the WebSocket fallback.
+- **Not isolated:** desktops, agents and mobd run as one Unix user; agents can read each other's
+  profiles and files.
 
 Developers build/run the same CLI:
 
@@ -338,6 +375,22 @@ curl -H "Authorization: Bearer $MOBD_TOKEN" -s localhost:8080/artifacts/ARTIFACT
 | `claudeWorkdir` | `MOBD_CLAUDE_WORKDIR` | Codex workdir | Claude working directory |
 | `claudeModels` | `MOBD_CLAUDE_MODELS` | `opus,sonnet,haiku` | Claude model picker |
 
+Conversation desktops (Linux; accepted and validated everywhere):
+
+| JSON key | Environment variable | Default | Meaning |
+| --- | --- | --- | --- |
+| `desktopMode` | `MOBD_DESKTOP_MODE` | `session` on Linux, `shared` elsewhere | Linux: `session` (a desktop per conversation) or `none` |
+| `desktopSleepAfter` | `MOBD_DESKTOP_SLEEP_AFTER` | `10m` | Idle time before a desktop sleeps; `0` never |
+| `desktopSleepCPU` | `MOBD_DESKTOP_SLEEP_CPU` | `0.02` | CPU use (fraction of one core) under which a desktop counts as idle |
+| `desktopSize` | `MOBD_DESKTOP_SIZE` | `1920x1080` | Desktop size in points |
+| `desktopScale` | `MOBD_DESKTOP_SCALE` | `1` | `1` or `2` (HiDPI) |
+| `desktopKeyboardLayout` | `MOBD_DESKTOP_KEYBOARD_LAYOUT` | the machine's `XKBLAYOUT`, else `us` | XKB layout of every desktop |
+| `desktopDisplayBase` | `MOBD_DESKTOP_DISPLAY_BASE` | `100` | First X display number |
+| `maxDesktops` | `MOBD_MAX_DESKTOPS` | `0` (no cap) | Desktops open at once; new conversations wait (`queueReason: desktops`) |
+| `memoryWarnPercent` / `memoryFloorPercent` | `MOBD_MEMORY_WARN_PERCENT` / `MOBD_MEMORY_FLOOR_PERCENT` | `15` / `5` | Available memory below which mobd warns / starts no new desktop |
+| `diskWarnPercent`, `diskWarnBytes` / `diskFloorBytes` | `MOBD_DISK_WARN_PERCENT`, `MOBD_DISK_WARN_BYTES` / `MOBD_DISK_FLOOR_BYTES` | `10`, `5G` / `1G` | Free space (the lower of percent and bytes) to warn / floor for new desktops |
+| `desktopBrowserSeed` | `MOBD_DESKTOP_BROWSER_SEED` | `<dataDir>/seed` | Browser profiles (`chrome/`, `firefox/`) new conversations start from |
+
 `vncAddr` and `vncViewUrl` in older configs are accepted and ignored.
 
 
@@ -367,6 +420,7 @@ CORS covers API responses and SSE, plus `OPTIONS` preflight for `GET`/`POST`/`PA
 - [Office smoke checklist](docs/office-smoke-checklist.md), [security](docs/security.md): deployment and verification.
 - [Live desktop streaming](docs/desktop-streaming.md): capture, encoding, WebRTC and WebSocket transports, rate control and input.
 - [Signing dev builds](docs/dev-signing.md): keep macOS grants across rebuilds.
-- [Linux](docs/linux.md) (draft plan, not implemented): one virtual desktop per conversation (Xvfb), concurrency, packaging and phases.
-- [Linux design](docs/linux-design.md) (detailed design for review, not implemented): packages, interfaces, desktop state machine, API, CLI and PR-sized phases.
+- [Linux](docs/linux.md): one virtual desktop per conversation (Xvfb), sleep, memory, browsers, packaging.
+- [Linux design](docs/linux-design.md): packages, interfaces, desktop state machine, API, CLI, and what was built differently.
+- [Building on Linux](docs/linux-build.md): other distributions, from source.
 - [Windows](docs/windows.md) (draft plan, not implemented): backend for the logged-in user's desktop, session model, packaging and phases.

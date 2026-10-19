@@ -16,7 +16,8 @@ See [architecture](architecture.md), [runners](runners.md),
 4. **Live multi-client state**: a global event stream keeps the sidebar, queue and status chips current without polling.
 5. **Task options**: per-task model and reasoning effort, plus image attachments.
 6. **Desktop snapshots**: `GET /screen` for thumbnails (iPhone, session previews) and readiness checks.
-7. **Readiness**: `/health` explains what is missing on the office Mac (Codex, actuation, macOS permissions, display state).
+7. **Readiness**: `/health` explains what is missing on the office computer (Codex, actuation, macOS permissions, display state; on Linux the desktop programs, cgroup, encoder, memory and disk).
+8. **Desktops per conversation** (Linux, feature `sessionDesktops`): each conversation has its own desktop, turns of different conversations run at once, idle desktops sleep; see [Conversation desktops](#conversation-desktops-linux).
 
 ## Current scope
 
@@ -26,8 +27,8 @@ are implemented. Every business route requires a paired device credential in
 [pairing protocol](pairing.md) for invitations and CLI management.
 The `pairing` feature is advertised after authentication. There is no multi-user
 login or dedicated security audit log. Storage uses an
-atomic JSON snapshot with separate image files. Tasks share one desktop; human
-Control mode does not automatically pause an agent.
+atomic JSON snapshot with separate image files. On macOS tasks share one desktop; on Linux each
+conversation has its own. Human Control mode does not automatically pause an agent.
 
 ## Codex exec events → MOB model
 
@@ -83,6 +84,7 @@ type Task = {
   usage?: { inputTokens: number; cachedInputTokens: number; outputTokens: number; reasoningOutputTokens: number; costUsd?: number };
   waiting?: boolean;              // awaiting a user answer or approval
   queuePosition?: number;         // 1-based while queued, computed on read
+  queueReason?: "slots" | "desktops" | "memory" | "disk" | "desktopStarting"; // why it still waits
   startedAt?: string;
   finishedAt?: string;
 };
@@ -129,6 +131,9 @@ The App builds the conversation timeline by merging `messages` and `activities` 
 - A session allows only one non-terminal task. A follow-up while queued or running returns **409**.
 - Cancelling an undispatched queued task makes it `cancelled` straight away without starting a runner. A dispatched task can briefly still report `queued`; cancellation then waits for its worker to stop.
 - `queuePosition` is set on queued tasks in every response and in `task` global events.
+- `queueReason` says what a queued task waits for: a free slot (`maxRunning`), the desktop limit
+  (`maxDesktops`), memory or disk below their floor (only new desktops wait), or its desktop
+  starting. It is kept in memory, never persisted.
 - Dispatch is asynchronous. Two immediate submissions can initially have positions 1 and 2; once the first becomes `running`, the second becomes queued position 1.
 
 ## Endpoints
@@ -151,13 +156,17 @@ Invitation redemption and preview are documented in [pairing](pairing.md).
 | POST | `/tasks/{id}/cancel` | Cancels queued or running tasks → **202** |
 | GET | `/queue` | `{running: Task[], queued: Task[]}` |
 | GET | `/events` | Global SSE (see below) |
-| GET | `/screen` | Current desktop snapshot. `?format=png\|jpeg` (default jpeg), `?maxWidth=` (default full size), `?quality=1..100` (default 80) |
+| GET | `/screen` | Current desktop snapshot. `?format=png\|jpeg` (default jpeg), `?maxWidth=` (default full size), `?quality=1..100` (default 80). With `sessionDesktops`, `?sessionId=` picks the conversation; an asleep desktop answers with its last frame and `X-Mob-Desktop-State: asleep` without waking; **409** `no_desktop` when it has none |
 | POST | `/uploads` | `multipart/form-data` field `file`; PNG/JPEG/GIF/WebP up to 20 MiB → `{id, name, mime, size, url}` |
 | GET | `/artifacts/{id}` | Stored image (screenshots from tool results, uploads). Authenticated, `Cache-Control: no-store` |
 | POST | `/tasks/{id}/questions/{qid}/answer` | Answer a pending question: `{answer}` (questions) or `{approved, answer?}` (approvals) → question; 409 if already settled ([runners.md](runners.md#asking-the-user-ask_user-request_approval)) |
 | POST | `/tasks/{id}/steer` | `{prompt}`: add a message to the running turn (runners with `steer`; Codex app-server). 409 when the turn cannot take input |
 | POST | `/internal/tasks/{id}/ask` | Used by `mobd mcp` only (per-turn token); blocks until the question is settled |
-| POST | `/stream` | Opens the live desktop: `{offer?, maxWidth, maxHeight, quality}` → **201** `{session, answer?, wsTicket, width, height, display}` ([desktop-streaming.md](desktop-streaming.md)) |
+| POST | `/stream` | Opens the live desktop: `{offer?, maxWidth, maxHeight, quality, sessionId?}` → **201** `{session, answer?, wsTicket, width, height, display}` ([desktop-streaming.md](desktop-streaming.md)). With `sessionDesktops`, `sessionId` is required (**400** `session_required`, **404** `session_not_found`, **409** `no_desktop`); opening wakes an asleep desktop, and the stream ends with the reason when the desktop closes |
+| GET | `/desktops` | `{desktops: Info[], memory, disk}`, largest memory first; `{desktops: []}` with one shared desktop |
+| POST | `/desktops/{sessionId}` | Starts or wakes the conversation's desktop without a turn → **200** Info. **503** `low_memory`, `low_disk`, `max_desktops`, `desktop_unavailable`; **501** with a shared desktop |
+| DELETE | `/desktops/{sessionId}` | Stops the conversation's running turn, then closes its desktop → **204** |
+| POST | `/desktops/{sessionId}/seed` | Makes the conversation's browser profiles the seed for new conversations → **204**; **409** `browser_running`, `no_profile` |
 | DELETE | `/stream/{id}` | Ends the client's live desktop session |
 | GET | `/stream/ws` | `?session=` (and `?ticket=` for webviews): the same session over a WebSocket where UDP cannot pass. 403 for unknown origins, 404 unknown session, 409 if WebRTC already carries it |
 | GET, POST | `/vnc`, `/vnc/ticket` | Not supported: **410** asking the client to update |
@@ -196,11 +205,35 @@ SSE with monotonic `id`s from a 1024-entry in-memory ring. `Last-Event-ID` / `?a
 | `session.deleted` | `{id}` |
 | `task` | task snapshot (with `queuePosition`) on every status change |
 | `queue` | same shape as `GET /queue` whenever it changes |
+| `desktop` | desktop Info (below) on every state or viewer change; `reason: "oomKill"` when the kernel ended one of its apps |
+| `memory`, `disk` | `{level: ok\|low\|critical, …}` when the level changes |
 | `reset` | `{}` |
 
 Per-task timelines stay on `/tasks/{id}/events`, including `question` events for
 question/approval changes. The global stream carries session/task summaries with
 their `waiting` flags; question snapshots are also available in `GET /sessions/{id}`.
+
+## Conversation desktops (Linux)
+
+`/health` lists the `sessionDesktops` feature, `maxDesktops`, `desktops: {count, asleep,
+memoryBytes, diskBytes}` and the checks `xvfb`, `windowManager`, `dbus`, `keyboard`, `cgroup`,
+`display`, `encoder`, `browsers`, `memory` and `disk` (memory and disk read live). A desktop Info:
+
+```ts
+type DesktopInfo = {
+  sessionId: string; title?: string; display?: string;   // ":101"
+  width: number; height: number; scale: number;          // points
+  state: "starting" | "running" | "asleep" | "waking" | "closing" | "closed" | "failed";
+  reason?: string;          // why it closed or failed: archived, deleted, user, stop, crashed, reboot, thawFailed...
+  memoryBytes: number; diskBytes: number;
+  startedAt?: string; lastUsedAt?: string; activeTaskId?: string; viewers: number;
+};
+```
+
+A desktop starts with its conversation's first turn (or `POST /desktops/{id}`), sleeps after
+`desktopSleepAfter` with no turn, viewer, CPU use or screen change, and wakes for a turn or a live
+view. Archiving or deleting the conversation closes it; a running turn is cancelled first. Errors
+for these conditions carry a machine-readable `code` next to `error`.
 
 ## API configuration
 

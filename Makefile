@@ -12,7 +12,7 @@ SIGN_IDENTITY ?=
 help: ## List targets
 	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z_-]+:.*## / {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
-## --- mobd (office Mac) ---
+## --- mobd ---
 
 build: ## Build mobd into bin/mobd (SIGN_IDENTITY=... signs it so macOS grants survive rebuilds)
 	$(GO) build -o $(BIN) ./cmd/mobd
@@ -36,7 +36,7 @@ init: build ## Create the user config (never overwrite)
 serve: build ## Run mobd in the foreground
 	$(BIN) serve $(ARGS)
 
-start: build ## Start mobd via the user LaunchAgent
+start: build ## Start mobd as the background service (LaunchAgent / systemd user unit)
 	$(BIN) start $(ARGS)
 
 stop: build ## Stop mobd and disable login startup

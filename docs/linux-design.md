@@ -1,11 +1,52 @@
-# Linux: detailed design (for review, not implemented)
+# Linux: detailed design
 
-> **Status: detailed design for review, not implemented.** This turns the agreed plan in
-> [Linux](linux.md) into packages, interfaces, state, API and PR-sized steps. It does not repeat the
-> plan's reasoning; read that first. Statements about today's code cite `file:line` (as of commit
-> `3d589ce`). Where the plan was silent this document makes a choice, marked *(design choice)* with
-> the reason. Unconfirmed OS behaviour is marked *(to verify)*. Phase 0 is shared by
-> macOS, Linux and [Windows](windows.md) (see the table in [Linux](linux.md#portable-core-phase-0-shared-by-macos-linux-and-windows)).
+> **Status: implemented** on `feat/linux` (phases 0–4, section 12). This turns the agreed plan in
+> [Linux](linux.md) into packages, interfaces, state, API and PR-sized steps. Statements about
+> the code before the work cite `file:line` as of commit `3d589ce`. Choices the plan left open are
+> marked *(design choice)*; unconfirmed OS behaviour *(to verify)*. Where the code differs, or a
+> check settled a *(to verify)*, see [As built](#as-built). Phase 0 is shared by macOS, Linux and
+> [Windows](windows.md).
+
+## As built
+
+**Different from this design:**
+
+- **Start order:** Xvfb is started and its cookie verified before the scope is created, so losing
+  a display race to another server just moves on to the next number; Xvfb is moved into the
+  scope right after.
+- **Running** means openbox manages the screen (`_NET_SUPPORTING_WM_CHECK`): an app opened before
+  that stayed unmapped and unframed.
+- **Crash during a turn:** only `session/` and `apps/` are killed; the runner keeps running
+  without a display and the scope stops when the turn ends (stopping the scope would have killed
+  the turn, which the design wanted to keep).
+- **systemd** is reached over the user manager's private socket
+  (`$XDG_RUNTIME_DIR/systemd/private`, as `systemctl --user`), so no session bus is needed, with a
+  connection that outlives the context it was dialled with.
+- **Paste** owns CLIPBOARD and PRIMARY and presses **Shift+Insert** (Ctrl+V types a literal in X
+  terminals), then waits until the app fetched the text, so a following key cannot overtake it.
+  At most 200 KB (no INCR transfers).
+- **Encoders:** `gst.Encoders` is shared by all desktops; an encoder that errors or gives no
+  first unit within 3 s is skipped for 5 minutes. Capture is `GetImage` (no MIT-SHM yet);
+  `ShowCursor` is ignored (frames have no cursor; clients draw it).
+- **`/stream`** reports the size of a starting or asleep desktop from its record, so opening the
+  live view waits for the start or wakes it.
+- **`mobd desktops logs`** reads the log files itself (works while mobd is stopped), not through
+  a control-socket route. The offline `list` notes "mobd is stopped" once.
+- **Memory pressure** counts as low at PSI `some avg60` ≥ 25%.
+- **Release builds** for both architectures run on Ubuntu 22.04 runners (glibc 2.35).
+- **Browsers:** downloads are set in Chrome's `Default/Preferences` and Firefox's `user.js` at
+  every desktop start (unless the browser runs); snap browsers are not supported (they cannot open
+  profiles under `~/.local/share`) and `doctor` warns.
+
+**Not built:** `mobd setup-system-user` and the system-user deployment; reconnecting X after a
+connection error is done once, without resubscribing anything else; the `fonts` doctor check;
+hardware encoders are configured but untested.
+
+**Settled by tests on Ubuntu 24.04 / Debian 13:** `FreezeUnit` replies once the cgroup is frozen
+(systemd 255); Ubuntu 24.04 delegates the memory controller to the user manager; Ubuntu 22.04 and
+24.04 `gstreamer1.0-plugins-bad` include OpenH264; `GetImage` of Xvfb has no cursor; a fresh
+DAMAGE object reports once with no change; the `.deb` installs on Ubuntu 22.04/24.04 and
+Debian 12; Chrome and Firefox honour the download settings.
 
 ## Contents
 

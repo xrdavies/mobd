@@ -1,4 +1,4 @@
-# mobd 发布与安装（macOS Apple Silicon）
+# mobd 发布与安装（macOS Apple Silicon、Linux amd64/arm64）
 
 此仓库独立构建、签名、公证和发布 mobd。当前发布目标是 macOS 13+ / Apple Silicon。
 桌面应用在 [mob](https://github.com/xrdavies/mob) 独立发布，Tauri updater 配置也只在
@@ -118,12 +118,15 @@ make release VERSION=v0.0.3
 Actions 中执行。本地可先运行 `make check`；只测试发布工具使用 `make release-test`。
 
 推送标签成功表示构建请求已提交，**不表示构建或公开发布已经完成**。
-到仓库的 Actions 页面查看 **Release mobd macOS arm64**；也可以手动运行它，
+到仓库的 Actions 页面查看 **Release mobd (macOS arm64, Linux amd64 and arm64)**；也可以手动运行它，
 填写已存在的稳定标签。
 `.github/workflows/release.yml` 将标签解析为确切提交，运行 Go vet/test，以 CGO
 构建 arm64 二进制并注入版本；验证版本和架构后，执行 Developer ID 签名、Apple
 公证和签名验证，打包 `mobd`、LICENSE、README，并生成 `SHA256SUMS` 和草稿 Release。
-Release 上传两个附件：`mobd_<版本>_darwin_arm64.tar.gz` 和 `SHA256SUMS`。
+Linux 任务在 Ubuntu 22.04（amd64 与 arm64 runner，glibc 2.35）上运行 vet/test，以 CGO
+链接系统 GStreamer 构建，再由 `packaging/linux/build.sh` 打包。
+Release 上传：`mobd_<版本>_darwin_arm64.tar.gz`、`mobd_<版本>_linux_amd64.tar.gz`、
+`mobd_<版本>_linux_arm64.tar.gz`、`mobd_<版本>_amd64.deb`、`mobd_<版本>_arm64.deb` 和 `SHA256SUMS`。
 归档保留 `LICENSE` 和 `README.md`；安装脚本校验这三个条目，但只安装 `mobd`。
 Node.js 用于发布脚本及分发测试；用户运行二进制不需要 Node.js 或 Go。
 
@@ -182,6 +185,10 @@ gh workflow run publish-r2.yml --repo xrdavies/mobd --ref main \
 mobd/
   v0.0.2/
     mobd_0.0.2_darwin_arm64.tar.gz
+    mobd_0.0.2_linux_amd64.tar.gz
+    mobd_0.0.2_linux_arm64.tar.gz
+    mobd_0.0.2_amd64.deb
+    mobd_0.0.2_arm64.deb
     SHA256SUMS
     release.json
     install.sh
@@ -213,6 +220,12 @@ mobd/
   旧运行的 **Re-run jobs** 使用原提交，不会采用新的工作流代码。
 
 ## 4. 安装和升级
+
+`release.json` 的 `platforms` 含 `darwin-aarch64`、`linux-x86_64`、`linux-aarch64`（Linux
+条目另有 `deb` 的地址和 SHA-256）。在 Linux 上推荐安装 `.deb`
+（`sudo apt install ./mobd_<版本>_<arch>.deb`），它会带上 Xvfb、openbox 和 GStreamer；
+同一个安装脚本也会在 Linux 上安装对应架构的 tarball（只校验 SHA-256，没有代码签名），并
+打印需要 `apt install` 的软件包。`apt remove mobd` 会关闭每个用户的桌面并移除服务，升级不会。
 
 在 macOS 13+ 的 Apple Silicon Mac 上，以普通登录用户执行：
 

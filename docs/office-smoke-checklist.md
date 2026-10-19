@@ -1,4 +1,6 @@
-# Office Mac smoke checklist
+# Office smoke checklist
+
+Sections 1–5 cover an office Mac; [section 6](#6-office-linux-computer) covers Linux.
 
 Verify the installed mobd, one configured agent runner, and the home client's live
 view on the real office desktop.
@@ -108,3 +110,34 @@ WebSocket) reports first-picture time, bitrate and frame rate.
 
 Use `mobd start --login` when login startup is desired;
 `mobd stop` removes that registration.
+
+## 6. Office Linux computer
+
+On Ubuntu 22.04/24.04 or Debian 12/13, as the user who runs mobd, with a client paired and
+Codex or Claude Code installed for that user.
+
+```bash
+sudo apt install ./mobd_<version>_<arch>.deb
+mobd init                        # set workdir, runners
+mobd start
+mobd desktops doctor             # every line ok; fix FAIL lines before going on
+```
+
+| Check | Criterion |
+| --- | --- |
+| Readiness | `/health` lists `sessionDesktops`; checks `xvfb`, `windowManager`, `dbus`, `cgroup`, `encoder`, `memory`, `disk` are ok. |
+| A desktop per conversation | Two conversations started together run at once; `mobd desktops list` shows two displays. |
+| Agent actuation | Ask the agent to open a terminal and type into it; the conversation's snapshot shows it, the other conversation's does not. |
+| Live view | The app's live view follows the open conversation; click and type reach that desktop. |
+| Browser | Ask the agent to open Firefox or Chromium and download a file: it lands in that conversation's `Downloads` (`~/.local/share/mob/desktops/<id>/Downloads`). |
+| Seed | Log in to a site in one conversation's browser, close the browser, `mobd desktops seed <id>`; a new conversation's browser is logged in. |
+| Sleep | Leave a conversation idle for `desktopSleepAfter`: `list` shows `asleep`, the snapshot is the last frame; the next turn or live view wakes it with its windows. |
+| Restart | `mobd stop` (answer no), `mobd start`: desktops re-attach with their windows. |
+| Close | Archiving the conversation closes its desktop (`list` no longer shows it); files stay. |
+| Memory guard | With `memoryFloorPercent` at 99 and a restart, a new conversation's turn waits with `queueReason: memory`; existing desktops still run turns. |
+| Reboot | After a reboot desktops are closed with reason `reboot`; the next turn starts a new one with the same browser profile. |
+| Uninstall | `sudo apt remove mobd` closes every desktop and stops mobd; `~/.mobd` and `~/.local/share/mob` remain. |
+
+Also check: HiDPI (`desktopScale: 2`), a CJK page with `fonts-noto-cjk`, three viewers at once,
+and a VA-API or NVENC machine (`doctor` names the hardware encoder). Hardware encoders and
+reboots are not covered by CI.
