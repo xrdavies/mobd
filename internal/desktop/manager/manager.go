@@ -39,10 +39,13 @@ type Options struct {
 	SleepAfter time.Duration
 	// SleepCPU is the CPU use (fraction of one core) under which a desktop counts as idle.
 	SleepCPU float64
-	Version  string // mobd's, recorded with each desktop
-	Systemd  sysd.Client
-	Cgroups  cgroup.FS
-	Spawner  proc.Spawner
+	// Memory and Disk: below the warning a level is low, below the floor no new desktop starts.
+	Memory  MemoryLimits
+	Disk    DiskLimits
+	Version string // mobd's, recorded with each desktop
+	Systemd sysd.Client
+	Cgroups cgroup.FS
+	Spawner proc.Spawner
 	// Sessions tells Attach which conversations still exist; nil keeps every desktop.
 	Sessions SessionLookup
 }
@@ -56,10 +59,11 @@ type SessionLookup interface {
 type Manager struct {
 	opts Options
 
-	mu       sync.Mutex // guards desks, reserved and subs; never held across slow work
+	mu       sync.Mutex // guards desks, reserved, subs and res; never held across slow work
 	desks    map[string]*desk
 	reserved map[*reservation]bool
 	subs     []func(desktop.Event)
+	res      desktop.Resources // the guard's last samples
 
 	events   chan desktop.Event
 	quit     chan struct{}
@@ -78,6 +82,11 @@ type Manager struct {
 	now          func() time.Time
 	startTimeout time.Duration
 	sleepTick    time.Duration
+	memoryTick   time.Duration
+	diskTick     time.Duration
+	procRoot     string // /proc
+	statfs       func(path string) (free, total int64, err error)
+	oomdActive   func() bool
 }
 
 var _ desktop.Provider = (*Manager)(nil)
@@ -105,8 +114,13 @@ func New(opts Options) (*Manager, error) {
 		killGroup: func(pgid int) error { return proc.KillGroup(pgid, syscall.SIGKILL) },
 		watch:     proc.Watch, owns: inCgroup, bootID: bootID,
 		now: time.Now, startTimeout: startTimeout, sleepTick: sleepTick,
+		memoryTick: memoryTick, diskTick: diskTick,
+		procRoot: "/proc", statfs: statfs, oomdActive: oomdActive,
 	}
 	m.xready = func(ctx context.Context, n int, cookie []byte) error { return xHandshake(ctx, m.tmp, n, cookie) }
+	// Levels are known before the first turn is scheduled.
+	m.sampleMemory()
+	m.sampleDisk(false)
 	go m.deliver()
 	return m, nil
 }
@@ -131,7 +145,7 @@ func (m *Manager) desk(sid string, create bool) (*desk, error) {
 	defer m.mu.Unlock()
 	d := m.desks[sid]
 	if d == nil && create {
-		d = &desk{m: m, sid: sid, dir: filepath.Join(m.opts.DataDir, sid), work: make(chan struct{}, 1)}
+		d = &desk{m: m, sid: sid, dir: filepath.Join(m.opts.DataDir, sid), work: make(chan struct{}, 1), oomKills: -1}
 		m.desks[sid] = d
 	}
 	return d, nil
@@ -291,8 +305,12 @@ func (m *Manager) List() []desktop.Info {
 	return out
 }
 
-// Resources: the memory and disk guard arrives in a later step.
-func (m *Manager) Resources() desktop.Resources { return desktop.Resources{} }
+// Resources is the guard's view of the machine's memory and disk.
+func (m *Manager) Resources() desktop.Resources {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.res
+}
 
 func (m *Manager) Subscribe(f func(desktop.Event)) {
 	m.mu.Lock()
@@ -319,8 +337,16 @@ func (m *Manager) Reserve(sid string) (desktop.Reservation, desktop.QueueReason,
 	for r := range m.reserved {
 		live[r.sid] = true
 	}
-	if !live[sid] && m.opts.MaxDesktops > 0 && len(live) >= m.opts.MaxDesktops {
-		return nil, desktop.WaitDesktops, false
+	// The limits only hold back new desktops; a session's own desktop always serves its turns.
+	if !live[sid] {
+		switch {
+		case m.opts.MaxDesktops > 0 && len(live) >= m.opts.MaxDesktops:
+			return nil, desktop.WaitDesktops, false
+		case m.res.Memory.Level == desktop.LevelCritical:
+			return nil, desktop.WaitMemory, false
+		case m.res.Disk.Level == desktop.LevelCritical:
+			return nil, desktop.WaitDisk, false
+		}
 	}
 	r := &reservation{m: m, sid: sid}
 	m.reserved[r] = true

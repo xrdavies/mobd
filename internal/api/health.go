@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"fmt"
+	"maps"
 	"net"
 	"net/http"
 	"os/exec"
@@ -64,14 +65,24 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		runners = append(runners, runnerHealth{Info: info, Available: c.OK, Detail: c.Detail, Default: info.Name == s.runners.Default()})
 	}
 	def, _ := s.runners.Get(s.runners.Default())
-	writeJSON(w, http.StatusOK, map[string]any{
+	body := map[string]any{
 		"ok": true, "service": "mobd", "apiVersion": APIVersion,
 		"runner": s.runners.Default(), "runners": runners, "mobMcp": s.cfg.MobMCPCommand,
 		"maxRunning": max(s.cfg.MaxRunning, 1), "features": s.features(),
 		// models/efforts describe the default runner (API v3 clients read these).
 		"models": def.Info().Models, "efforts": def.Info().Efforts, "checks": checks,
 		"streamSessions": s.streams.Count(),
-	})
+	}
+	if s.desktops.PerSession() {
+		// Memory and disk are cheap and change fast: read live, not from the cache.
+		checks = maps.Clone(checks)
+		res := s.desktops.Resources()
+		for name, c := range map[string]desktop.Check{"memory": desktop.MemoryCheck(res.Memory), "disk": desktop.DiskCheck(res.Disk)} {
+			checks[name] = check{OK: c.OK, Unknown: c.Unknown, Detail: c.Detail}
+		}
+		body["checks"], body["maxDesktops"], body["desktops"] = checks, s.cfg.MaxDesktops, s.desktopsSummary()
+	}
+	writeJSON(w, http.StatusOK, body)
 }
 
 func (s *Server) readiness(ctx context.Context) map[string]check {

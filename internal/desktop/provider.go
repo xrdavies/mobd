@@ -150,9 +150,12 @@ type Resources struct {
 }
 
 type MemoryInfo struct {
-	Level          Level `json:"level"`
-	AvailableBytes int64 `json:"availableBytes"`
-	TotalBytes     int64 `json:"totalBytes"`
+	Level          Level   `json:"level"`
+	AvailableBytes int64   `json:"availableBytes"`
+	TotalBytes     int64   `json:"totalBytes"`
+	Pressure       float64 `json:"pressure"` // PSI "some" avg60, percent
+	WarnPercent    int     `json:"warnPercent,omitempty"`
+	FloorPercent   int     `json:"floorPercent,omitempty"`
 }
 
 type DiskInfo struct {
@@ -214,6 +217,11 @@ func (noDesktops) List() []Info                                              { r
 func (noDesktops) Resources() Resources                                      { return Resources{} }
 func (noDesktops) Subscribe(func(Event))                                     {}
 func (noDesktops) Shutdown()                                                 {}
+
+// Checks says why there are no desktops (/health "cgroup").
+func (u noDesktops) Checks(context.Context) map[string]Check {
+	return map[string]Check{"cgroup": {Detail: u.err.Error()}}
+}
 
 type noReservation struct{}
 

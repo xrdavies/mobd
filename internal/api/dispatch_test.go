@@ -27,11 +27,17 @@ type scripted struct {
 	calls    []string
 	released int
 	subs     []func(desktop.Event)
+	list     []desktop.Info
+	res      desktop.Resources
 }
 
 type scriptedDesktop struct {
 	desktop.Desktop
 	sid string
+}
+
+func (d scriptedDesktop) Info() desktop.Info {
+	return desktop.Info{SessionID: d.sid, State: desktop.StateRunning, Display: ":101"}
 }
 
 type scriptedReservation struct {
@@ -95,8 +101,12 @@ func (p *scripted) Remove(_ context.Context, sid string) error {
 	p.record("remove " + sid)
 	return nil
 }
-func (p *scripted) List() []desktop.Info         { return nil }
-func (p *scripted) Resources() desktop.Resources { return desktop.Resources{} }
+func (p *scripted) List() []desktop.Info {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return slices.Clone(p.list)
+}
+func (p *scripted) Resources() desktop.Resources { p.mu.Lock(); defer p.mu.Unlock(); return p.res }
 func (p *scripted) Shutdown()                    {}
 func (p *scripted) Subscribe(f func(desktop.Event)) {
 	p.mu.Lock()
@@ -117,7 +127,9 @@ func dispatchServer(t *testing.T, p *scripted, maxRunning int, wait string) (*Se
 	t.Helper()
 	dir := t.TempDir()
 	bin := filepath.Join(dir, "fake-codex")
-	script := `cat > /dev/null
+	// cd: /health runs it too (--version), from the package directory.
+	script := `cd "` + dir + `"
+cat > /dev/null
 echo "$MOB_TEST_DISPLAY" >> envs
 ` + wait + `
 printf '%s\n' '{"type":"thread.started","thread_id":"th"}' '{"type":"item.completed","item":{"id":"m","type":"agent_message","text":"ok"}}' '{"type":"turn.completed"}'

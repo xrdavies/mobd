@@ -107,11 +107,7 @@ func New(cfg config.Config, store *task.Store, auth *pairing.Store, desktops des
 	store.SetNotifier(s.onChange)
 	// A desktop closing, failing or finishing its start, and memory or disk changing, can let
 	// a waiting turn through.
-	desktops.Subscribe(func(desktop.Event) {
-		s.mu.Lock()
-		s.scheduleLocked()
-		s.mu.Unlock()
-	})
+	desktops.Subscribe(s.onDesktopEvent)
 	return s
 }
 
@@ -153,6 +149,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /queue", s.handleQueue)
 	mux.HandleFunc("GET /events", s.handleEvents)
 	mux.HandleFunc("GET /screen", s.handleScreen)
+	mux.HandleFunc("GET /desktops", s.handleListDesktops)
+	mux.HandleFunc("POST /desktops/{id}", s.handleOpenDesktop)
+	mux.HandleFunc("DELETE /desktops/{id}", s.handleCloseDesktop)
 	mux.HandleFunc("POST /uploads", s.handleUpload)
 	mux.HandleFunc("GET /artifacts/{id}", s.handleArtifact)
 	// The VNC relay was replaced by the live desktop stream; old clients get a readable error.
@@ -422,13 +421,7 @@ func (s *Server) cancelLocked(id string) (*task.Task, error) {
 // closeDesktop cancels the session's active turn, if any, then closes its desktop in the
 // background (the owner's decision: closing never waits for a turn to finish).
 func (s *Server) closeDesktop(sessionID, activeTask string, reason desktop.CloseReason) {
-	if activeTask != "" {
-		s.mu.Lock()
-		if _, err := s.cancelLocked(activeTask); err != nil && !errors.Is(err, task.ErrNotCancellable) {
-			log.Printf("cancel task %s before closing its desktop: %v", activeTask, err)
-		}
-		s.mu.Unlock()
-	}
+	s.cancelSessionTurn(activeTask)
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()

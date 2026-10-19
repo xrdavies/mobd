@@ -13,6 +13,8 @@ import (
 type Fake struct {
 	// Slice is the ControlGroup prefix of new scopes.
 	Slice string
+	// SystemdVersion is what Version reports.
+	SystemdVersion string
 	// OnStart and OnStop run with the unit's ControlGroup, to create or empty its cgroup.
 	OnStart func(unit, controlGroup string, pids []int) error
 	OnStop  func(unit, controlGroup string) error
@@ -30,9 +32,10 @@ type Fake struct {
 
 func NewFake() *Fake {
 	return &Fake{
-		Slice: "/user.slice/user-1000.slice/user@1000.service/app.slice",
-		Fail:  map[string]error{},
-		units: map[string]*UnitState{},
+		Slice:          "/user.slice/user-1000.slice/user@1000.service/app.slice",
+		SystemdVersion: "255",
+		Fail:           map[string]error{},
+		units:          map[string]*UnitState{},
 	}
 }
 
@@ -133,6 +136,8 @@ func (f *Fake) UnitState(_ context.Context, unit string) (UnitState, error) {
 	}
 	return UnitState{ActiveState: "inactive", FreezerState: "running"}, nil
 }
+
+func (f *Fake) Version(context.Context) (string, error) { return f.SystemdVersion, nil }
 
 func (f *Fake) Close() error { return nil }
 

@@ -23,22 +23,35 @@ const (
 	maxFreezeFailures = 3
 )
 
-// Run puts idle desktops to sleep until ctx ends or Shutdown. A desktop sleeps after
-// desktopSleepAfter with no turn, no viewer and its cgroup under desktopSleepCPU (screen changes
-// join with the X11 backend). It does nothing when sleep is off.
+// Run samples memory and disk and puts idle desktops to sleep until ctx ends or Shutdown. A
+// desktop sleeps after desktopSleepAfter with no turn, no viewer and its cgroup under
+// desktopSleepCPU (screen changes join with the X11 backend); never when SleepAfter is 0.
 func (m *Manager) Run(ctx context.Context) {
-	if m.opts.SleepAfter <= 0 {
-		return
+	mem, disk := time.NewTicker(m.memoryTick), time.NewTicker(m.diskTick)
+	defer mem.Stop()
+	defer disk.Stop()
+	var sleep <-chan time.Time
+	if m.opts.SleepAfter > 0 {
+		t := time.NewTicker(m.sleepTick)
+		defer t.Stop()
+		sleep = t.C
 	}
-	t := time.NewTicker(m.sleepTick)
-	defer t.Stop()
+	var walked time.Time
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-m.quit:
 			return
-		case <-t.C:
+		case <-mem.C:
+			m.sampleMemory()
+		case <-disk.C:
+			walk := time.Since(walked) >= walkEvery
+			if walk {
+				walked = time.Now()
+			}
+			m.sampleDisk(walk)
+		case <-sleep:
 			m.sleepIdle(ctx)
 		}
 	}

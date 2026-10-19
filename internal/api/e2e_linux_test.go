@@ -4,6 +4,7 @@ package api
 
 import (
 	"context"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -100,5 +101,63 @@ printf '%s\n' '{"type":"thread.started","thread_id":"th"}' '{"type":"item.comple
 		if err := m.Remove(context.Background(), sess); err != nil {
 			t.Error(err)
 		}
+	}
+}
+
+// TestMemoryFloorHoldsNewDesktops: with memoryFloorPercent 99 every real machine is critical, so a
+// new conversation's turn waits with queueReason "memory" and no desktop starts.
+func TestMemoryFloorHoldsNewDesktops(t *testing.T) {
+	if os.Getenv("MOBD_DESKTOP_TEST") != "1" {
+		t.Skip("set MOBD_DESKTOP_TEST=1 to run turns on real desktops")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	sd, err := sysd.User(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sd.Close()
+	dir := t.TempDir()
+	m, err := manager.New(manager.Options{
+		DataDir: filepath.Join(dir, "desktops"), RuntimeDir: filepath.Join(os.Getenv("XDG_RUNTIME_DIR"), "mobd-test"),
+		Size: [2]int{1024, 768}, Scale: 1, Layout: "us", DisplayBase: 170, Version: "test",
+		Systemd: sd, Cgroups: cgroup.New(cgroup.DefaultRoot), Spawner: proc.Exec{},
+		Memory: manager.MemoryLimits{WarnPercent: 99, FloorPercent: 99},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer m.Shutdown()
+	cfg := config.Config{CodexBin: "/bin/false", CodexWorkDir: dir, MobMCPCommand: "mob-mcp", MaxRunning: 4, DataDir: dir}
+	auth, err := pairing.Open(filepath.Join(dir, "auth.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := New(cfg, task.NewStore(), auth, m, codex.New(cfg))
+	defer auth.Close()
+	defer s.Close()
+
+	a := postTask(t, s, `{"prompt":"a"}`)
+	time.Sleep(500 * time.Millisecond)
+	if got, _ := s.store.Get(a.ID); got.Status != task.StatusQueued || got.QueueReason != "memory" {
+		t.Fatalf("turn %+v", got)
+	}
+	if len(m.List()) != 0 {
+		t.Errorf("a desktop started: %+v", m.List())
+	}
+	rr := doJSON(t, s, http.MethodGet, "/desktops", "")
+	if !strings.Contains(rr.Body.String(), `"level":"critical"`) {
+		t.Errorf("GET /desktops %s", rr.Body)
+	}
+	if rr := doJSON(t, s, http.MethodPost, "/desktops/"+a.SessionID, ""); rr.Code != http.StatusServiceUnavailable || !strings.Contains(rr.Body.String(), "low_memory") {
+		t.Errorf("POST /desktops %d %s", rr.Code, rr.Body)
+	}
+	rr = doJSON(t, s, http.MethodGet, "/health", "")
+	if !strings.Contains(rr.Body.String(), `"memory":{"ok":false`) || !strings.Contains(rr.Body.String(), `"cgroup":{"ok":true`) {
+		t.Errorf("health %s", rr.Body)
+	}
+	t.Logf("health checks: %s", rr.Body)
+	if rr := doJSON(t, s, http.MethodPost, "/tasks/"+a.ID+"/cancel", ""); rr.Code != http.StatusAccepted {
+		t.Errorf("cancel %d", rr.Code)
 	}
 }

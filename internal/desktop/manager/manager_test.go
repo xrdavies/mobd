@@ -238,6 +238,14 @@ func (f *fixture) newManager(t *testing.T, sessions SessionLookup) *Manager {
 		t.Fatal(err)
 	}
 	m.look = func(name string) (string, error) { return "/usr/bin/" + name, nil }
+	// The machine: half of 16 GB free, no pressure, 500 GB of 1 TB disk free.
+	m.procRoot = filepath.Join(f.root, "proc")
+	f.setMemory(t, 16<<30, 8<<30, 0)
+	m.statfs = func(string) (int64, int64, error) { return 500e9, 1000e9, nil }
+	m.oomdActive = func() bool { return false }
+	m.res = desktop.Resources{}
+	m.sampleMemory()
+	m.sampleDisk(false)
 	// The servers answer shortly after starting, unless they exited first.
 	ready := func(ctx context.Context) error {
 		select {
@@ -257,12 +265,32 @@ func (f *fixture) newManager(t *testing.T, sessions SessionLookup) *Manager {
 	return m
 }
 
+// setMemory writes the fake /proc/meminfo and PSI.
+func (f *fixture) setMemory(t *testing.T, total, avail int64, pressure float64) {
+	t.Helper()
+	dir := filepath.Join(f.root, "proc")
+	if err := os.MkdirAll(filepath.Join(dir, "pressure"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	meminfo := fmt.Sprintf("MemTotal:       %d kB\nMemFree:         1000 kB\nMemAvailable:   %d kB\n", total>>10, avail>>10)
+	psi := fmt.Sprintf("some avg10=0.00 avg60=%.2f avg300=0.00 total=1\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=0\n", pressure)
+	if err := os.WriteFile(filepath.Join(dir, "meminfo"), []byte(meminfo), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "pressure", "memory"), []byte(psi), 0600); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func (f *fixture) states(t *testing.T, until desktop.DesktopState) []desktop.DesktopState {
 	t.Helper()
 	var states []desktop.DesktopState
 	for {
 		select {
 		case e := <-f.events:
+			if e.Desktop == nil {
+				continue
+			}
 			if len(states) == 0 || states[len(states)-1] != e.Desktop.State {
 				states = append(states, e.Desktop.State)
 			}

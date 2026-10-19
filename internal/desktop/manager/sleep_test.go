@@ -242,7 +242,7 @@ func TestFailedWakeStartsANewDesktop(t *testing.T) {
 	}
 	var reasons []string
 	for len(f.events) > 0 {
-		if e := <-f.events; e.Desktop.State == desktop.StateClosed {
+		if e := <-f.events; e.Desktop != nil && e.Desktop.State == desktop.StateClosed {
 			reasons = append(reasons, e.Desktop.Reason)
 		}
 	}

@@ -52,6 +52,8 @@ type desk struct {
 	cpuPrev        time.Duration
 	cpuAt          time.Time
 	freezeFailures int
+	// Guard samples (guard.go): memory, directory size, and the OOM kill count (-1 unknown).
+	memBytes, diskBytes, oomKills int64
 }
 
 // child is a process the desktop started.
@@ -502,6 +504,7 @@ func (d *desk) Info() desktop.Info {
 	}
 	d.mu.Lock()
 	info.Viewers = d.viewers
+	info.MemoryBytes, info.DiskBytes = d.memBytes, d.diskBytes
 	d.mu.Unlock()
 	return info
 }

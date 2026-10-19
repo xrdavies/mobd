@@ -173,6 +173,11 @@ func (f *Fake) SetCPU(dir string, usage time.Duration) error {
 		[]byte("usage_usec "+strconv.FormatInt(usage.Microseconds(), 10)+"\n"), 0644)
 }
 
+// SetOOMKills writes memory.events with the kernel's oom_kill count.
+func (f *Fake) SetOOMKills(dir string, n int64) error {
+	return os.WriteFile(filepath.Join(dir, "memory.events"), []byte("low 0\nhigh 0\nmax 0\noom 0\noom_kill "+strconv.FormatInt(n, 10)+"\n"), 0644)
+}
+
 func (f *Fake) SetMemory(dir string, bytes int64) error {
 	return os.WriteFile(filepath.Join(dir, "memory.current"), []byte(strconv.FormatInt(bytes, 10)+"\n"), 0644)
 }

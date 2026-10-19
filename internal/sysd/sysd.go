@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 
 	sd "github.com/coreos/go-systemd/v22/dbus"
 	"github.com/godbus/dbus/v5"
@@ -27,6 +28,8 @@ type Client interface {
 	Freeze(ctx context.Context, unit string) error
 	Thaw(ctx context.Context, unit string) error
 	UnitState(ctx context.Context, unit string) (UnitState, error)
+	// Version is systemd's version, e.g. "255.4-1ubuntu8".
+	Version(ctx context.Context) (string, error)
 	Close() error
 }
 
@@ -181,6 +184,11 @@ func unitType(unit string) string {
 		return ""
 	}
 	return string(ext[1]-'a'+'A') + ext[2:]
+}
+
+func (c *client) Version(context.Context) (string, error) {
+	v, err := c.c.GetManagerProperty("Version")
+	return strings.Trim(v, `"`), err
 }
 
 func (c *client) Close() error { c.c.Close(); return nil }

@@ -35,6 +35,8 @@ type FS interface {
 	Frozen(dir string) (bool, error)            // cgroup.events frozen
 	FreezeDirect(dir string, on bool) error     // cgroup.freeze, fallback when FreezeUnit fails
 	Kill(dir string) error                      // SIGKILL to the subtree: cgroup.kill, else each pid
+	Procs(dir string) ([]int, error)            // every pid in the subtree (cgroup.procs)
+	OOMKills(dir string) (int64, error)         // memory.events oom_kill; ErrNoController if absent
 }
 
 // New returns the hierarchy mounted at root (DefaultRoot, or a temp directory in tests).
@@ -126,6 +128,37 @@ func (fsys) Kill(dir string) error {
 		}
 		return nil
 	})
+}
+
+func (fsys) Procs(dir string) ([]int, error) {
+	var pids []int
+	err := filepath.WalkDir(dir, func(p string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() || d.Name() != "cgroup.procs" {
+			return err
+		}
+		b, err := os.ReadFile(p)
+		if err != nil {
+			return err
+		}
+		for _, f := range strings.Fields(string(b)) {
+			if pid, err := strconv.Atoi(f); err == nil {
+				pids = append(pids, pid)
+			}
+		}
+		return nil
+	})
+	return pids, err
+}
+
+func (fsys) OOMKills(dir string) (int64, error) {
+	n, err := keyed(filepath.Join(dir, "memory.events"), "oom_kill")
+	if errors.Is(err, os.ErrNotExist) {
+		if _, serr := os.Stat(dir); serr != nil {
+			return 0, serr
+		}
+		return 0, ErrNoController
+	}
+	return n, err
 }
 
 // write writes an interface file in one write(2), as the kernel expects.
