@@ -70,7 +70,7 @@
 ```text
 cmd/mobd/
   main.go                 command dispatch; stop/start/restart through service.Manager
-  desktops.go             NEW  mobd desktops list|close|wake|logs|doctor|seed (control socket)
+  desktops.go             NEW  mobd desktops list|close|wake|logs|doctor|seed <session> (control socket)
   provider_darwin.go      NEW  newProvider(): desktop.Shared(desktop.Current())
   provider_linux.go       NEW  newProvider(): manager.New(...) or Shared(unsupported) for desktopMode "none"
   provider_other.go       NEW  //go:build !darwin && !linux
@@ -263,7 +263,6 @@ type Info struct {
 	LastUsedAt   *time.Time `json:"lastUsedAt,omitempty"`
 	ActiveTaskID string     `json:"activeTaskId,omitempty"`
 	Viewers      int        `json:"viewers"`
-	Seed         bool       `json:"seed,omitempty"`
 }
 
 type State string // "starting" "running" "asleep" "waking" "closing" "closed" "failed"
@@ -406,8 +405,7 @@ Cgroup tree of one desktop (`<scope>` = `.../user@<uid>.service/app.slice/mobd-d
   turn/             the runner of the current turn and everything its shell starts
 ```
 
-The scope name uses the full 32-hex session ID (`mobd-desktop-<sid>.scope`); the seed desktop is
-`mobd-desktop-seed.scope`. Controllers are not enabled in the scope's `cgroup.subtree_control`
+The scope name uses the full 32-hex session ID (`mobd-desktop-<sid>.scope`). Controllers are not enabled in the scope's `cgroup.subtree_control`
 *(design choice: accounting and the freezer work hierarchically without it, and processes can
 then move freely between the leaves)*.
 
@@ -716,8 +714,7 @@ minute, then the desktop is closed with reason `crashed`).
   "lastUsedAt": "2026-10-19T09:14:40Z",
   "sleptAt": "2026-10-19T09:24:40Z",
   "turn": {"taskId": "77ab…", "pgid": 41501},
-  "crashes": ["2026-10-19T08:30:00Z"],
-  "seed": false
+  "crashes": ["2026-10-19T08:30:00Z"]
 }
 ```
 
@@ -748,8 +745,8 @@ asleep desktop survives a mobd restart.
 | `GET /screen?sessionId` | 409 `no_desktop` | 409 `desktop_starting` | snapshot | last frame + `X-Mob-Desktop-State: asleep` (no wake) | 409 `no_desktop` |
 | `POST /stream` + sessionId | 409 `no_desktop` | wait ≤ 15 s, then stream | stream | wake, stream | 409 |
 | `POST /desktops/{id}` | start (guards: 503) | wait | 200 | wake | wait, then start |
-| `DELETE /desktops/{id}` | 204 (no-op) | wait, then close | close (409 if turn active) | close | wait |
-| `PATCH /sessions` archived:true | — | close after ready | close, or after the turn | close | — |
+| `DELETE /desktops/{id}` | 204 (no-op) | wait, then close | cancel the active turn, then close | close | wait |
+| `PATCH /sessions` archived:true | — | close after ready | cancel the active turn, then close | close | — |
 | `DELETE /sessions/{id}` | remove files | close + remove | close + remove (session not busy, `store.go:322`) | close + remove | wait, remove |
 | `/internal/…/desktop/{op}` | 409 `no_desktop` | wait | execute | wake first (a turn keeps it awake, so only after a race) | 409 |
 | sleep loop | — | — | may freeze | — | — |
@@ -963,7 +960,7 @@ asleep without a last frame), 409 `desktop_starting`, 501 unsupported. ETag/304 
      "startedAt":"…","lastUsedAt":"…","activeTaskId":"","viewers":0}
   ],
   "memory": {"level":"low","availableBytes":2100000000,"totalBytes":16700000000,"warnPercent":15,"floorPercent":5},
-  "disk":   {"level":"ok","freeBytes":81000000000,"totalBytes":250000000000,"path":"/home/me/.config/mob"}
+  "disk":   {"level":"ok","freeBytes":81000000000,"totalBytes":250000000000,"path":"/home/me/.local/share/mob"}
 }
 ```
 
@@ -976,9 +973,19 @@ running (≤ 15 s). `404 session_not_found`; `503 low_memory` / `low_disk` / `ma
 the reason; `503 desktop_unavailable` on start failure; `501` on macOS.
 
 `DELETE /desktops/{sessionId}` closes (reason `user`). `204` (also when there is none);
-`404 session_not_found`; `409 turn_active` ("stop the running turn first") *(design choice: the
-plan's apps confirm before closing; killing a running turn's display mid-action is worse than
-asking the user to cancel it)*.
+`404 session_not_found`. **Decided by the owner:** an active turn of that session is cancelled
+first (the same path as `POST /tasks/{id}/cancel`, so it ends as cancelled with its partial
+output), then the desktop closes. The apps' confirmation says so ("The running turn will be
+stopped and open windows closed."). Archiving during a turn does the same.
+
+`POST /desktops/{sessionId}/seed` copies that conversation's browser profiles into the seed
+(`<dataDir>/seed/`, or `desktopBrowserSeed` when set), replacing the previous seed; new
+conversations start from a copy of it. `204`; `404 session_not_found`;
+`409 browser_running` while a browser in that conversation still holds its profile (Chrome's
+`SingletonLock`, Firefox's `lock`), with "Close the browser in this conversation first" *(design
+choice: copying a profile in use can give a half-written cookie database)*; `409 no_profile`
+when the conversation never ran a browser. Copies skip caches and lock files. Existing
+conversations keep their own profiles.
 
 ### 6.5 Internal desktop proxy
 
@@ -1111,9 +1118,8 @@ ok    locale           en_US.UTF-8, keyboard us, time zone Europe/Berlin
 
 `close` takes `--yes`. Without mobd running, `list` reads the records (state shown as recorded,
 followed by "(mobd stopped)") and `close` uses `manager.CloseOffline` (StopUnit + record update);
-`wake` needs mobd. `seed` (phase 4) starts the seed desktop: `mobd desktops seed` prints
-"Seed desktop on :110; open it in the live view (conversation list → Seed browser profile) and log
-in; then run mobd desktops close seed".
+`wake` needs mobd. `mobd desktops seed <session>` (phase 4) calls `POST /desktops/{id}/seed`:
+"Browser profile of 'Check the invoices' is now the seed; new conversations start logged in."
 
 ### 7.2 `mobd stop`
 
@@ -1157,14 +1163,14 @@ Usage text (`main.go:35-62`) drops "LaunchAgent" for "background service" on Lin
 | `~/.mobd/` | 0700 | `config.json`, `service.json`, `service-args.json`, `mobd.log` (as today) |
 | `~/.mobd/run/control.sock` | 0600 in 0700 dir | control socket (`control.go:21-24`, `:72`) |
 | `~/.config/systemd/user/mobd.service` | 0644 | user unit |
-| `<dataDir>/desktops/` | 0700 | default `~/.config/mob/desktops` (dataDir = dir of `statePath`, `config.go:291-293`) |
+| `<dataDir>/desktops/` | 0700 | default `~/.local/share/mob/desktops` (Linux default below) |
 | `<dataDir>/desktops/<sid>/desktop.json` | 0600 | record (3.2) |
 | `<dataDir>/desktops/<sid>/lastframe.png` | 0600 | last frame before sleep |
 | `<dataDir>/desktops/<sid>/profiles/{chrome,firefox}/` | 0700 | browser profiles |
 | `<dataDir>/desktops/<sid>/Downloads/` | 0700 | downloads |
 | `<dataDir>/desktops/<sid>/logs/{xvfb,dbus,openbox,apps}.log` (+ `.1`) | 0600 | rotated at 1 MB by copy-truncate (processes hold them `O_APPEND`) |
 | `<dataDir>/desktops/<sid>/bin/` | 0700 | wrappers `google-chrome`, `chromium`, `firefox` (phase 4), 0700 |
-| `<dataDir>/desktops/seed/` | 0700 | seed desktop; its `profiles/` is the default seed |
+| `<dataDir>/seed/` | 0700 | the seed browser profiles (`chrome/`, `firefox/`), copied from a conversation |
 | `$XDG_RUNTIME_DIR/mobd/` | 0700 | runtime root (`<dataDir>/run/` if unset) |
 | `$XDG_RUNTIME_DIR/mobd/d<N>/` | 0700 | `Xauthority` (0600, one MIT-MAGIC-COOKIE-1 entry for `:N`, written in Go), `bus` (dbus socket), `rc.xml` (openbox, regenerated at every start), `dbus.conf` |
 | `/tmp/.X11-unix/X<N>`, `/tmp/.X<N>-lock` | Xvfb's | created by Xvfb; also abstract `@/tmp/.X11-unix/X<N>` |
@@ -1345,12 +1351,15 @@ Only items this design could not settle; the owner questions in
 [Linux](linux.md#open-questions-for-the-owner) still apply (1, 3, 4, 6, 7, 8, 9 are untouched by
 this design; 2 and 5 are answered with the proposed defaults here).
 
-1. **Default `dataDir` on Linux** is `~/.config/mob` (from `os.UserConfigDir`), so profiles,
-   caches and downloads land under `~/.config`. Move Linux's default to `~/.local/share/mob`
-   before the first release (no users to migrate yet)?
-2. **Seed desktop in clients:** the seed desktop needs a client entry point (it is not a
-   conversation). Hidden `seed` session in `/sessions`, or a separate "Browser logins" screen
-   using `GET /desktops` `seed: true`?
-3. **`DELETE /desktops` during a turn:** 409 (this design) or cancel the turn and close?
-4. **systemd-oomd:** document only, or ask users to exclude `user@.service` from oomd
-   (`ManagedOOMMemoryPressure=` override, needs root)?
+Decided by the owner (19 Oct 2026):
+
+1. **Default `dataDir` on Linux** moves to `$XDG_DATA_HOME/mob` (`~/.local/share/mob`); the
+   default `statePath` becomes `<dataDir>/state.json` there. macOS keeps `os.UserConfigDir()/mob`.
+   No migration needed (no Linux users yet). Phase 0 step: `config.Dir()`/defaults per OS.
+2. **Seed profile:** copied, never shared. One browser profile cannot be used by two running
+   browsers, and a second Chrome on a profile in use opens its window in the other desktop's
+   process. The seed is made from a conversation (`POST /desktops/{id}/seed`, "Use this browser
+   profile as the seed" in the apps); there is no separate seed desktop.
+3. **Closing a desktop during a turn** cancels the turn, then closes (above).
+4. **systemd-oomd** is documented only: `doctor` warns when it is active, and docs/linux.md says
+   how users can exclude mobd themselves. mobd changes nothing that needs root.

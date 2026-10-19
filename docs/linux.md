@@ -329,6 +329,11 @@ closing desktops:
   **Close desktop** and **Delete conversation**.
 - **Critical:** below `memoryFloorPercent` (proposed 5%) mobd starts **no new desktops**; turns that
   need one wait (above). Running and asleep desktops are untouched.
+- **systemd-oomd** (active by default on Ubuntu desktop installs) may kill a whole desktop's scope
+  under memory pressure, which loses its windows. mobd does not change it (that needs root);
+  `mobd desktops doctor` warns when it is active, and users who want to exclude mobd can add a
+  drop-in for `user@.service` with `ManagedOOMMemoryPressure=auto` *(to verify the exact setting)*
+  or raise `ManagedOOMMemoryPressureLimit`.
 - **Swap or zram** lets the kernel move asleep desktops out of RAM, so many more conversations
   can stay open; the docs recommend it (Ubuntu desktop installs have a swap file; servers often
   do not). Waking a swapped-out desktop takes a moment longer.
@@ -381,8 +386,10 @@ optimisation.
     (without lock and cache files) when a session's profile is created, so sites the user logged
     into once are logged in for every new conversation. There is no keyring on a virtual desktop,
     so the wrappers pass `--password-store=basic`; a seed must be created the same way or Chrome
-    cannot decrypt its cookies. The simplest way to make one: a `mobd desktops seed` command opens
-    a desktop for a "seed" session that the user prepares through the live view.
+    cannot decrypt its cookies. The seed is made from a conversation: log in to the sites in any
+    conversation's desktop, close its browser, then "Use this browser profile as the seed" in the
+    apps (or `mobd desktops seed <session>`). Profiles are copied, never shared: two running
+    browsers cannot use one profile.
   - profiles survive sleep, closing the desktop and reboots, and are removed with the session.
 - **HOME and XDG dirs:** **shared by default.** A per-session `HOME` or `XDG_CONFIG_HOME` would
   isolate apps but would also hide the runners' and tools' logins (`gh` keeps its token in
@@ -434,7 +441,8 @@ as today.
 - **Clients:** with `sessionDesktops`, the live view follows the open conversation: opening
   another conversation re-POSTs `/stream` (one session per client already replaces the old one).
   Before the first turn it shows "no desktop yet; it starts with the first turn". A conversation's
-  menu gets **Close desktop** (confirming that open windows will be lost); the chat list marks
+  menu gets **Close desktop** (confirming that open windows will be lost and a running turn
+  stopped); the chat list marks
   conversations with a running or asleep desktop; the low-memory banner lists desktops by memory.
   Archiving and deleting a conversation warn that its desktop closes too.
 - **macOS unchanged:** one desktop, `sessionId` accepted and ignored, no `sessionDesktops`
@@ -577,8 +585,8 @@ no permission prompts or code-signing costs, and every desktop path is testable 
 
 ## Open questions for the owner
 
-1. Browser profiles: per-session by default (proposed) or one shared profile? Is a seed profile
-   enough for "logged in everywhere"?
+1. ~~Browser profiles~~ decided: one per conversation, copied from a seed made from a
+   conversation; never shared.
 2. `desktopSleepAfter` 10 min and `desktopSleepCPU` 2% of a core (proposed)? Stop new desktops at
    5% available memory (proposed; the 15% warning is decided)?
 3. Should every turn get a desktop, or should clients be able to mark a turn "no desktop"?
