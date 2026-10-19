@@ -8,8 +8,7 @@ import (
 	"github.com/xrdavies/mobd/internal/desktop"
 )
 
-// The input, clipboard, window and app methods arrive with phases 2.2 and 2.3; until then they
-// answer as the unsupported backend does.
+// later answers what X11 does not do yet (StartStream: phase 3) as the unsupported backend.
 type later = desktop.Backend
 
 // Backend is X11 as a desktop.Backend.

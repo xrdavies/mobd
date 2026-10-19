@@ -9,6 +9,7 @@ import (
 	"image/jpeg"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
@@ -210,5 +211,28 @@ func TestBackendFollowsReconnect(t *testing.T) {
 	}
 	if err := d.Source().NewInput().Key("KeyA", true); !errors.Is(err, desktop.ErrNoDesktop) {
 		t.Errorf("input after close: %v", err)
+	}
+}
+
+func TestLaunchStartsAppsInTheAppsCgroup(t *testing.T) {
+	f := newFixture(t)
+	if _, err := f.m.Ensure(context.Background(), sid, "turn"); err != nil {
+		t.Fatal(err)
+	}
+	pid, err := f.lastX().launch([]string{"/usr/bin/xterm", "-T", "hi"})
+	if err != nil || pid == 0 {
+		t.Fatal(err)
+	}
+	s := f.sp.spec("xterm")
+	scope := f.cg.Path(f.m.desks[sid].record().Cgroup)
+	if s.CgroupDir == nil || s.CgroupDir.Name() != filepath.Join(scope, "apps") || !s.NewSession || s.OOMScoreAdj != 500 ||
+		len(s.Args) != 2 || s.Dir != filepath.Join(f.root, "desktops", sid) {
+		t.Errorf("spec %+v", s)
+	}
+	if !slices.Contains(s.Env, "DISPLAY=:100") || !slices.Contains(s.Env, "MOB_DESKTOP="+filepath.Join(f.root, "desktops", sid)) {
+		t.Errorf("env %q", s.Env)
+	}
+	if _, err := f.lastX().launch(nil); err == nil {
+		t.Error("empty command started")
 	}
 }

@@ -5,6 +5,7 @@ package manager
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"image"
 	_ "image/jpeg"
 	_ "image/png"
@@ -507,4 +508,76 @@ func TestRealScreen(t *testing.T) {
 		t.Errorf("asleep snapshot: %s, %d lit samples (awake %d)", st, after, before)
 	}
 	t.Logf("lit samples: xterm %d, asleep frame %d", before, after)
+}
+
+// TestRealApps: the agent opens an xterm, finds it in the window list and pastes a Unicode
+// command into it.
+func TestRealApps(t *testing.T) {
+	sd, ctx := realUser(t)
+	if _, err := exec.LookPath("xterm"); err != nil {
+		t.Skip("xterm not installed")
+	}
+	m := realManager(t, sd, t.TempDir())
+	defer m.Shutdown()
+	id := strings.Repeat("9", 32)
+	defer m.Remove(context.Background(), id)
+	d, err := m.Ensure(ctx, id, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := d.Backend()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ops := desktop.On(b)
+	msg, err := ops.OpenApp(ctx, "xterm")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Log(msg)
+	var win desktop.Window
+	for i := 0; win.ID == 0; i++ {
+		if i > 100 {
+			wins, _ := ops.ListWindows(false)
+			t.Fatalf("xterm never listed on screen; all windows: %+v", wins)
+		}
+		time.Sleep(100 * time.Millisecond)
+		wins, err := ops.ListWindows(true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, w := range wins {
+			if w.App == "XTerm" {
+				win = w
+			}
+		}
+	}
+	t.Logf("window %+v", win)
+	if win.PID == 0 || win.Bounds.Width < 100 || win.Title == "" {
+		t.Errorf("window %+v", win)
+	}
+	rec := m.desks[id].record()
+	if b, _ := os.ReadFile(fmt.Sprintf("/proc/%d/cgroup", win.PID)); !strings.HasSuffix(strings.TrimSpace(string(b)), rec.Cgroup+"/apps") {
+		t.Errorf("xterm cgroup %q", b)
+	}
+	// Click into the terminal (openbox: click to focus), then paste a command and run it.
+	if err := ops.Click(win.Bounds.X+win.Bounds.Width/2, win.Bounds.Y+win.Bounds.Height/2, "left", 1); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(300 * time.Millisecond)
+	out := filepath.Join(m.desks[id].dir, "pasted")
+	if _, err := ops.TypeText(ctx, "printf '%s\\n' 'Grüße 中文 →' > \""+out+"\""); err != nil {
+		t.Fatal(err)
+	}
+	if err := ops.Key("return"); err != nil {
+		t.Fatal(err)
+	}
+	var got []byte
+	for i := 0; i < 50 && len(got) == 0; i++ {
+		time.Sleep(100 * time.Millisecond)
+		got, _ = os.ReadFile(out)
+	}
+	if string(got) != "Grüße 中文 →\n" {
+		t.Errorf("pasted command wrote %q", got)
+	}
 }

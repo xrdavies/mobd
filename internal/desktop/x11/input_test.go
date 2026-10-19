@@ -97,6 +97,42 @@ func TestRealTyping(t *testing.T) {
 		t.Errorf("typed %q, want %q", got, want)
 	}
 
+	// Paste: Shift+Insert, which xterm reads from PRIMARY; the next key waits for the text.
+	got = typeInto("paste", func() {
+		if err := b.Paste(ctx, "Grüße 中文 →"); err != nil {
+			t.Fatal(err)
+		}
+		if err := b.Key("return", nil); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if want := "Grüße 中文 →\n"; got != want {
+		t.Errorf("pasted %q, want %q", got, want)
+	}
+	// Without a window manager the list falls back to the root's mapped children.
+	cmd := exec.Command("xterm", "-geometry", "20x5+300+200")
+	cmd.Env = env
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer cmd.Process.Kill()
+	var listed desktop.Window
+	for i := 0; i < 100 && listed.ID == 0; i++ {
+		time.Sleep(50 * time.Millisecond)
+		wins, err := b.ListWindows(true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, w := range wins {
+			if w.PID == cmd.Process.Pid { // the shell in it retitles it
+				listed = w
+			}
+		}
+	}
+	if listed.App != "XTerm" || listed.Bounds.X != 300 || listed.Bounds.Y != 200 || listed.PID != cmd.Process.Pid {
+		t.Errorf("listed %+v (pid %d)", listed, cmd.Process.Pid)
+	}
+
 	if _, err := exec.LookPath("setxkbmap"); err == nil {
 		set := exec.Command("setxkbmap", "-layout", "de")
 		set.Env = env

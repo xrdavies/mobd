@@ -73,7 +73,7 @@ type Manager struct {
 	tmp          string // where X servers keep locks and sockets
 	look         func(string) (string, error)
 	xready       func(ctx context.Context, display int, cookie []byte) error
-	openX        func(ctx context.Context, display int, cookie []byte, scale int, onChange func()) (xconn, error)
+	openX        func(ctx context.Context, display int, cookie []byte, scale int, onChange func(), launch func([]string) (int, error)) (xconn, error)
 	busReady     func(ctx context.Context, path string) error
 	kill         func(pid int) error
 	killGroup    func(pgid int) error

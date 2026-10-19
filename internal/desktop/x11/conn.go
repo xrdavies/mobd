@@ -29,6 +29,9 @@ type Options struct {
 	// OnChange is called (from the event goroutine, at most every subtractEvery) when the
 	// screen changed; it must not block.
 	OnChange func()
+	// Launch starts an application on this display (the manager's apps cgroup); nil disables
+	// OpenApp.
+	Launch func(argv []string) (pid int, err error)
 }
 
 // X11 is one connection to an X display.
@@ -50,8 +53,13 @@ type X11 struct {
 	km               *keymap
 	mapStale         atomic.Bool
 	scrollX, scrollY float64
-	done             chan struct{}
-	once             sync.Once
+
+	// Clipboard (clipboard.go) and apps (apps.go).
+	clipMu sync.Mutex
+	clip   clipboard
+	launch func(argv []string) (int, error)
+	done   chan struct{}
+	once   sync.Once
 }
 
 // Open connects to the display through the first socket in addrs that answers ("@/tmp/.X11-unix/X101"
@@ -90,7 +98,7 @@ func Open(ctx context.Context, name string, addrs []string, cookie []byte, opts 
 		nc.Close()
 		return nil, fmt.Errorf("X display %s: %w", name, ctx.Err())
 	}
-	x := &X11{c: c, name: name, scale: max(opts.Scale, 1), onChange: opts.OnChange, done: make(chan struct{})}
+	x := &X11{c: c, name: name, scale: max(opts.Scale, 1), onChange: opts.OnChange, launch: opts.Launch, done: make(chan struct{})}
 	if err := x.setup(); err != nil {
 		c.Close()
 		return nil, fmt.Errorf("X display %s: %w", name, err)
@@ -124,7 +132,10 @@ func (x *X11) setup() error {
 		return err
 	}
 	x.dmg = id
-	return damage.CreateChecked(x.c, id, xproto.Drawable(x.root), damage.ReportLevelNonEmpty).Check()
+	if err := damage.CreateChecked(x.c, id, xproto.Drawable(x.root), damage.ReportLevelNonEmpty).Check(); err != nil {
+		return err
+	}
+	return x.setupClipboard()
 }
 
 // events reads the connection: damage notifies mark the screen changed. It ends when the
@@ -136,11 +147,15 @@ func (x *X11) events() {
 		if ev == nil && err == nil {
 			return
 		}
-		switch ev.(type) {
+		switch e := ev.(type) {
 		case damage.NotifyEvent:
 			x.dirty.Store(true)
 		case xproto.MappingNotifyEvent:
 			x.mapStale.Store(true)
+		case xproto.SelectionRequestEvent:
+			x.answer(e)
+		case xproto.SelectionClearEvent:
+			x.cleared(e)
 		}
 	}
 }

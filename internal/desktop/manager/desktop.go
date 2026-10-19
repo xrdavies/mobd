@@ -358,6 +358,16 @@ func (d *desk) start(ctx context.Context) (err error) {
 	if err := d.connectX(ctx, rec); err != nil {
 		return err
 	}
+	// Running means openbox manages the screen: an app mapped before that keeps no frame.
+	for !d.conn().WindowManager() {
+		select {
+		case <-wm.exited:
+			return fmt.Errorf("openbox exited: %s", logs["openbox"].reason())
+		case <-ctx.Done():
+			return fmt.Errorf("openbox did not start: %w", ctx.Err())
+		case <-time.After(50 * time.Millisecond):
+		}
+	}
 
 	rec.State = desktop.StateRunning
 	d.commit(rec)

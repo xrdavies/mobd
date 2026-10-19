@@ -189,6 +189,7 @@ type testX struct {
 	mu       sync.Mutex
 	shade    uint8
 	onChange func()
+	launch   func([]string) (int, error)
 	done     chan struct{}
 	once     sync.Once
 }
@@ -207,6 +208,7 @@ func (x *testX) Snapshot(_ context.Context, opts desktop.SnapshotOptions) (deskt
 	return desktop.EncodeImage(img, cmp.Or(opts.Format, "png"), opts.MaxWidth, opts.Quality)
 }
 func (x *testX) Done() <-chan struct{} { return x.done }
+func (x *testX) WindowManager() bool   { return true }
 func (x *testX) Close()                { x.once.Do(func() { close(x.done) }) }
 
 // paint changes the screen, as an app drawing.
@@ -306,14 +308,14 @@ func (f *fixture) newManager(t *testing.T, sessions SessionLookup) *Manager {
 	m.watch = f.sp.watch
 	m.owns = f.sp.owns
 	m.bootID = func() string { return "boot-1" }
-	m.openX = func(_ context.Context, _ int, _ []byte, _ int, onChange func()) (xconn, error) {
+	m.openX = func(_ context.Context, _ int, _ []byte, _ int, onChange func(), launch func([]string) (int, error)) (xconn, error) {
 		f.xmu.Lock()
 		defer f.xmu.Unlock()
 		if err := f.failX; err != nil {
 			f.failX = nil
 			return nil, err
 		}
-		x := &testX{Backend: desktop.Current(), shade: 0x80, onChange: onChange, done: make(chan struct{})}
+		x := &testX{Backend: desktop.Current(), shade: 0x80, onChange: onChange, launch: launch, done: make(chan struct{})}
 		f.xs = append(f.xs, x)
 		return x, nil
 	}

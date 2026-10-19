@@ -15,6 +15,7 @@ import (
 
 	"github.com/xrdavies/mobd/internal/desktop"
 	"github.com/xrdavies/mobd/internal/desktop/x11"
+	"github.com/xrdavies/mobd/internal/proc"
 )
 
 // xconn is a desktop's X connection as the manager uses it: the X11 backend, a fake in tests.
@@ -22,11 +23,13 @@ type xconn interface {
 	desktop.Backend
 	Done() <-chan struct{} // closed when the connection ends
 	Close()
+	WindowManager() bool // openbox manages the screen
 }
 
-// openX11 connects to display n with its cookie; onChange hears of screen changes.
-func (m *Manager) openX11(ctx context.Context, n int, cookie []byte, scale int, onChange func()) (xconn, error) {
-	x, err := x11.Open(ctx, ":"+strconv.Itoa(n), xSockets(m.tmp, n), cookie, x11.Options{Scale: scale, OnChange: onChange})
+// openX11 connects to display n with its cookie; onChange hears of screen changes, launch
+// starts the apps the agent opens.
+func (m *Manager) openX11(ctx context.Context, n int, cookie []byte, scale int, onChange func(), launch func([]string) (int, error)) (xconn, error) {
+	x, err := x11.Open(ctx, ":"+strconv.Itoa(n), xSockets(m.tmp, n), cookie, x11.Options{Scale: scale, OnChange: onChange, Launch: launch})
 	if err != nil {
 		return nil, err
 	}
@@ -46,7 +49,7 @@ func (d *desk) connectX(ctx context.Context, rec record) error {
 		d.mu.Lock()
 		d.changedAt = now
 		d.mu.Unlock()
-	})
+	}, d.launch)
 	if err != nil {
 		return fmt.Errorf("connect to the desktop's X server: %w", err)
 	}
@@ -58,6 +61,41 @@ func (d *desk) connectX(ctx context.Context, rec record) error {
 		old.Close()
 	}
 	return nil
+}
+
+// appOOMScoreAdj makes the kernel kill an app before the agent working with it.
+const appOOMScoreAdj = 500
+
+// launch starts an app the agent opened in the desktop's apps/ cgroup, in its own session
+// (it outlives a cancelled turn), with output to logs/apps.log.
+func (d *desk) launch(argv []string) (int, error) {
+	if len(argv) == 0 {
+		return 0, fmt.Errorf("empty command")
+	}
+	rec := d.record()
+	if rec.State != desktop.StateRunning {
+		return 0, desktop.ErrNoDesktop
+	}
+	apps, err := d.m.opts.Cgroups.Open(filepath.Join(d.m.opts.Cgroups.Path(rec.Cgroup), "apps"))
+	if err != nil {
+		return 0, err
+	}
+	defer apps.Close()
+	l, err := openLog(filepath.Join(d.dir, "logs"), "apps")
+	if err != nil {
+		return 0, err
+	}
+	defer l.Close()
+	pid, wait, err := d.m.opts.Spawner.Start(proc.Spec{
+		Path: argv[0], Args: argv[1:], Env: childEnv(append(rec.env(), "MOB_DESKTOP="+d.dir)...), Dir: d.dir,
+		Stdout: l.File, Stderr: l.File, NewSession: true, CgroupDir: apps, OOMScoreAdj: appOOMScoreAdj,
+	})
+	if err != nil {
+		return 0, err
+	}
+	go func() { _ = wait() }() // apps are reaped here; they die with the scope
+	log.Printf("desktop %s: opened %s (pid %d)", d.sid, argv[0], pid)
+	return pid, nil
 }
 
 // dropX closes the X connection once no X call is in flight (before freezing or stopping the

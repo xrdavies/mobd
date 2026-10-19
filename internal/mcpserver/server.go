@@ -34,6 +34,7 @@ func wordingFor(backend string) wording {
 Use screenshot to observe the screen, then click/type_text/key to act.
 Coordinates for click are in points (logical pixels); see screenshot metadata for scale_factor.
 Shortcuts use ctrl, not cmd (ctrl+c, ctrl+v); in terminals use ctrl+shift+c/v.
+This conversation has its own desktop; windows and apps you open stay there between turns.
 Human control of the desktop goes through the live view (/stream); do not use this server for remote human input.
 `, desktop.ComputerName(backend)),
 		keyHint: "Use ctrl for shortcuts (ctrl+c, ctrl+v, ctrl+q).",

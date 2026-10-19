@@ -113,7 +113,11 @@ func (o Ops) TypeText(ctx context.Context, text string) (string, error) {
 	if err := o.B.Paste(ctx, text); err != nil {
 		return "", err
 	}
-	return fmt.Sprintf("typed %d characters via pasteboard", len([]rune(text))), nil
+	via := "clipboard"
+	if o.B.Name() == "macos" {
+		via = "pasteboard"
+	}
+	return fmt.Sprintf("typed %d characters via %s", len([]rune(text)), via), nil
 }
 
 // ListWindows returns normal windows with app, title, pid and bounds.

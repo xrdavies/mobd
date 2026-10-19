@@ -3,8 +3,6 @@
 package x11
 
 import (
-	"context"
-	"errors"
 	"fmt"
 	"math"
 	"time"
@@ -353,12 +351,4 @@ func (r remote) Cursor() (float64, float64, error) {
 		return 0, 0, err
 	}
 	return float64(p.RootX) / float64(b.scale), float64(p.RootY) / float64(b.scale), nil
-}
-
-// Paste: the clipboard arrives with phase 2.3; until then the agent's text is typed.
-func (b *Backend) Paste(ctx context.Context, text string) error {
-	if len(text) > 4096 {
-		return errors.New("text too long to type (at most 4096 characters until the clipboard works)")
-	}
-	return remote{b}.Unicode(text, desktop.Modifiers{})
 }
