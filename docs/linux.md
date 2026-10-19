@@ -8,8 +8,10 @@
 >
 > Decided by the owner: desktops sleep (freeze) when idle and are closed only when the user
 > archives or deletes the conversation or closes its desktop; low memory is reported to the user
-> (warning below 15% available), never solved by closing desktops. Ubuntu and Debian are supported; other distributions get build and
-> configuration instructions.
+> (warning below 15% available), never solved by closing desktops; low disk is reported the same
+> way. `mobd stop` asks before closing desktops (default no); uninstalling closes them; data is
+> always kept. Desktops use the machine's locale. Ubuntu and Debian are supported; other
+> distributions get build and configuration instructions.
 
 On macOS mobd drives the one real desktop of the logged-in user, shared by every task and
 serialized by the FIFO desktop queue (`maxRunning`, default 1, `internal/api/server.go`
@@ -145,6 +147,12 @@ unexpectedly; xfwm4/metacity pull in more of a desktop environment. No panel or 
 
 ### Session bus, notifications, clipboard
 
+- **Locale and time zone:** each desktop uses the machine's settings: `LANG`/`LC_*` from
+  `/etc/default/locale` (or `localectl`), the time zone from `/etc/localtime`, and the matching XKB
+  layout as the default for `desktopKeyboardLayout`. A system unit gets them the same way, since
+  systemd does not pass the login locale. Fonts for the locale (e.g. `fonts-noto-cjk` for zh/ja/ko)
+  become a dependency of the `.deb`, not a recommendation. Typing still goes through mobd (keysym
+  remapping); no input method (ibus/fcitx) runs inside a desktop in v1.
 - **D-Bus:** one `dbus-daemon --session --nofork --address=unix:path=<rundir>/bus` per desktop.
   Browsers, GTK and Electron apps expect a session bus; sharing one across desktops would mix
   single-instance apps between displays.
@@ -232,11 +240,21 @@ mobd no longer needs a graphical login session. It runs as a systemd unit; today
   `Restart=on-failure`, captured `PATH`) and enables linger (`loginctl enable-linger`), so mobd
   starts at boot without anyone logging in. Agents run as the user, with their `codex`/`claude`
   logins, git and SSH keys. `--login` = `systemctl --user enable`; `stop` = stop + disable;
-  `logs` = `journalctl --user -u mobd -f`. Keep capturing `PATH` and absolute `codex`/`claude`
+  `logs` = `journalctl --user -u mobd -f`. `restart` and upgrades leave desktops running; mobd
+  re-attaches to them. Keep capturing `PATH` and absolute `codex`/`claude`
   paths at `start`, as `service.go` does (nvm and `~/.npm-global/bin` are missing from systemd).
 - **Option: system unit** for dedicated servers: `/etc/systemd/system/mobd.service` with
   `User=mobd`, home `/var/lib/mobd`, shipped by the `.deb` but disabled. The runners must be logged
   in as that user.
+- **`mobd stop` and desktops:** desktops are not mobd's children, so stopping mobd does not end
+  them by itself. With desktops open, `mobd stop` asks
+  `Close 3 desktops (2 asleep)? Open windows will be lost; files and browser profiles are kept. [y/N]`.
+  **No (the default)** stops mobd and leaves the desktops as they are; the next `mobd start`
+  re-attaches. **Yes** closes them first. `--close-desktops` / `--keep-desktops` answer without a
+  prompt (scripts, no terminal: keep). Session data is never deleted.
+- **Uninstall:** `apt remove mobd` (the `.deb` `prerm`) and the tarball's uninstall step stop mobd
+  and close every desktop; `~/.mobd` and `<dataDir>/desktops` (profiles, downloads) are kept.
+  `apt purge` keeps user data too; the docs say which directories to delete by hand.
 - **Desktop supervision:** each desktop runs in its own systemd transient scope
   (`mobd-desktop-<session>.scope`, created over D-Bus with `StartTransientUnit`, under the user
   manager or, for the system unit, under `mobd.service`'s slice with `Delegate=yes`): Xvfb, then
@@ -308,6 +326,14 @@ closing desktops:
 - **Swap or zram** lets the kernel move asleep desktops out of RAM, so many more conversations
   can stay open; the docs recommend it (Ubuntu desktop installs have a swap file; servers often
   do not). Waking a swapped-out desktop takes a moment longer.
+- **Disk, reported the same way:** mobd measures each desktop's directory (profiles, cache,
+  downloads; a walk every few minutes, cached) and the free space of the data dir's filesystem.
+  Below `diskWarnPercent` (proposed 10%) or `diskWarnBytes` (5 GB): a `disk` check in `/health`, a
+  `disk` SSE event and the same banner, listing conversations by disk use. Below `diskFloorBytes`
+  (proposed 1 GB) mobd starts no new desktops. Browser wrappers cap the cache
+  (`--disk-cache-size`, Firefox `browser.cache.disk.capacity`) so caches do not dominate.
+- **Apps learn it from mobd only:** the levels and per-desktop numbers come from `/health`,
+  `GET /desktops` and SSE; the apps compute nothing themselves.
 - **Sizing:** Xvfb at 1080p is ~10–20 MB plus the framebuffer (8 MB), openbox and dbus a few MB
   each. The browser dominates: 0.5–1.5 GB per desktop with a few tabs. Without swap, about 8–10
   open conversations with a browser fit a 16 GB machine.
@@ -378,17 +404,25 @@ as today.
 - **`GET /screen?sessionId=…`**: same rule, except that an asleep desktop is not woken: mobd
   returns its last frame with `X-Mob-Desktop-State: asleep`.
 - **`GET /desktops`**: `[{sessionId, display, width, height, scale, state: running|asleep,
-  memoryBytes, startedAt, lastUsedAt, running, viewers}]`. `DELETE /desktops/{sessionId}` closes
+  memoryBytes, diskBytes, startedAt, lastUsedAt, running, viewers}]`. `DELETE /desktops/{sessionId}` closes
   one (besides archiving or deleting the conversation). `POST /desktops/{sessionId}` starts or
   wakes one without a turn, so a user can log in somewhere before the agent runs.
 - **SSE:** `GET /events` gains `desktop` events `{sessionId, state: starting|running|asleep|stopped,
-  reason}` and `memory` events `{level: ok|low|critical, availableBytes, totalBytes}`.
-- **`/health`:** adds `desktops: {count, asleep, memoryBytes}`, `maxDesktops` and a `memory` check. The macOS permission checks are
+  reason}` and `memory` events `{level: ok|low|critical, availableBytes, totalBytes}` and `disk` events
+  `{level, freeBytes, totalBytes}`.
+- **`/health`:** adds `desktops: {count, asleep, memoryBytes, diskBytes}`, `maxDesktops`, and `memory` and `disk` checks. The macOS permission checks are
   generalized to backend checks: on Linux `xvfb`, `windowManager`, `dbus`, `encoder` (detail e.g.
   "vah264enc (VA-API)" or "openh264enc (software)"), and `fonts` (a warning; see
   [Packaging](#networking-packaging-testing)). `accessibility` and `screenRecording`
   (`internal/api/health.go` `permissionChecks`) are reported `ok` with detail "not needed on Linux"
   so API v3 clients show no false warning; `display` reports the desktop cap instead of sleep/lock.
+- **`mobd desktops` CLI** (over the control socket, like `mobd clients`):
+  - `mobd desktops list`: session, title, display, state, memory, disk, uptime, last used;
+  - `mobd desktops close <session>` (asks; `--yes`), `mobd desktops wake <session>`;
+  - `mobd desktops logs <session>`: Xvfb, openbox and dbus output, kept per desktop in
+    `<dataDir>/desktops/<sessionId>/logs/` (rotated, 1 MB each) along with crash reasons;
+  - `mobd desktops doctor`: checks Xvfb, openbox, dbus, cgroup v2 and the freezer, encoders, fonts
+    and locale, and prints what to install or fix.
 - **Clients:** with `sessionDesktops`, the live view follows the open conversation: opening
   another conversation re-POSTs `/stream` (one session per client already replaces the old one).
   Before the first turn it shows "no desktop yet; it starts with the first turn". A conversation's
@@ -412,6 +446,8 @@ as today.
 - **GPU inside Xvfb:** none. GL is Mesa llvmpipe; browsers fall back to software compositing and
   SwiftShader WebGL. Pages work but use more CPU; WebGL-heavy sites and video are slow; WebGPU is
   off. Later options: Xorg with a real GPU driver headless, or VirtualGL.
+- **Desktop size per conversation:** fixed `desktopSize` for everyone in v1, also when watched from
+  a portrait phone. A per-conversation size (new desktop) or Xvnc for live resize can come later.
 - **Audio:** none. Apps find no sound server and stay silent. A PipeWire/PulseAudio null sink per
   desktop could come later.
 
@@ -505,10 +541,11 @@ Rough effort assumes one engineer familiar with the codebase.
 | Phase | Scope | Effort |
 | --- | --- | --- |
 | **0. Portable core** | the list above. Result: mobd runs runners on Linux and Windows (no desktop), and `GOOS=windows` builds. | 1.5–2 weeks |
-| **1. Desktop manager** | systemd scopes, Xvfb/openbox/dbus supervision, display numbers, Xauthority, re-attach after restart, sleep and wake (cgroup freezer), close and delete, runners in the desktop's cgroup, memory guard, `/desktops`, SSE events, health checks, systemd unit. | 2–2.5 weeks |
+| **1. Desktop manager** | systemd scopes, Xvfb/openbox/dbus supervision, `mobd stop`/uninstall handling, `mobd desktops`, per-desktop logs, locale, disk guard, display numbers, Xauthority, re-attach after restart, sleep and wake (cgroup freezer), close and delete, runners in the desktop's cgroup, memory guard, `/desktops`, SSE events, health checks, systemd unit. | 2.5–3 weeks |
 | **2. X11 backend** | xgb capture and snapshots, XTest input, key tables, Unicode, clipboard, EWMH windows, `OpenApp`, MCP text, CI desktop tests. | 1.5 weeks |
 | **3. Streaming** | GStreamer shim, encoder probe and fallback, per-session `POST /stream` and `/screen`, stream-probe in CI. | 1.5–2 weeks |
 | **4. Agent environment and release** | browser wrappers, per-session profiles, seed profile, downloads, `.deb` and tarball, `install.sh`, CI release matrix, `linux-build.md` for other distributions, docs. | 1–1.5 weeks |
+| **4b. Clients** | mob, mob-ios, mob-android: live view per conversation, running/asleep state, Close desktop, archive/delete warnings, memory and disk banners, pausing an unattended view, stopping when hidden or in the background. Each app's docs are updated when this ships. | 1.5–2 weeks |
 | **5. Later** | cursor shape, shared encodes, attach mode, per-session users, GPU, audio. | as needed |
 
 Linux first remains the recommendation: phase 0 is mostly Unix code that already works, there are
