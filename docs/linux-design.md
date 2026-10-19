@@ -4,8 +4,8 @@
 > [Linux](linux.md) into packages, interfaces, state, API and PR-sized steps. It does not repeat the
 > plan's reasoning; read that first. Statements about today's code cite `file:line` (as of commit
 > `3d589ce`). Where the plan was silent this document makes a choice, marked *(design choice)* with
-> the reason. Unconfirmed OS behaviour is marked *(to verify)*. Phase 0 is shared with
-> [Windows](windows.md).
+> the reason. Unconfirmed OS behaviour is marked *(to verify)*. Phase 0 is shared by
+> macOS, Linux and [Windows](windows.md) (see the table in [Linux](linux.md#portable-core-phase-0-shared-by-macos-linux-and-windows)).
 
 ## Contents
 
@@ -1291,7 +1291,10 @@ the macOS baseline.
 
 Each PR builds and passes `go test ./...` on macOS and Linux and keeps macOS behaviour identical.
 
-### Phase 0: portable core (shared with Windows)
+### Phase 0: portable core (shared by macOS, Linux and Windows)
+
+Every step keeps macOS behaviour unchanged: the macOS tests pass on each PR, and the phase is
+checked on a real office Mac (live view, agent input, pairing, `mobd start/stop`) before merging.
 
 | # | PR | Files | Done when |
 | --- | --- | --- | --- |

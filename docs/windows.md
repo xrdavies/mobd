@@ -3,7 +3,7 @@
 > **Status: draft for review.** Nothing here is implemented. Today only macOS has a desktop
 > backend; other systems compile `unsupported` (`internal/desktop/backend.go`,
 > `backend_other.go`) and the API answers 501 for `/screen` and `/stream`. mobd does not even build
-> for Windows yet (see [Portable core](linux.md#portable-core-phase-0-shared-with-windows)).
+> for Windows yet (see [Portable core](linux.md#portable-core-phase-0-shared-by-macos-linux-and-windows)).
 > Items marked *(to verify)* are OS behaviour we have not confirmed on real machines.
 > The Linux plan is separate: [Linux](linux.md).
 
@@ -24,7 +24,7 @@ do not change.
 | Permissions | none beyond integrity level (UIPI) |
 | Control socket | AF_UNIX socket file + ACL, `LockFileEx` (named pipe rejected, see below) |
 | Packages | signed zip + PowerShell installer; MSI later |
-| Order | after Linux phase 0 (shared [portable core](linux.md#portable-core-phase-0-shared-with-windows)) |
+| Order | after Linux phase 0 (shared [portable core](linux.md#portable-core-phase-0-shared-by-macos-linux-and-windows)) |
 
 ## Why not one desktop per agent on Windows
 
@@ -138,7 +138,7 @@ mobd runs **as the logged-in user in their session**:
 separate process, so it uses the shared `proxyBackend` that forwards desktop calls to
 `POST /internal/tasks/{id}/desktop/{op}` on mobd serve, authenticated with the task token like
 `ask` (`internal/mcpserver/ask.go`). mobd serve owns the only backend instance. Details in
-[Portable core](linux.md#portable-core-phase-0-shared-with-windows).
+[Portable core](linux.md#portable-core-phase-0-shared-by-macos-linux-and-windows).
 
 MCP instructions and tool descriptions lose "office Mac", "Quartz", "pasteboard + Cmd+V" and
 "bundle id" on Windows and tell agents to use `ctrl+c`/`ctrl+v`; `command` means Win and
@@ -264,7 +264,7 @@ Rough effort assumes one engineer familiar with the codebase.
 
 | Phase | Scope | Effort |
 | --- | --- | --- |
-| **0. Portable core** | shared with Linux: see [Linux phase 0](linux.md#portable-core-phase-0-shared-with-windows). The Windows parts (`LockFileEx`, ACL, Job Objects, Scheduled Task) can trail the Linux work. | (in Linux phase 0) |
+| **0. Portable core** | shared with Linux: see [Linux phase 0](linux.md#portable-core-phase-0-shared-by-macos-linux-and-windows). The Windows parts (`LockFileEx`, ACL, Job Objects, Scheduled Task) can trail the Linux work. | (in Linux phase 0) |
 | **1. Windows** | DXGI duplication, MF encoder (hardware + software), SendInput, DPI, clipboard/windows/apps, WTS/power, Scheduled Task, AF_UNIX + ACL, firewall, signed zip + `install.ps1`, CI. | 4–6 weeks |
 | **2. Hardening** | Windows.Graphics.Capture, cursor shape to clients, MSI, arm64, SYSTEM service + per-session helper for the lock screen. | as needed |
 

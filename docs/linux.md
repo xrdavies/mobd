@@ -521,7 +521,26 @@ as today.
   Firefox with a seed profile; HiDPI scale 2; `stream-probe` first-picture time, bitrate and fps
   against the macOS baseline.
 
-## Portable core (phase 0, shared with Windows)
+## Portable core (phase 0, shared by macOS, Linux and Windows)
+
+Phase 0 changes code that all three platforms run, not only the new ones:
+
+| Phase 0 item | macOS | Linux | Windows |
+| --- | --- | --- | --- |
+| Desktop provider between the API and the desktop | one shared desktop, behaves as today | one desktop per conversation | one shared desktop |
+| Service manager interface | launchd (today's code moves behind it) | systemd user unit | per-user logon task |
+| File locking, runner process kill | Unix version (today's code) | Unix version | new: `LockFileEx`, Job Objects |
+| Control socket | Unix version | Unix version | new: AF_UNIX file with an ACL |
+| Config and data folders per OS (`config.Dir()`) | `~/.mobd`, data in `~/Library/Application Support/mob` (unchanged) | `~/.mobd`, data in `~/.local/share/mob` | `%LOCALAPPDATA%\\mobd` ([Windows](windows.md)) |
+| Health checks per platform | Accessibility, Screen Recording (as today) | Xvfb, openbox, dbus, encoder, fonts | Windows checks |
+| Shared H.264 cleanup and frame delivery | moves out of `stream_darwin.go`, used by macOS too | used | used |
+| Key tables per OS | macOS table (today's `keys.go`) | Linux table | Windows table |
+| Agent desktop calls through `mobd serve` (MCP proxy) | optional (`MOB_DESKTOP_PROXY=1`, off by default) | always | always |
+
+Phase 0 is mostly a restructuring of today's macOS code: new interfaces with the current behaviour
+behind them, then the Linux and Windows implementations. It can break macOS, so every phase 0 step
+must pass the macOS tests, and before merging it is checked on a real office Mac (live view, agent
+clicks and typing, pairing, `mobd start/stop`).
 
 These macOS-only assumptions block both Linux and [Windows](windows.md); each is cited so the work
 list is concrete.
@@ -556,7 +575,7 @@ Rough effort assumes one engineer familiar with the codebase.
 
 | Phase | Scope | Effort |
 | --- | --- | --- |
-| **0. Portable core** | the list above. Result: mobd runs runners on Linux and Windows (no desktop), and `GOOS=windows` builds. | 1.5–2 weeks |
+| **0. Portable core** | the list above. Result: mobd runs runners on Linux and Windows (no desktop), `GOOS=windows` builds, and macOS behaves as before. | 1.5–2 weeks |
 | **1. Desktop manager** | systemd scopes, Xvfb/openbox/dbus supervision, `mobd stop`/uninstall handling, `mobd desktops`, per-desktop logs, locale, disk guard, display numbers, Xauthority, re-attach after restart, sleep and wake (cgroup freezer), close and delete, runners in the desktop's cgroup, memory guard, `/desktops`, SSE events, health checks, systemd unit. | 2.5–3 weeks |
 | **2. X11 backend** | xgb capture and snapshots, XTest input, key tables, Unicode, clipboard, EWMH windows, `OpenApp`, MCP text, CI desktop tests. | 1.5 weeks |
 | **3. Streaming** | GStreamer shim, encoder probe and fallback, per-session `POST /stream` and `/screen`, stream-probe in CI. | 1.5–2 weeks |
