@@ -113,7 +113,7 @@ func offlineDoctor(ctx context.Context, cfg config.Config) []desktop.DoctorCheck
 }
 
 // probeEncoders finds the H.264 encoders for the live view (a second or two, once).
-func probeEncoders() []gst.Factory {
+func probeEncoders() *gst.Encoders {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	encoders := gst.Probe(ctx)
@@ -122,7 +122,7 @@ func probeEncoders() []gst.Factory {
 	} else {
 		log.Printf("live desktop: encoder %s (%s)", encoders[0].Name, encoders[0].Detail)
 	}
-	return encoders
+	return gst.NewEncoders(encoders)
 }
 
 // noManager stands in for the systemd user manager when it cannot be reached.

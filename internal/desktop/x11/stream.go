@@ -4,6 +4,7 @@ package x11
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -15,13 +16,18 @@ import (
 // ErrNoEncoder: the machine has no working H.264 encoder.
 var ErrNoEncoder = fmt.Errorf("%w: the live desktop needs an H.264 encoder; see mobd desktops doctor", desktop.ErrUnsupported)
 
+// firstUnitWait bounds an encoder's first access unit; one that gives none failed to start.
+var firstUnitWait = 3 * time.Second
+
 // StartStream captures the screen when it changes, at most opts.FPS times a second, and
-// encodes it with the best probed encoder.
+// encodes it with the best usable encoder; one that fails to start (a hardware session
+// limit) is skipped for a while and the next is tried.
 func (b *Backend) StartStream(ctx context.Context, opts desktop.StreamOptions) (desktop.Stream, error) {
 	if err := b.alive(); err != nil {
 		return nil, err
 	}
-	if len(b.encoders) == 0 {
+	usable := b.encoders.Usable()
+	if len(usable) == 0 {
 		return nil, ErrNoEncoder
 	}
 	if opts.Width <= 0 || opts.Height <= 0 {
@@ -30,19 +36,50 @@ func (b *Backend) StartStream(ctx context.Context, opts desktop.StreamOptions) (
 	opts.Width, opts.Height = opts.Width&^1, opts.Height&^1
 	opts.FPS = min(max(opts.FPS, 1), 60)
 	opts.Kbps = max(opts.Kbps, 100)
-	f := b.encoders[0]
+	var errs []error
+	for _, f := range usable {
+		s, err := b.startWith(ctx, f, opts)
+		if err == nil {
+			return s, nil
+		}
+		b.encoders.Failed(f.Name, err)
+		errs = append(errs, fmt.Errorf("%s: %w", f.Name, err))
+		if ctx.Err() != nil {
+			break
+		}
+	}
+	return nil, fmt.Errorf("%w: %w", gst.ErrAllFailed, errors.Join(errs...))
+}
+
+// startWith starts a stream on one encoder and waits for its first unit.
+func (b *Backend) startWith(ctx context.Context, f gst.Factory, opts desktop.StreamOptions) (*stream, error) {
 	enc, err := f.New(gst.EncoderOptions{Width: opts.Width, Height: opts.Height, FPS: opts.FPS, Kbps: opts.Kbps})
 	if err != nil {
-		return nil, fmt.Errorf("%s encoder: %w", f.Name, err)
+		return nil, err
 	}
 	s := &stream{x: b.X11, enc: enc, start: time.Now(), done: make(chan struct{}), fps: opts.FPS,
-		width: opts.Width, height: opts.Height, keyNow: make(chan struct{}, 1)}
+		width: opts.Width, height: opts.Height, keyNow: make(chan struct{}, 1), first: make(chan struct{}),
+		encoderFailed: func(err error) { b.encoders.Failed(f.Name, err) }}
 	s.queue = desktop.NewUnitQueue(s.Keyframe)
 	b.addStream(s)
 	s.wg.Add(2)
 	go s.capture(ctx)
 	go s.forward()
-	return s, nil
+	select {
+	case <-s.first:
+		return s, nil
+	case <-s.done:
+		err = s.Err()
+	case <-time.After(firstUnitWait):
+		err = errors.New("no output")
+	case <-ctx.Done():
+		err = ctx.Err()
+	}
+	s.Close()
+	if err == nil {
+		err = errors.New("the encoder stopped")
+	}
+	return nil, err
 }
 
 // addStream makes damage acknowledgement follow the fastest running stream.
@@ -82,9 +119,12 @@ type stream struct {
 	annexb desktop.AnnexB
 	start  time.Time
 	keyNow chan struct{} // re-push the last frame: a keyframe was asked on a still screen
+	first  chan struct{} // closed with the first unit
 	done   chan struct{}
-	once   sync.Once
-	wg     sync.WaitGroup
+	// encoderFailed records a failure of the stream's encoder, so the next stream uses another.
+	encoderFailed func(error)
+	once          sync.Once
+	wg            sync.WaitGroup
 
 	mu            sync.Mutex
 	fps           int
@@ -149,7 +189,12 @@ func (s *stream) capture(ctx context.Context) {
 func (s *stream) forward() {
 	defer s.wg.Done()
 	defer s.queue.Close()
+	firstUnit := true
 	for u := range s.enc.Units() {
+		if firstUnit {
+			firstUnit = false
+			close(s.first)
+		}
 		data, key := s.annexb.Normalize(u.Data)
 		s.mu.Lock()
 		w, h := s.width, s.height
@@ -157,6 +202,9 @@ func (s *stream) forward() {
 		s.queue.Deliver(desktop.AccessUnit{Data: data, Key: key, PTS: time.Since(s.start), Width: w, Height: h})
 	}
 	if err := s.enc.Err(); err != nil {
+		if s.encoderFailed != nil {
+			s.encoderFailed(err)
+		}
 		s.fail(err)
 	}
 }

@@ -106,15 +106,16 @@ func (m *Manager) cgroupCheck(ctx context.Context) desktop.DoctorCheck {
 
 // encoderCheck names the encoder the live view uses.
 func (m *Manager) encoderCheck() desktop.DoctorCheck {
-	if len(m.opts.Encoders) == 0 {
+	usable := m.opts.Encoders.Usable()
+	if len(usable) == 0 {
 		return desktop.DoctorCheck{Name: "encoder", Detail: "no H.264 encoder: the live desktop is off",
 			Fix: "sudo apt install gstreamer1.0-plugins-bad (OpenH264) or a VA-API driver"}
 	}
-	var names []string
-	for _, e := range m.opts.Encoders {
-		names = append(names, e.Name+" ("+e.Detail+")")
+	detail := usable[0].Name + " (" + usable[0].Detail + ")"
+	if failed := m.opts.Encoders.Failures(); len(failed) > 0 {
+		detail += "; " + strings.Join(failed, "; ")
 	}
-	return desktop.DoctorCheck{Name: "encoder", OK: true, Detail: strings.Join(names, ", ")}
+	return desktop.DoctorCheck{Name: "encoder", OK: true, Detail: detail}
 }
 
 func (m *Manager) displayCheck() desktop.DoctorCheck {

@@ -4,6 +4,7 @@ package manager
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/xrdavies/mobd/internal/desktop"
+	"github.com/xrdavies/mobd/internal/desktop/gst"
 )
 
 func TestMemoryLevels(t *testing.T) {
@@ -207,6 +209,14 @@ func TestDoctor(t *testing.T) {
 	}
 	if c := checks["memory"]; !c.OK || !strings.Contains(c.Detail, "8.6 GB of 17.2 GB available (50%)") {
 		t.Errorf("memory %+v", c)
+	}
+	if c := checks["encoder"]; c.OK || !strings.Contains(c.Fix, "OpenH264") {
+		t.Errorf("no encoder: %+v", c)
+	}
+	f.m.opts.Encoders = gst.NewEncoders([]gst.Factory{{Name: "nvh264enc", Detail: "NVENC"}, {Name: "openh264enc", Detail: "software"}})
+	f.m.opts.Encoders.Failed("nvh264enc", errors.New("session limit"))
+	if c := f.m.encoderCheck(); !c.OK || !strings.HasPrefix(c.Detail, "openh264enc (software); nvh264enc failed") || !strings.Contains(c.Detail, "session limit") {
+		t.Errorf("encoder %+v", c)
 	}
 	health := f.m.Checks(context.Background())
 	if _, ok := health["oomd"]; ok || health["display"].Detail != "0 desktops (0 asleep), no cap" {

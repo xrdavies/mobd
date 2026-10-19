@@ -33,8 +33,9 @@ type Options struct {
 	// Launch starts an application on this display (the manager's apps cgroup); nil disables
 	// OpenApp.
 	Launch func(argv []string) (pid int, err error)
-	// Encoders are the probed H.264 encoders, best first; none disables StartStream.
-	Encoders []gst.Factory
+	// Encoders are the probed H.264 encoders, shared by every desktop; none disables
+	// StartStream.
+	Encoders *gst.Encoders
 }
 
 // X11 is one connection to an X display.
@@ -65,7 +66,7 @@ type X11 struct {
 	launch func(argv []string) (int, error)
 
 	// Streams (stream.go).
-	encoders []gst.Factory
+	encoders *gst.Encoders
 	streamMu sync.Mutex
 	streams  map[*stream]bool
 	done     chan struct{}

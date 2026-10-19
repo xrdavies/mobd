@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -22,7 +23,7 @@ type fakeEncoder struct {
 	last         gst.Frame
 	sizes        [][2]int
 	out          chan gst.Unit
-	closed       bool
+	err          error
 	closeOnce    sync.Once
 }
 
@@ -40,8 +41,20 @@ func (e *fakeEncoder) SetSize(w, h int) {
 	e.mu.Unlock()
 }
 func (e *fakeEncoder) ForceKeyframe() { e.mu.Lock(); e.keys++; e.mu.Unlock() }
-func (e *fakeEncoder) Err() error     { return nil }
-func (e *fakeEncoder) Close()         { e.closeOnce.Do(func() { close(e.out) }) }
+func (e *fakeEncoder) Err() error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.err
+}
+func (e *fakeEncoder) Close() { e.closeOnce.Do(func() { close(e.out) }) }
+
+// fail ends the encoder with err, as a pipeline error.
+func (e *fakeEncoder) fail(err error) {
+	e.mu.Lock()
+	e.err = err
+	e.mu.Unlock()
+	e.Close()
+}
 func (e *fakeEncoder) counts() (int, int) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -66,16 +79,19 @@ func TestStreamPushesOnlyChanges(t *testing.T) {
 	enc := &fakeEncoder{out: make(chan gst.Unit, 4)}
 	var opened gst.EncoderOptions
 	factory := gst.Factory{Name: "fake", New: func(o gst.EncoderOptions) (gst.Encoder, error) { opened = o; return enc, nil }}
-	x, err := Open(ctx, ":196", addrs, cookie, Options{Scale: 1, Encoders: []gst.Factory{factory}})
+	x, err := Open(ctx, ":196", addrs, cookie, Options{Scale: 1, Encoders: gst.NewEncoders([]gst.Factory{factory})})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer x.Close()
 	b := NewBackend(x)
+	// The encoder's first unit tells StartStream it works.
+	go func() { time.Sleep(50 * time.Millisecond); enc.out <- gst.Unit{Data: []byte{0, 0, 0, 1, 0x65, 0}} }()
 	st, err := b.StartStream(ctx, desktop.StreamOptions{Width: 321, Height: 240, FPS: 30, Kbps: 500})
 	if err != nil {
 		t.Fatal(err)
 	}
+	<-st.Units()
 	defer st.Close()
 	if opened.Width != 320 || opened.Height != 240 || opened.FPS != 30 {
 		t.Errorf("encoder options %+v", opened)
@@ -164,7 +180,7 @@ func TestStreamOpenH264(t *testing.T) {
 	addrs, cookie := xvfb(t, 197)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	x, err := Open(ctx, ":197", addrs, cookie, Options{Scale: 1, Encoders: encoders[len(encoders)-1:]})
+	x, err := Open(ctx, ":197", addrs, cookie, Options{Scale: 1, Encoders: gst.NewEncoders(encoders[len(encoders)-1:])})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -192,5 +208,72 @@ func TestStreamOpenH264(t *testing.T) {
 	st.Keyframe()
 	if u, ok := next(2 * time.Second); !ok || !u.Key {
 		t.Errorf("keyframe on request: %v %v", ok, u.Key)
+	}
+}
+
+// An encoder that fails to start, then one that gives no output, are skipped for the next one;
+// one failing mid-stream sends the next stream to the next encoder.
+func TestStreamEncoderFallback(t *testing.T) {
+	addrs, cookie := xvfb(t, 198)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	firstUnitWait = 300 * time.Millisecond
+	defer func() { firstUnitWait = 3 * time.Second }()
+	var working []*fakeEncoder
+	answering := func() (gst.Encoder, error) {
+		e := &fakeEncoder{out: make(chan gst.Unit, 4)}
+		e.out <- gst.Unit{Data: []byte{0, 0, 0, 1, 0x65, 0}}
+		working = append(working, e)
+		return e, nil
+	}
+	silent := &fakeEncoder{out: make(chan gst.Unit)}
+	encoders := gst.NewEncoders([]gst.Factory{
+		{Name: "broken", New: func(gst.EncoderOptions) (gst.Encoder, error) { return nil, errors.New("no device") }},
+		{Name: "silent", New: func(gst.EncoderOptions) (gst.Encoder, error) { return silent, nil }},
+		{Name: "first-working", New: func(gst.EncoderOptions) (gst.Encoder, error) { return answering() }},
+		{Name: "second-working", New: func(gst.EncoderOptions) (gst.Encoder, error) { return answering() }},
+	})
+	x, err := Open(ctx, ":198", addrs, cookie, Options{Scale: 1, Encoders: encoders})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer x.Close()
+	b := NewBackend(x)
+	opts := desktop.StreamOptions{Width: 320, Height: 240, FPS: 30, Kbps: 500}
+	st, err := b.StartStream(ctx, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(working) != 1 {
+		t.Fatalf("%d working encoders opened", len(working))
+	}
+	if f := encoders.Failures(); len(f) != 2 || !strings.HasPrefix(f[0], "broken failed") || !strings.Contains(f[1], "silent failed") {
+		t.Errorf("failures %q", f)
+	}
+
+	// The working encoder fails mid-stream: the stream ends with its error.
+	working[0].fail(errors.New("GPU reset"))
+	deadline := time.Now().Add(3 * time.Second)
+	for st.Err() == nil && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if st.Err() == nil || !strings.Contains(st.Err().Error(), "GPU reset") {
+		t.Fatalf("stream error %v", st.Err())
+	}
+	st2, err := b.StartStream(ctx, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st2.Close()
+	if len(working) != 2 {
+		t.Errorf("second stream did not use the next encoder: %d opened", len(working))
+	}
+	if usable := encoders.Usable(); len(usable) != 1 || usable[0].Name != "second-working" {
+		t.Errorf("usable %v", usable)
+	}
+
+	all := gst.NewEncoders([]gst.Factory{{Name: "broken", New: func(gst.EncoderOptions) (gst.Encoder, error) { return nil, errors.New("no device") }}})
+	if _, err := NewBackend(&X11{c: x.c, done: make(chan struct{}), encoders: all, width: 640, height: 480}).StartStream(ctx, opts); !errors.Is(err, gst.ErrAllFailed) || !strings.Contains(err.Error(), "no device") {
+		t.Errorf("all failing: %v", err)
 	}
 }
