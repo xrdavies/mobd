@@ -35,11 +35,12 @@ func (f *Fake) Create(dir string) error {
 	if err != nil {
 		return err
 	}
-	p := f.root
-	for _, part := range strings.Split(rel, string(filepath.Separator)) {
-		if p = filepath.Join(p, part); part == "." {
-			continue
-		}
+	p, parts := f.root, []string{"."}
+	if rel != "." {
+		parts = append(parts, strings.Split(rel, string(filepath.Separator))...)
+	}
+	for _, part := range parts {
+		p = filepath.Join(p, part)
 		if err := f.mkdir(p); err != nil && !os.IsExist(err) {
 			return err
 		}

@@ -1,0 +1,300 @@
+//go:build linux
+
+// Package manager gives each session (conversation) its own virtual desktop on Linux: an Xvfb
+// display with a session bus and openbox, in a systemd scope of its own (docs/linux-design.md).
+package manager
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"regexp"
+	"slices"
+	"strconv"
+	"sync"
+	"time"
+
+	"github.com/xrdavies/mobd/internal/cgroup"
+	"github.com/xrdavies/mobd/internal/desktop"
+	"github.com/xrdavies/mobd/internal/proc"
+	"github.com/xrdavies/mobd/internal/sysd"
+)
+
+// startTimeout bounds bringing a desktop up.
+const startTimeout = 15 * time.Second
+
+type Options struct {
+	DataDir     string // <dataDir>/desktops
+	RuntimeDir  string // $XDG_RUNTIME_DIR/mobd
+	Size        [2]int // desktopSize, points
+	Scale       int    // desktopScale
+	Layout      string // desktopKeyboardLayout
+	DisplayBase int    // desktopDisplayBase
+	Version     string // mobd's, recorded with each desktop
+	Systemd     sysd.Client
+	Cgroups     cgroup.FS
+	Spawner     proc.Spawner
+}
+
+// Manager implements desktop.Provider with one desktop per session.
+type Manager struct {
+	opts Options
+
+	mu    sync.Mutex // guards desks and subs; never held across slow work
+	desks map[string]*desk
+	subs  []func(desktop.Event)
+
+	events   chan desktop.Event
+	quit     chan struct{}
+	quitOnce sync.Once
+
+	// Replaced in tests.
+	tmp          string // where X servers keep locks and sockets
+	look         func(string) (string, error)
+	xready       func(ctx context.Context, display int, cookie []byte) error
+	busReady     func(ctx context.Context, path string) error
+	kill         func(pid int) error
+	now          func() time.Time
+	startTimeout time.Duration
+}
+
+var _ desktop.Provider = (*Manager)(nil)
+
+// New prepares the manager; it starts no processes.
+func New(opts Options) (*Manager, error) {
+	if opts.Systemd == nil || opts.Cgroups == nil || opts.Spawner == nil {
+		return nil, errors.New("desktop manager: Systemd, Cgroups and Spawner are required")
+	}
+	if opts.Size[0] <= 0 || opts.Size[1] <= 0 || opts.Scale <= 0 || opts.DisplayBase <= 0 {
+		return nil, fmt.Errorf("desktop manager: bad size %v, scale %d or display base %d", opts.Size, opts.Scale, opts.DisplayBase)
+	}
+	for _, dir := range []string{opts.DataDir, opts.RuntimeDir} {
+		if !filepath.IsAbs(dir) {
+			return nil, fmt.Errorf("desktop manager: %q is not an absolute directory", dir)
+		}
+		if err := os.MkdirAll(dir, 0700); err != nil {
+			return nil, err
+		}
+	}
+	m := &Manager{
+		opts: opts, desks: map[string]*desk{},
+		events: make(chan desktop.Event, 64), quit: make(chan struct{}),
+		tmp: "/tmp", look: exec.LookPath, busReady: dialReady, kill: killPID,
+		now: time.Now, startTimeout: startTimeout,
+	}
+	m.xready = func(ctx context.Context, n int, cookie []byte) error { return xHandshake(ctx, m.tmp, n, cookie) }
+	go m.deliver()
+	return m, nil
+}
+
+// RuntimeDir is where the manager keeps sockets and cookies: $XDG_RUNTIME_DIR/mobd, else
+// <fallback>/run.
+func RuntimeDir(fallback string) string {
+	if dir := os.Getenv("XDG_RUNTIME_DIR"); dir != "" {
+		return filepath.Join(dir, "mobd")
+	}
+	return filepath.Join(fallback, "run")
+}
+
+// Session IDs are hex (task.newID); anything else never names a unit or a directory.
+var sessionID = regexp.MustCompile(`^[0-9a-f]{1,64}$`)
+
+func (m *Manager) desk(sid string, create bool) (*desk, error) {
+	if !sessionID.MatchString(sid) {
+		return nil, fmt.Errorf("invalid session id %q", sid)
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	d := m.desks[sid]
+	if d == nil && create {
+		d = &desk{m: m, sid: sid, dir: filepath.Join(m.opts.DataDir, sid), work: make(chan struct{}, 1)}
+		m.desks[sid] = d
+	}
+	return d, nil
+}
+
+// freeDisplay returns the first display from n that no desktop of this manager uses (except
+// self) and nothing else holds, or -1.
+func (m *Manager) freeDisplay(n int, self *desk) int {
+	m.mu.Lock()
+	used := map[int]bool{}
+	for _, d := range m.desks {
+		if d == self {
+			continue
+		}
+		switch r := d.record(); r.State {
+		case "", desktop.StateClosed, desktop.StateFailed:
+		default:
+			used[r.Display] = true
+		}
+	}
+	m.mu.Unlock()
+	for end := n + maxDisplayTries; n < end; n++ {
+		if !used[n] && displayFree(m.tmp, n) {
+			return n
+		}
+	}
+	return -1
+}
+
+func (m *Manager) publish(e desktop.Event) {
+	select {
+	case m.events <- e:
+	default: // subscribers are behind; they reload with GET /desktops
+	}
+}
+
+func (m *Manager) deliver() {
+	for {
+		select {
+		case e := <-m.events:
+			m.mu.Lock()
+			subs := slices.Clone(m.subs)
+			m.mu.Unlock()
+			for _, f := range subs {
+				f(e)
+			}
+		case <-m.quit:
+			return
+		}
+	}
+}
+
+// desktop.Provider
+
+func (m *Manager) PerSession() bool { return true }
+
+func (m *Manager) Get(sid string) (desktop.Desktop, error) {
+	d, err := m.desk(sid, false)
+	if err != nil {
+		return nil, err
+	}
+	if d == nil {
+		return nil, desktop.ErrNoDesktop
+	}
+	switch d.State() {
+	case "", desktop.StateClosed, desktop.StateFailed:
+		return nil, desktop.ErrNoDesktop
+	}
+	return d, nil
+}
+
+// Ensure starts the session's desktop unless it runs. Concurrent calls wait for one start.
+func (m *Manager) Ensure(ctx context.Context, sid, why string) (desktop.Desktop, error) {
+	d, err := m.desk(sid, true)
+	if err != nil {
+		return nil, err
+	}
+	if err := d.lock(ctx); err != nil {
+		return nil, err
+	}
+	defer d.unlock()
+	switch d.State() {
+	case desktop.StateRunning:
+		return d, nil
+	case desktop.StateAsleep, desktop.StateWaking:
+		return nil, errors.New("waking a desktop is not supported yet")
+	}
+	if err := d.start(ctx); err != nil {
+		return nil, fmt.Errorf("the conversation's desktop did not start: %w", err)
+	}
+	return d, nil
+}
+
+func (m *Manager) Close(ctx context.Context, sid string, reason desktop.CloseReason) error {
+	d, err := m.desk(sid, false)
+	if err != nil || d == nil {
+		return err
+	}
+	if err := d.lock(ctx); err != nil {
+		return err
+	}
+	defer d.unlock()
+	return d.close(ctx, reason)
+}
+
+func (m *Manager) Remove(ctx context.Context, sid string) error {
+	d, err := m.desk(sid, false)
+	if err != nil {
+		return err
+	}
+	if d != nil {
+		if err := d.lock(ctx); err != nil {
+			return err
+		}
+		defer d.unlock()
+		if err := d.close(ctx, desktop.CloseDeleted); err != nil {
+			return err
+		}
+	}
+	m.mu.Lock()
+	delete(m.desks, sid)
+	m.mu.Unlock()
+	return os.RemoveAll(filepath.Join(m.opts.DataDir, sid))
+}
+
+// List returns the desktops that are not closed.
+func (m *Manager) List() []desktop.Info {
+	m.mu.Lock()
+	desks := make([]*desk, 0, len(m.desks))
+	for _, d := range m.desks {
+		desks = append(desks, d)
+	}
+	m.mu.Unlock()
+	var out []desktop.Info
+	for _, d := range desks {
+		if info := d.Info(); info.State != "" && info.State != desktop.StateClosed {
+			out = append(out, info)
+		}
+	}
+	return out
+}
+
+// Resources: the memory and disk guard arrives in a later step.
+func (m *Manager) Resources() desktop.Resources { return desktop.Resources{} }
+
+func (m *Manager) Subscribe(f func(desktop.Event)) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.subs = append(m.subs, f)
+}
+
+// Shutdown stops delivering events; desktops keep running for the next mobd.
+func (m *Manager) Shutdown() { m.quitOnce.Do(func() { close(m.quit) }) }
+
+// Reserve always admits the turn for now; limits arrive with turn dispatch.
+func (m *Manager) Reserve(sid string) (desktop.Reservation, desktop.QueueReason, bool) {
+	return reservation{m: m, sid: sid}, "", true
+}
+
+type reservation struct {
+	m   *Manager
+	sid string
+}
+
+// Turn returns the session's display, bus and the turn/ cgroup for the runner.
+func (r reservation) Turn(desktop.Desktop) (desktop.TurnEnv, error) {
+	d, err := r.m.desk(r.sid, false)
+	if err != nil {
+		return desktop.TurnEnv{}, err
+	}
+	if d == nil {
+		return desktop.TurnEnv{}, desktop.ErrNoDesktop
+	}
+	rec := d.record()
+	if rec.State != desktop.StateRunning {
+		return desktop.TurnEnv{}, desktop.ErrNoDesktop
+	}
+	return desktop.TurnEnv{
+		Env: []string{
+			"DISPLAY=:" + strconv.Itoa(rec.Display), "XAUTHORITY=" + rec.XAuthority,
+			"DBUS_SESSION_BUS_ADDRESS=" + rec.Bus,
+		},
+		Cgroup: filepath.Join(r.m.opts.Cgroups.Path(rec.Cgroup), "turn"),
+	}, nil
+}
+
+func (reservation) Release() {}

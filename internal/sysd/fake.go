@@ -74,7 +74,10 @@ func (f *Fake) StartScope(_ context.Context, unit string, pids []int, _ string) 
 	f.units[unit] = s
 	f.mu.Unlock()
 	if f.OnStart != nil {
-		return f.OnStart(unit, s.ControlGroup, pids)
+		if err := f.OnStart(unit, s.ControlGroup, pids); err != nil {
+			f.Remove(unit) // a failed start job leaves no unit (CollectMode=inactive-or-failed)
+			return err
+		}
 	}
 	return nil
 }
