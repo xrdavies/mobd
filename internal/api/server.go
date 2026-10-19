@@ -46,10 +46,14 @@ type Server struct {
 	mu      sync.Mutex
 	cancels map[string]context.CancelFunc
 	// tokens authenticate `mobd mcp` calls from a dispatched turn.
-	tokens  map[string]string
-	closing bool
-	runs    sync.WaitGroup
-	done    chan struct{}
+	tokens map[string]string
+	// reservations hold each dispatched turn's place on its desktop until the turn ends.
+	reservations map[string]desktop.Reservation
+	// starting marks dispatched turns whose desktop is still starting.
+	starting map[string]bool
+	closing  bool
+	runs     sync.WaitGroup
+	done     chan struct{}
 }
 
 // New serves the given runners; cfg.DefaultRunner (or the first runner) starts
@@ -76,6 +80,7 @@ func New(cfg config.Config, store *task.Store, auth *pairing.Store, desktops des
 		artifacts: artifact.New(filepath.Join(dataDir(cfg), "artifacts")),
 		cancels:   make(map[string]context.CancelFunc), done: make(chan struct{}),
 		tokens: make(map[string]string), waiters: make(map[string]chan struct{}),
+		reservations: make(map[string]desktop.Reservation), starting: make(map[string]bool),
 	}
 	if desktops == nil {
 		desktops = desktop.Shared(desktop.Current())
@@ -100,6 +105,13 @@ func New(cfg config.Config, store *task.Store, auth *pairing.Store, desktops des
 	}
 	s.streams = streams
 	store.SetNotifier(s.onChange)
+	// A desktop closing, failing or finishing its start, and memory or disk changing, can let
+	// a waiting turn through.
+	desktops.Subscribe(func(desktop.Event) {
+		s.mu.Lock()
+		s.scheduleLocked()
+		s.mu.Unlock()
+	})
 	return s
 }
 
@@ -228,24 +240,49 @@ func (s *Server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 	}
 	s.scheduleLocked()
 	s.mu.Unlock()
+	// The response says why the new turn waits, as set by scheduling.
+	if fresh, err := s.store.Get(t.ID); err == nil && fresh.Status == task.StatusQueued {
+		t.QueueReason = fresh.QueueReason
+	}
 	writeJSON(w, http.StatusCreated, t)
 }
 
-// scheduleLocked starts queued turns in FIFO order while desktop slots are free.
-// A dispatched task has a cancel func even before it reports running. Caller holds mu.
+// scheduleLocked starts queued turns in FIFO order while slots are free and their desktop can
+// be had; a turn held by its desktop (limit, memory, disk) lets later turns of other sessions
+// pass. Every waiting turn gets its queue reason. A dispatched task has a cancel func even
+// before it reports running. Caller holds mu.
 func (s *Server) scheduleLocked() {
 	limit := max(s.cfg.MaxRunning, 1)
-	for !s.closing && len(s.cancels) < limit {
-		next := s.store.NextQueued(func(id string) bool { return s.cancels[id] != nil })
-		if next == nil {
-			return
+	reasons := map[string]string{}
+	for _, t := range s.store.QueuedTasks() {
+		if s.closing {
+			break
+		}
+		if s.cancels[t.ID] != nil {
+			if s.starting[t.ID] {
+				reasons[t.ID] = string(desktop.WaitStarting)
+			}
+			continue
+		}
+		if len(s.cancels) >= limit {
+			reasons[t.ID] = string(desktop.WaitSlots)
+			continue
+		}
+		r, why, ok := s.desktops.Reserve(t.SessionID)
+		if !ok {
+			reasons[t.ID] = string(why)
+			continue
 		}
 		ctx, cancel := context.WithCancel(context.Background())
-		s.cancels[next.ID] = cancel
-		s.tokens[next.ID] = newToken()
+		s.cancels[t.ID], s.tokens[t.ID], s.reservations[t.ID] = cancel, newToken(), r
+		if s.desktops.PerSession() {
+			s.starting[t.ID] = true
+			reasons[t.ID] = string(desktop.WaitStarting)
+		}
 		s.runs.Add(1)
-		go s.runTask(ctx, next.ID)
+		go s.runTask(ctx, t.ID)
 	}
+	s.store.SetQueueReasons(reasons)
 }
 
 func (s *Server) handleQueue(w http.ResponseWriter, r *http.Request) {
@@ -276,6 +313,10 @@ func (s *Server) handlePatchSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	session, err := s.store.UpdateSession(r.PathValue("id"), patch)
+	if err == nil && patch.Archived != nil && *patch.Archived && s.desktops.PerSession() {
+		// An archived conversation keeps no desktop; its running turn stops first.
+		s.closeDesktop(session.ID, session.ActiveTaskID, desktop.CloseArchived)
+	}
 	switch {
 	case errors.Is(err, task.ErrNotFound):
 		writeErr(w, http.StatusNotFound, "session not found")
@@ -289,9 +330,17 @@ func (s *Server) handlePatchSession(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
-	artifacts, err := s.store.DeleteSession(r.PathValue("id"))
+	id := r.PathValue("id")
+	artifacts, err := s.store.DeleteSession(id)
 	if err == nil {
 		s.artifacts.Delete(artifacts...)
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			if err := s.desktops.Remove(ctx, id); err != nil {
+				log.Printf("remove desktop of deleted session %s: %v", id, err)
+			}
+		}()
 	}
 	switch {
 	case errors.Is(err, task.ErrNotFound):
@@ -342,15 +391,7 @@ func (s *Server) handleGetTask(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleCancelTask(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	s.mu.Lock()
-	t, err := s.store.CanCancel(id)
-	if err == nil {
-		if cancel := s.cancels[id]; cancel != nil {
-			cancel()
-		} else {
-			// Still waiting for the desktop: nothing to stop, finish it now.
-			t, err = s.store.UpdateStatus(id, task.StatusCancelled, "cancelled")
-		}
-	}
+	t, err := s.cancelLocked(id)
 	s.mu.Unlock()
 	if err != nil {
 		code := http.StatusConflict
@@ -362,6 +403,39 @@ func (s *Server) handleCancelTask(w http.ResponseWriter, r *http.Request) {
 	}
 	// Keep the session busy until the process and its output readers have stopped.
 	writeJSON(w, http.StatusAccepted, t)
+}
+
+// cancelLocked stops a dispatched turn, or finishes a queued one at once. Caller holds mu.
+func (s *Server) cancelLocked(id string) (*task.Task, error) {
+	t, err := s.store.CanCancel(id)
+	if err != nil {
+		return nil, err
+	}
+	if cancel := s.cancels[id]; cancel != nil {
+		cancel()
+		return t, nil
+	}
+	// Still waiting for a slot or its desktop: nothing to stop, finish it now.
+	return s.store.UpdateStatus(id, task.StatusCancelled, "cancelled")
+}
+
+// closeDesktop cancels the session's active turn, if any, then closes its desktop in the
+// background (the owner's decision: closing never waits for a turn to finish).
+func (s *Server) closeDesktop(sessionID, activeTask string, reason desktop.CloseReason) {
+	if activeTask != "" {
+		s.mu.Lock()
+		if _, err := s.cancelLocked(activeTask); err != nil && !errors.Is(err, task.ErrNotCancellable) {
+			log.Printf("cancel task %s before closing its desktop: %v", activeTask, err)
+		}
+		s.mu.Unlock()
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		if err := s.desktops.Close(ctx, sessionID, reason); err != nil {
+			log.Printf("close desktop of session %s: %v", sessionID, err)
+		}
+	}()
 }
 
 func (s *Server) handleTaskEvents(w http.ResponseWriter, r *http.Request) {
@@ -490,19 +564,32 @@ func (s *Server) runTask(ctx context.Context, id string) {
 	defer func() {
 		s.mu.Lock()
 		s.cancels[id]()
+		if r := s.reservations[id]; r != nil {
+			r.Release()
+		}
 		delete(s.cancels, id)
 		delete(s.tokens, id)
+		delete(s.reservations, id)
+		delete(s.starting, id)
 		s.scheduleLocked()
 		s.mu.Unlock()
 		s.runs.Done()
 	}()
-	t, err := s.store.UpdateStatus(id, task.StatusRunning, "")
+	t, err := s.store.Get(id)
+	var env desktop.TurnEnv
+	if err == nil {
+		// The turn stays queued ("desktopStarting") until its desktop runs.
+		env, err = s.turnDesktop(ctx, t)
+	}
+	if err == nil {
+		t, err = s.store.UpdateStatus(id, task.StatusRunning, "")
+	}
 	if err == nil {
 		rn, ok := s.runners.Get(t.Runner)
 		if !ok {
 			err = fmt.Errorf("runner %q is not enabled on this mobd", t.Runner)
 		} else {
-			err = rn.Start(ctx, t, s.runOptions(t), func(ev task.Event) error { return s.store.AppendEvent(id, ev) })
+			err = rn.Start(ctx, t, s.runOptions(t, env), func(ev task.Event) error { return s.store.AppendEvent(id, ev) })
 		}
 	}
 	if t != nil {
@@ -520,6 +607,21 @@ func (s *Server) runTask(ctx context.Context, id string) {
 			log.Printf("report task %s failure: %v", id, emitErr)
 		}
 	}
+}
+
+// turnDesktop starts or wakes the turn's desktop and returns how the runner reaches it.
+func (s *Server) turnDesktop(ctx context.Context, t *task.Task) (desktop.TurnEnv, error) {
+	s.mu.Lock()
+	r := s.reservations[t.ID]
+	s.mu.Unlock()
+	d, err := s.desktops.Ensure(ctx, t.SessionID, "turn")
+	s.mu.Lock()
+	delete(s.starting, t.ID)
+	s.mu.Unlock()
+	if err != nil {
+		return desktop.TurnEnv{}, err
+	}
+	return r.Turn(d)
 }
 
 // Close cancels active turns, waits for their final state to be saved, and

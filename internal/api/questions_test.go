@@ -6,11 +6,13 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/xrdavies/mobd/internal/config"
+	"github.com/xrdavies/mobd/internal/desktop"
 	"github.com/xrdavies/mobd/internal/runner/codex"
 	"github.com/xrdavies/mobd/internal/task"
 )
@@ -176,7 +178,10 @@ func TestRunOptionsCarryAskSettings(t *testing.T) {
 	s := newTestServer(t, cfg, task.NewStore(), codex.New(cfg))
 	t.Cleanup(s.Close)
 	s.tokens["t1"] = "tok"
-	opts := s.runOptions(&task.Task{ID: "t1"})
+	opts := s.runOptions(&task.Task{ID: "t1"}, desktop.TurnEnv{Env: []string{"DISPLAY=:101"}, Cgroup: "/sys/fs/cgroup/x/turn", OOMScoreAdj: 300})
+	if !slices.Equal(opts.Env, []string{"DISPLAY=:101"}) || opts.Cgroup != "/sys/fs/cgroup/x/turn" || opts.OOMScoreAdj != 300 {
+		t.Fatalf("turn environment not passed: %+v", opts)
+	}
 	if opts.MCPEnv["MOB_API"] != "http://127.0.0.1:9090" || opts.MCPEnv["MOB_TASK_TOKEN"] != "tok" ||
 		opts.ToolTimeout != 11*time.Minute || !strings.Contains(opts.Instructions, "request_approval") {
 		t.Fatalf("%+v", opts)

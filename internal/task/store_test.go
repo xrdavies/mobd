@@ -374,3 +374,40 @@ func TestQuestionsLifecycleAndRestart(t *testing.T) {
 		t.Fatalf("delete %v", err)
 	}
 }
+
+func TestQueueReasons(t *testing.T) {
+	s := NewStore()
+	a, _ := s.Create("a")
+	b, _ := s.Create("b")
+	var mu sync.Mutex
+	var notified []string
+	s.SetNotifier(func(c Change) {
+		if c.Task != nil {
+			mu.Lock()
+			notified = append(notified, c.Task.ID+"="+c.Task.QueueReason)
+			mu.Unlock()
+		}
+	})
+	if q := s.QueuedTasks(); len(q) != 2 || q[0].ID != a.ID || q[1].ID != b.ID {
+		t.Fatalf("QueuedTasks %+v", q)
+	}
+	s.SetQueueReasons(map[string]string{a.ID: "desktopStarting", b.ID: "slots"})
+	s.SetQueueReasons(map[string]string{a.ID: "desktopStarting", b.ID: "slots"}) // no change, no events
+	if got, _ := s.Get(b.ID); got.QueueReason != "slots" {
+		t.Errorf("reason on read: %+v", got)
+	}
+	s.SetQueueReason(b.ID, "memory")
+	if _, err := s.UpdateStatus(a.ID, StatusRunning, ""); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.Get(a.ID); got.QueueReason != "" {
+		t.Errorf("running task keeps its reason: %+v", got)
+	}
+	s.SetQueueReasons(nil)
+	want := []string{a.ID + "=desktopStarting", b.ID + "=slots", b.ID + "=memory", a.ID + "=", b.ID + "="}
+	mu.Lock()
+	defer mu.Unlock()
+	if strings.Join(notified, " ") != strings.Join(want, " ") {
+		t.Errorf("notified %q\nwant %q", notified, want)
+	}
+}

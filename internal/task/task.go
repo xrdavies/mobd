@@ -44,6 +44,9 @@ type Task struct {
 	Waiting bool `json:"waiting,omitempty"`
 	// QueuePosition is computed on read (1-based) while the task waits for the desktop.
 	QueuePosition int `json:"queuePosition,omitempty"`
+	// QueueReason says what a queued task waits for: "slots", "desktops", "memory", "disk" or
+	// "desktopStarting". Held in memory by the scheduler, never persisted.
+	QueueReason string `json:"queueReason,omitempty"`
 }
 
 // Usage is the token accounting reported when a turn completes.

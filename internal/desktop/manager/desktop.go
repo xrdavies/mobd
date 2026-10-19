@@ -189,6 +189,16 @@ func (d *desk) start(ctx context.Context) (err error) {
 		}
 	}()
 
+	// A scope of this session left by an earlier mobd would block the new one.
+	if st, err := m.opts.Systemd.UnitState(ctx, rec.Unit); err != nil {
+		return err
+	} else if st.ActiveState != "inactive" {
+		log.Printf("desktop %s: stopping %s left by an earlier mobd (%s)", d.sid, rec.Unit, st.ActiveState)
+		if err := m.opts.Systemd.StopUnit(ctx, rec.Unit); err != nil {
+			return err
+		}
+	}
+
 	// The X server, on the first free display; losing a race for one moves on to the next.
 	var xvfb *child
 	n := m.opts.DisplayBase

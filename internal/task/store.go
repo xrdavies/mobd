@@ -74,6 +74,8 @@ type Store struct {
 	logs    map[string]int
 	changed map[string]chan struct{}
 	notify  func(Change)
+	// reasons are the scheduler's queue reasons by task ID (SetQueueReasons).
+	reasons map[string]string
 }
 
 // SetNotifier registers a callback invoked under the store lock after each
@@ -118,6 +120,7 @@ func NewStore() *Store {
 			Activities: make(map[string][]Activity),
 		},
 		events: make(map[string][]Event), logs: make(map[string]int), changed: make(map[string]chan struct{}),
+		reasons: make(map[string]string),
 	}
 }
 
@@ -242,16 +245,57 @@ func (s *Store) Queue() (running, queued []*Task) {
 	return running, queued
 }
 
-// NextQueued returns the oldest queued task the caller has not dispatched yet.
-func (s *Store) NextQueued(dispatched func(id string) bool) *Task {
+// QueuedTasks lists queued tasks in dispatch (FIFO) order, including dispatched ones that have
+// not reported running yet (their desktop is starting).
+func (s *Store) QueuedTasks() []*Task {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+	var out []*Task
 	for _, id := range s.data.Order {
-		if t := s.data.Tasks[id]; t.Status == StatusQueued && !dispatched(id) {
-			return clone(t)
+		if t := s.data.Tasks[id]; t.Status == StatusQueued {
+			out = append(out, clone(t))
 		}
 	}
-	return nil
+	return out
+}
+
+// SetQueueReasons replaces what queued tasks wait for (task ID → reason; missing means none)
+// and sends task events for the tasks whose reason changed.
+func (s *Store) SetQueueReasons(reasons map[string]string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.setReasonsLocked(reasons)
+}
+
+// SetQueueReason sets one task's reason, keeping the others.
+func (s *Store) SetQueueReason(id, reason string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	reasons := maps.Clone(s.reasons)
+	reasons[id] = reason
+	s.setReasonsLocked(reasons)
+}
+
+func (s *Store) setReasonsLocked(reasons map[string]string) {
+	var changed []string
+	for _, id := range s.data.Order {
+		t := s.data.Tasks[id]
+		want := ""
+		if t.Status == StatusQueued {
+			want = reasons[id]
+		}
+		if s.reasons[id] != want {
+			changed = append(changed, id)
+		}
+		if want == "" {
+			delete(s.reasons, id)
+		} else {
+			s.reasons[id] = want
+		}
+	}
+	for _, id := range changed {
+		s.notifyLocked(nil, s.data.Tasks[id])
+	}
 }
 
 // ListSessions returns summaries (no messages): pinned first, then most recent.
@@ -401,6 +445,7 @@ func (s *Store) UpdateStatus(id string, status Status, errMsg string) (*Task, er
 	t := clone(stored)
 	t.Status, t.UpdatedAt, t.EventID = status, time.Now().UTC(), t.EventID+1
 	t.QueuePosition = 0
+	delete(s.reasons, id)
 	if status.Terminal() {
 		t.Waiting = false
 	}
@@ -762,6 +807,9 @@ func (s *Store) queuePositions() map[string]int {
 func (s *Store) view(t *Task, positions map[string]int) *Task {
 	c := clone(t)
 	c.QueuePosition = positions[t.ID]
+	if t.Status == StatusQueued {
+		c.QueueReason = s.reasons[t.ID]
+	}
 	return c
 }
 

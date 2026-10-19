@@ -249,3 +249,15 @@ func defaultMaxRunning(cfg Config) int {
 	}
 	return 1
 }
+
+// DesktopDimensions returns desktopSize as width and height in points; 0, 0 if it is invalid
+// (Load validates it).
+func (c Config) DesktopDimensions() (width, height int) {
+	m := sizePattern.FindStringSubmatch(c.DesktopSize)
+	if m == nil {
+		return 0, 0
+	}
+	width, _ = strconv.Atoi(m[1])
+	height, _ = strconv.Atoi(m[2])
+	return width, height
+}

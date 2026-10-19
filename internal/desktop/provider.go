@@ -193,6 +193,25 @@ func (shared) Resources() Resources                                      { retur
 func (shared) Subscribe(func(Event))                                     {}
 func (shared) Shutdown()                                                 {}
 
+// Unavailable is a per-session provider that cannot start desktops, for example Linux without
+// the systemd user manager: every turn fails with err instead of running without its desktop.
+func Unavailable(err error) Provider { return noDesktops{err} }
+
+type noDesktops struct{ err error }
+
+func (noDesktops) PerSession() bool            { return true }
+func (noDesktops) Get(string) (Desktop, error) { return nil, ErrNoDesktop }
+func (noDesktops) Reserve(string) (Reservation, QueueReason, bool) {
+	return noReservation{}, "", true
+}
+func (u noDesktops) Ensure(context.Context, string, string) (Desktop, error) { return nil, u.err }
+func (noDesktops) Close(context.Context, string, CloseReason) error          { return nil }
+func (noDesktops) Remove(context.Context, string) error                      { return nil }
+func (noDesktops) List() []Info                                              { return nil }
+func (noDesktops) Resources() Resources                                      { return Resources{} }
+func (noDesktops) Subscribe(func(Event))                                     {}
+func (noDesktops) Shutdown()                                                 {}
+
 type noReservation struct{}
 
 func (noReservation) Turn(Desktop) (TurnEnv, error) { return TurnEnv{}, nil }

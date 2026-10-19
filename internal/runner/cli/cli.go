@@ -34,6 +34,10 @@ type Command struct {
 	Dir   string
 	Env   []string
 	Stdin io.Reader
+	// Cgroup is the cgroup directory the process starts in (Linux); "" keeps mobd's.
+	Cgroup string
+	// OOMScoreAdj is written for the process after it starts (Linux); 0 leaves it.
+	OOMScoreAdj int
 }
 
 // MaxLine bounds one stdout/stderr line (agents print large JSON events).
@@ -50,6 +54,13 @@ func Run(ctx context.Context, c Command, p Parser, emit runner.EmitFunc) error {
 	// shortcut: hard daemon crashes need an external process supervisor; graceful shutdown cancels this group.
 	group := proc.NewGroup(cmd)
 	defer group.Close()
+	if c.Cgroup != "" {
+		dir, err := proc.IntoCgroup(cmd, c.Cgroup)
+		if err != nil {
+			return fmt.Errorf("start %s: %w", c.Name, err)
+		}
+		defer dir.Close()
+	}
 	cmd.Cancel = group.Kill
 	cmd.WaitDelay = 3 * time.Second
 	stdout, stdoutWriter := io.Pipe()
@@ -75,6 +86,13 @@ func Run(ctx context.Context, c Command, p Parser, emit runner.EmitFunc) error {
 		_ = cmd.Process.Kill()
 		_ = cmd.Wait()
 		return fmt.Errorf("start %s: %w", c.Name, err)
+	}
+	if c.OOMScoreAdj != 0 {
+		if err := proc.SetOOMScoreAdj(cmd.Process.Pid, c.OOMScoreAdj); err != nil {
+			_ = group.Kill()
+			_ = cmd.Wait()
+			return fmt.Errorf("start %s: %w", c.Name, err)
+		}
 	}
 
 	var wg sync.WaitGroup

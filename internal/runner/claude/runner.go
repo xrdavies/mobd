@@ -63,13 +63,14 @@ func (r *Runner) Start(ctx context.Context, t *task.Task, opts runner.Options, e
 	if err != nil {
 		return err
 	}
-	env := os.Environ()
+	env := append(os.Environ(), opts.Env...)
 	if opts.ToolTimeout > 0 {
 		// Lets ask_user block while the user decides.
 		env = append(env, fmt.Sprintf("MCP_TOOL_TIMEOUT=%d", opts.ToolTimeout.Milliseconds()))
 	}
 	return cli.Run(ctx, cli.Command{
 		Name: "claude", Path: path, Args: r.buildArgs(t, opts), Dir: r.cfg.ClaudeWorkDir, Env: env, Stdin: bytes.NewReader(stdin),
+		Cgroup: opts.Cgroup, OOMScoreAdj: opts.OOMScoreAdj,
 	}, newParser(emit, opts.SaveImage), emit)
 }
 

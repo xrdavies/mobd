@@ -184,7 +184,7 @@ func (s *Server) turnOptions(req task.CreateRequest) (task.TurnOptions, string, 
 }
 
 // runOptions resolves attachments to files and lets the runner save screenshots.
-func (s *Server) runOptions(t *task.Task) runner.Options {
+func (s *Server) runOptions(t *task.Task, env desktop.TurnEnv) runner.Options {
 	s.mu.Lock()
 	token := s.tokens[t.ID]
 	s.mu.Unlock()
@@ -197,6 +197,7 @@ func (s *Server) runOptions(t *task.Task) runner.Options {
 		Ask: func(ctx context.Context, kind, text, details string) (task.Question, error) {
 			return s.ask(ctx, t.ID, askRequest{Kind: kind, Text: text, Details: details})
 		},
+		Env: env.Env, Cgroup: env.Cgroup, OOMScoreAdj: env.OOMScoreAdj,
 	}
 	// mobd mcp drives the desktop through mobd serve: the conversation's own desktop on Linux,
 	// and on macOS the process holding the Screen Recording grant (a mobd mcp started by an

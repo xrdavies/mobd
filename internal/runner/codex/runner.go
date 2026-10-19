@@ -67,7 +67,8 @@ func (r *Runner) Start(ctx context.Context, t *task.Task, opts runner.Options, e
 	}
 	return cli.Run(ctx, cli.Command{
 		Name: "codex", Path: path, Args: r.buildArgs(t, opts),
-		Dir: r.cfg.CodexWorkDir, Env: os.Environ(), Stdin: strings.NewReader(t.Prompt),
+		Dir: r.cfg.CodexWorkDir, Env: append(os.Environ(), opts.Env...), Stdin: strings.NewReader(t.Prompt),
+		Cgroup: opts.Cgroup, OOMScoreAdj: opts.OOMScoreAdj,
 	}, newParser(emit, opts.SaveImage), emit)
 }
 

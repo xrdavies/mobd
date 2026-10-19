@@ -235,7 +235,12 @@ func serve(cfg config.Config) error {
 	if _, err := runner.NewRegistry(cfg.DefaultRunner, runners...); err != nil {
 		return fmt.Errorf("defaultRunner: %w", err)
 	}
-	srv := api.New(cfg, store, auth, nil, runners...)
+	desktops := newProvider(cfg)
+	if desktops != nil {
+		// Desktops outlive mobd; the next one finds them.
+		defer desktops.Shutdown()
+	}
+	srv := api.New(cfg, store, auth, desktops, runners...)
 
 	httpSrv := &http.Server{
 		Addr:              cfg.ListenAddr,

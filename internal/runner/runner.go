@@ -34,6 +34,13 @@ type Options struct {
 	// Ask shows an approval or question to the user and blocks until it is
 	// settled, for runners whose agent asks in-process (Codex app-server).
 	Ask AskFunc
+	// Env is appended to mobd's environment for the agent (the session's DISPLAY, bus...);
+	// later entries win.
+	Env []string
+	// Cgroup is the cgroup directory the agent starts in; "" keeps mobd's.
+	Cgroup string
+	// OOMScoreAdj is set on the agent process (and inherited by what it starts); 0 leaves it.
+	OOMScoreAdj int
 }
 
 // AskFunc asks the user; kind is task.QuestionAsk or task.QuestionApproval.

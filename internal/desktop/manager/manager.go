@@ -33,6 +33,7 @@ type Options struct {
 	Scale       int    // desktopScale
 	Layout      string // desktopKeyboardLayout
 	DisplayBase int    // desktopDisplayBase
+	MaxDesktops int    // maxDesktops; 0 means no limit
 	Version     string // mobd's, recorded with each desktop
 	Systemd     sysd.Client
 	Cgroups     cgroup.FS
@@ -43,9 +44,10 @@ type Options struct {
 type Manager struct {
 	opts Options
 
-	mu    sync.Mutex // guards desks and subs; never held across slow work
-	desks map[string]*desk
-	subs  []func(desktop.Event)
+	mu       sync.Mutex // guards desks, reserved and subs; never held across slow work
+	desks    map[string]*desk
+	reserved map[*reservation]bool
+	subs     []func(desktop.Event)
 
 	events   chan desktop.Event
 	quit     chan struct{}
@@ -80,7 +82,7 @@ func New(opts Options) (*Manager, error) {
 		}
 	}
 	m := &Manager{
-		opts: opts, desks: map[string]*desk{},
+		opts: opts, desks: map[string]*desk{}, reserved: map[*reservation]bool{},
 		events: make(chan desktop.Event, 64), quit: make(chan struct{}),
 		tmp: "/tmp", look: exec.LookPath, busReady: dialReady, kill: killPID,
 		now: time.Now, startTimeout: startTimeout,
@@ -182,7 +184,9 @@ func (m *Manager) Get(sid string) (desktop.Desktop, error) {
 	return d, nil
 }
 
-// Ensure starts the session's desktop unless it runs. Concurrent calls wait for one start.
+// Ensure starts the session's desktop unless it runs. Concurrent calls wait for one start. A
+// caller that gives up (ctx) stops waiting, but the start goes on to its own timeout, so a
+// cancelled turn never leaves a half-started desktop.
 func (m *Manager) Ensure(ctx context.Context, sid, why string) (desktop.Desktop, error) {
 	d, err := m.desk(sid, true)
 	if err != nil {
@@ -191,17 +195,28 @@ func (m *Manager) Ensure(ctx context.Context, sid, why string) (desktop.Desktop,
 	if err := d.lock(ctx); err != nil {
 		return nil, err
 	}
-	defer d.unlock()
 	switch d.State() {
 	case desktop.StateRunning:
+		d.unlock()
 		return d, nil
 	case desktop.StateAsleep, desktop.StateWaking:
+		d.unlock()
 		return nil, errors.New("waking a desktop is not supported yet")
 	}
-	if err := d.start(ctx); err != nil {
-		return nil, fmt.Errorf("the conversation's desktop did not start: %w", err)
+	result := make(chan error, 1)
+	go func() {
+		defer d.unlock()
+		result <- d.start(context.Background())
+	}()
+	select {
+	case err := <-result:
+		if err != nil {
+			return nil, fmt.Errorf("the conversation's desktop did not start: %w", err)
+		}
+		return d, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
 	}
-	return d, nil
 }
 
 func (m *Manager) Close(ctx context.Context, sid string, reason desktop.CloseReason) error {
@@ -265,9 +280,28 @@ func (m *Manager) Subscribe(f func(desktop.Event)) {
 // Shutdown stops delivering events; desktops keep running for the next mobd.
 func (m *Manager) Shutdown() { m.quitOnce.Do(func() { close(m.quit) }) }
 
-// Reserve always admits the turn for now; limits arrive with turn dispatch.
+// Reserve admits a turn whose session already has a desktop; a new desktop waits while
+// maxDesktops are live or starting. The reservation counts as a starting desktop until
+// Release, so turns dispatched together cannot overshoot the limit.
 func (m *Manager) Reserve(sid string) (desktop.Reservation, desktop.QueueReason, bool) {
-	return reservation{m: m, sid: sid}, "", true
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	live := map[string]bool{}
+	for id, d := range m.desks {
+		switch d.State() {
+		case desktop.StateStarting, desktop.StateRunning, desktop.StateAsleep, desktop.StateWaking:
+			live[id] = true
+		}
+	}
+	for r := range m.reserved {
+		live[r.sid] = true
+	}
+	if !live[sid] && m.opts.MaxDesktops > 0 && len(live) >= m.opts.MaxDesktops {
+		return nil, desktop.WaitDesktops, false
+	}
+	r := &reservation{m: m, sid: sid}
+	m.reserved[r] = true
+	return r, "", true
 }
 
 type reservation struct {
@@ -275,8 +309,11 @@ type reservation struct {
 	sid string
 }
 
+// runnerOOMScoreAdj makes the kernel kill a runaway agent before the desktop it works on.
+const runnerOOMScoreAdj = 300
+
 // Turn returns the session's display, bus and the turn/ cgroup for the runner.
-func (r reservation) Turn(desktop.Desktop) (desktop.TurnEnv, error) {
+func (r *reservation) Turn(desktop.Desktop) (desktop.TurnEnv, error) {
 	d, err := r.m.desk(r.sid, false)
 	if err != nil {
 		return desktop.TurnEnv{}, err
@@ -291,10 +328,15 @@ func (r reservation) Turn(desktop.Desktop) (desktop.TurnEnv, error) {
 	return desktop.TurnEnv{
 		Env: []string{
 			"DISPLAY=:" + strconv.Itoa(rec.Display), "XAUTHORITY=" + rec.XAuthority,
-			"DBUS_SESSION_BUS_ADDRESS=" + rec.Bus,
+			"DBUS_SESSION_BUS_ADDRESS=" + rec.Bus, "MOB_DESKTOP=" + d.dir,
 		},
-		Cgroup: filepath.Join(r.m.opts.Cgroups.Path(rec.Cgroup), "turn"),
+		Cgroup:      filepath.Join(r.m.opts.Cgroups.Path(rec.Cgroup), "turn"),
+		OOMScoreAdj: runnerOOMScoreAdj,
 	}, nil
 }
 
-func (reservation) Release() {}
+func (r *reservation) Release() {
+	r.m.mu.Lock()
+	delete(r.m.reserved, r)
+	r.m.mu.Unlock()
+}

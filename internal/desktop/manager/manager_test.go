@@ -289,7 +289,8 @@ func TestStartAndClose(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Contains(env.Env, "DISPLAY=:100") || env.Cgroup != filepath.Join(scope, "turn") {
+	if !slices.Contains(env.Env, "DISPLAY=:100") || !slices.Contains(env.Env, "MOB_DESKTOP="+filepath.Join(f.root, "desktops", sid)) ||
+		env.Cgroup != filepath.Join(scope, "turn") || env.OOMScoreAdj != 300 {
 		t.Errorf("TurnEnv %+v", env)
 	}
 	if again, err := f.m.Ensure(ctx, sid, "turn"); err != nil || again != d {
@@ -330,7 +331,7 @@ func TestStartAndClose(t *testing.T) {
 	if len(f.m.List()) != 0 {
 		t.Errorf("List after close %v", f.m.List())
 	}
-	if !slices.Equal(f.sd.Calls(), []string{"start " + unit, "state " + unit, "stop " + unit}) {
+	if !slices.Equal(f.sd.Calls(), []string{"state " + unit, "start " + unit, "state " + unit, "stop " + unit}) {
 		t.Errorf("systemd calls %q", f.sd.Calls())
 	}
 	if err := f.m.Close(ctx, sid, desktop.CloseUser); err != nil {
@@ -408,8 +409,10 @@ func TestXvfbFailsBeforeScope(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "Xvfb exited: no screens found") {
 		t.Fatalf("Ensure: %v", err)
 	}
-	if len(f.sd.Calls()) != 0 {
-		t.Errorf("systemd calls %q", f.sd.Calls())
+	for _, c := range f.sd.Calls() {
+		if strings.HasPrefix(c, "start ") || strings.HasPrefix(c, "stop ") {
+			t.Errorf("scope touched before Xvfb ran: %q", f.sd.Calls())
+		}
 	}
 }
 
@@ -494,5 +497,90 @@ func TestBadSessionID(t *testing.T) {
 		if _, err := f.m.Ensure(context.Background(), id, "turn"); err == nil {
 			t.Errorf("Ensure(%q): no error", id)
 		}
+	}
+}
+
+func TestReserveLimitsDesktops(t *testing.T) {
+	f := newFixture(t)
+	f.m.opts.MaxDesktops = 2
+	a, b, c := sid[:31]+"1", sid[:31]+"2", sid[:31]+"3"
+	ra, _, ok := f.m.Reserve(a)
+	if !ok {
+		t.Fatal("first refused")
+	}
+	if _, _, ok := f.m.Reserve(b); !ok {
+		t.Fatal("second refused")
+	}
+	// Two reservations count as starting desktops, before any has started.
+	if _, why, ok := f.m.Reserve(c); ok || why != desktop.WaitDesktops {
+		t.Fatalf("third: %v %q", ok, why)
+	}
+	if _, err := f.m.Ensure(context.Background(), a, "turn"); err != nil {
+		t.Fatal(err)
+	}
+	ra.Release()
+	// a's desktop still runs after its turn: a may start another turn, c still waits.
+	if _, _, ok := f.m.Reserve(a); !ok {
+		t.Error("a session with a desktop was refused")
+	}
+	if _, _, ok := f.m.Reserve(c); ok {
+		t.Error("c admitted while a runs and b is reserved")
+	}
+	if err := f.m.Close(context.Background(), a, desktop.CloseUser); err != nil {
+		t.Fatal(err)
+	}
+	// a's second reservation is still held, so closing its desktop frees nothing yet.
+	if _, _, ok := f.m.Reserve(c); ok {
+		t.Error("c admitted while a and b are reserved")
+	}
+}
+
+func TestReleasedReservationFreesTheSlot(t *testing.T) {
+	f := newFixture(t)
+	f.m.opts.MaxDesktops = 1
+	r, _, _ := f.m.Reserve(sid[:31] + "1")
+	if _, _, ok := f.m.Reserve(sid[:31] + "2"); ok {
+		t.Fatal("second admitted")
+	}
+	r.Release()
+	r.Release() // idempotent
+	if _, _, ok := f.m.Reserve(sid[:31] + "2"); !ok {
+		t.Error("slot not freed by Release")
+	}
+}
+
+// A turn cancelled while its desktop starts stops waiting; the start completes anyway.
+func TestEnsureCallerGivesUp(t *testing.T) {
+	f := newFixture(t)
+	slow := make(chan struct{})
+	f.m.xready = func(ctx context.Context, _ int, _ []byte) error {
+		select {
+		case <-slow:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	errs := make(chan error, 1)
+	go func() { _, err := f.m.Ensure(ctx, sid, "turn"); errs <- err }()
+	f.states(t, desktop.StateStarting)
+	cancel()
+	if err := <-errs; !errors.Is(err, context.Canceled) {
+		t.Fatalf("Ensure: %v", err)
+	}
+	close(slow)
+	f.states(t, desktop.StateRunning)
+}
+
+func TestLeftoverScopeIsStopped(t *testing.T) {
+	f := newFixture(t)
+	unit := "mobd-desktop-" + sid + ".scope"
+	f.sd.Set(unit, sysd.UnitState{ActiveState: "active", FreezerState: "running", ControlGroup: f.sd.Slice + "/" + unit})
+	if _, err := f.m.Ensure(context.Background(), sid, "turn"); err != nil {
+		t.Fatal(err)
+	}
+	if calls := f.sd.Calls(); len(calls) < 3 || calls[1] != "stop "+unit || calls[2] != "start "+unit {
+		t.Errorf("systemd calls %q", calls)
 	}
 }
