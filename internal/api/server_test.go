@@ -867,6 +867,10 @@ func TestHealthReadiness(t *testing.T) {
 	dir := t.TempDir()
 	bin := filepath.Join(dir, "codex")
 	_ = os.WriteFile(bin, []byte("#!/bin/sh\necho codex-cli 9.9.9\n"), 0700)
+	// The macOS readiness checks, on any host (other backends report them as not needed).
+	restoreBackend := backendName
+	backendName = func() string { return "macos" }
+	t.Cleanup(func() { backendName = restoreBackend })
 	perms := desktop.Permissions{Accessibility: true}
 	currentPermissions = func() (desktop.Permissions, error) { return perms, nil }
 	t.Cleanup(func() { currentPermissions = desktop.CurrentPermissions })
