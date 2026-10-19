@@ -198,10 +198,10 @@ func (s *Server) runOptions(t *task.Task) runner.Options {
 			return s.ask(ctx, t.ID, askRequest{Kind: kind, Text: text, Details: details})
 		},
 	}
-	if s.desktops.PerSession() {
-		// mobd mcp then drives this conversation's desktop through mobd serve (MOB_DESKTOP_PROXY).
-		opts.MCPEnv["MOB_DESKTOP_PROXY"] = "1"
-	}
+	// mobd mcp drives the desktop through mobd serve: the conversation's own desktop on Linux,
+	// and on macOS the process holding the Screen Recording grant (a mobd mcp started by an
+	// agent CLI is not, and ScreenCaptureKit hangs there instead of refusing).
+	opts.MCPEnv["MOB_DESKTOP_PROXY"] = "1"
 	for _, id := range t.Attachments {
 		if path, _, err := s.artifacts.Path(id); err == nil {
 			opts.Images = append(opts.Images, path)

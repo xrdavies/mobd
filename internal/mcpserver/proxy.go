@@ -16,7 +16,8 @@ import (
 
 // proxyDesktop sends the agent's desktop tools to the mobd that dispatched the turn
 // (POST /internal/tasks/{id}/desktop/{op}), which runs them on the turn's conversation desktop.
-// mobd sets MOB_DESKTOP_PROXY=1 where each conversation has its own desktop (Linux).
+// mobd sets MOB_DESKTOP_PROXY=1 for every turn; without it (another MCP client) the tools act on
+// this machine directly.
 type proxyDesktop struct {
 	api, taskID, token string
 	client             *http.Client
