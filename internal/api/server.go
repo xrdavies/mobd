@@ -88,6 +88,15 @@ func New(cfg config.Config, store *task.Store, auth *pairing.Store, desktops des
 	s.desktops = desktops
 	streams, err := stream.NewManager(stream.Config{
 		Source: func(sessionID string) (stream.Source, error) {
+			if desktops.PerSession() {
+				// Each conversation has its own desktop: say which, and it must exist.
+				if sessionID == "" {
+					return nil, errSessionRequired
+				}
+				if _, ok := store.SessionTitle(sessionID); !ok {
+					return nil, errStreamSession
+				}
+			}
 			d, err := desktops.Get(sessionID)
 			if err != nil {
 				return nil, err

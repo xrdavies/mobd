@@ -548,9 +548,11 @@ func (r record) info() desktop.Info {
 // source is the live view's handle; streaming arrives with the X11 backend.
 type source struct{ d *desk }
 
+// Display is the desktop's size from its record, also while it starts or sleeps: opening the
+// live view then waits for it (Hold) or wakes it.
 func (s source) Display() (desktop.Display, error) {
 	r := s.d.record()
-	if r.State != desktop.StateRunning {
+	if (!live(r.State) && r.State != desktop.StateStarting) || r.Width == 0 {
 		return desktop.Display{}, desktop.ErrNoDesktop
 	}
 	return desktop.Display{ID: ":" + strconv.Itoa(r.Display), Width: r.Width, Height: r.Height, Scale: float64(r.Scale), Main: true}, nil

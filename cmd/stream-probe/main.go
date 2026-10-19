@@ -35,6 +35,7 @@ func main() {
 	typeText := flag.String("type", "", "type this text once connected (\\n presses Return)")
 	click := flag.String("click", "", "left-click at normalized x,y (0..1) once connected, e.g. 0.53,0.38")
 	useWS := flag.Bool("ws", false, "use the WebSocket fallback instead of WebRTC")
+	session := flag.String("session", "", "conversation ID whose desktop to watch (Linux: each conversation has its own)")
 	resolve := flag.String("resolve", "", "connect to this IP instead of resolving the host (e.g. Funnel's public address)")
 	flag.Parse()
 	if *resolve != "" {
@@ -51,7 +52,7 @@ func main() {
 	base := strings.TrimRight(*addr, "/")
 
 	if *useWS {
-		watchWS(strings.TrimRight(*addr, "/"), *token, *seconds, *maxWidth, *quality)
+		watchWS(strings.TrimRight(*addr, "/"), *token, *seconds, *maxWidth, *quality, *session)
 		return
 	}
 	pc, err := webrtc.NewPeerConnection(webrtc.Configuration{})
@@ -111,7 +112,7 @@ func main() {
 	_ = pc.SetLocalDescription(offer)
 	<-gathered
 
-	body, _ := json.Marshal(map[string]any{"offer": pc.LocalDescription().SDP, "maxWidth": *maxWidth, "quality": *quality})
+	body, _ := json.Marshal(map[string]any{"offer": pc.LocalDescription().SDP, "maxWidth": *maxWidth, "quality": *quality, "sessionId": *session})
 	req, _ := http.NewRequest("POST", base+"/stream", bytes.NewReader(body))
 	req.Header.Set("Authorization", "Bearer "+*token)
 	req.Header.Set("Content-Type", "application/json")
@@ -193,9 +194,9 @@ func main() {
 
 // watchWS opens a session without an offer and watches it over GET /stream/ws, acknowledging every
 // video message as the apps will.
-func watchWS(base, token string, seconds, maxWidth int, quality string) {
+func watchWS(base, token string, seconds, maxWidth int, quality, session string) {
 	start := time.Now()
-	body, _ := json.Marshal(map[string]any{"maxWidth": maxWidth, "quality": quality})
+	body, _ := json.Marshal(map[string]any{"maxWidth": maxWidth, "quality": quality, "sessionId": session})
 	req, _ := http.NewRequest("POST", base+"/stream", bytes.NewReader(body))
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Content-Type", "application/json")

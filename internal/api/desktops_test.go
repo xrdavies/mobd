@@ -63,7 +63,14 @@ func TestScreenUsesTheConversationDesktop(t *testing.T) {
 	if rr := doJSON(t, s, http.MethodGet, "/screen?sessionId=noframe", ""); rr.Code != http.StatusConflict || !strings.Contains(rr.Body.String(), `"no_desktop"`) {
 		t.Fatalf("asleep without a frame: %d %s", rr.Code, rr.Body)
 	}
-	if rr := doJSON(t, s, http.MethodPost, "/stream", `{"sessionId":"none","offer":""}`); rr.Code != http.StatusConflict {
+	if rr := doJSON(t, s, http.MethodPost, "/stream", `{"sessionId":"none","offer":""}`); rr.Code != http.StatusNotFound || !strings.Contains(rr.Body.String(), "session_not_found") {
+		t.Fatalf("stream for an unknown conversation: %d %s", rr.Code, rr.Body)
+	}
+	if rr := doJSON(t, s, http.MethodPost, "/stream", `{"offer":""}`); rr.Code != http.StatusBadRequest || !strings.Contains(rr.Body.String(), "session_required") {
+		t.Fatalf("stream without a conversation: %d %s", rr.Code, rr.Body)
+	}
+	tk, _ := s.store.Create("no desktop yet")
+	if rr := doJSON(t, s, http.MethodPost, "/stream", `{"sessionId":"`+tk.SessionID+`","offer":""}`); rr.Code != http.StatusConflict || !strings.Contains(rr.Body.String(), "no_desktop") {
 		t.Fatalf("stream without desktop: %d %s", rr.Code, rr.Body)
 	}
 }

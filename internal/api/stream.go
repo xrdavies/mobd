@@ -10,6 +10,12 @@ import (
 	"github.com/xrdavies/mobd/internal/stream"
 )
 
+var (
+	// errSessionRequired: with a desktop per conversation, the live view names the conversation.
+	errSessionRequired = errors.New("update the mob app to view this office computer's desktops")
+	errStreamSession   = errors.New("conversation not found")
+)
+
 // handleStreamOpen answers a WebRTC offer for the live desktop. The session outlives this request
 // and ends on DELETE, a new session from the same client, revoke, or shutdown.
 func (s *Server) handleStreamOpen(w http.ResponseWriter, r *http.Request) {
@@ -27,8 +33,12 @@ func (s *Server) handleStreamOpen(w http.ResponseWriter, r *http.Request) {
 			answer.WSTicket = ticket
 		}
 		writeJSON(w, http.StatusCreated, answer)
+	case errors.Is(err, errSessionRequired):
+		writeErrCode(w, http.StatusBadRequest, "session_required", err.Error())
+	case errors.Is(err, errStreamSession):
+		writeErrCode(w, http.StatusNotFound, "session_not_found", err.Error())
 	case errors.Is(err, desktop.ErrNoDesktop):
-		writeErr(w, http.StatusConflict, err.Error())
+		writeErrCode(w, http.StatusConflict, "no_desktop", err.Error())
 	case errors.Is(err, stream.ErrBadRequest):
 		writeErr(w, http.StatusBadRequest, err.Error())
 	case errors.Is(err, desktop.ErrUnsupported):
