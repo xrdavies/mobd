@@ -24,6 +24,14 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
+      # The live view's encoder (cgo, GStreamer with OpenH264) and a real Xvfb and xterm for the
+      # X11 tests, which skip without them.
+      - name: Linux desktop packages
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
+            gstreamer1.0-plugins-base gstreamer1.0-plugins-bad gstreamer1.0-libav xvfb xterm x11-xkb-utils
       - name: Vet
         run: go vet ./...
       - name: Test
