@@ -361,4 +361,5 @@ CORS covers API responses and SSE, plus `OPTIONS` preflight for `GET`/`POST`/`PA
 - [Office smoke checklist](docs/office-smoke-checklist.md), [security](docs/security.md): deployment and verification.
 - [Live desktop streaming](docs/desktop-streaming.md): capture, encoding, WebRTC and WebSocket transports, rate control and input.
 - [Linux](docs/linux.md) (draft plan, not implemented): one virtual desktop per conversation (Xvfb), concurrency, packaging and phases.
+- [Linux design](docs/linux-design.md) (detailed design for review, not implemented): packages, interfaces, desktop state machine, API, CLI and PR-sized phases.
 - [Windows](docs/windows.md) (draft plan, not implemented): backend for the logged-in user's desktop, session model, packaging and phases.

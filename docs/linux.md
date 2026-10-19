@@ -4,7 +4,8 @@
 > backend; Linux compiles a placeholder that returns `ErrUnsupported`
 > (`internal/desktop/backend_linux.go`) and the API answers 501 for `/screen` and `/stream`.
 > Items marked *(to verify)* are behaviour we have not confirmed on real machines.
-> The Windows plan is separate: [Windows](windows.md).
+> The Windows plan is separate: [Windows](windows.md). The detailed design (packages, interfaces,
+> state machine, API, PR steps) is in [Linux design](linux-design.md).
 >
 > Decided by the owner: desktops sleep (freeze) when idle and are closed only when the user
 > archives or deletes the conversation or closes its desktop; low memory is reported to the user
@@ -200,8 +201,8 @@ unexpectedly; xfwm4/metacity pull in more of a desktop environment. No panel or 
 ### Input
 
 - **XTest** (`FakeMotion`, `FakeButton`, `FakeKey`) through xgb. No prompt: mobd owns the display.
-- **Keyboard layout:** mobd sets a fixed XKB layout on each desktop (`us` by default,
-  `desktopKeyboardLayout`). Live-view `key` messages map `KeyboardEvent.code` to evdev codes
+- **Keyboard layout:** mobd sets a fixed XKB layout on each desktop (`desktopKeyboardLayout`,
+  default the machine's layout, else `us`). Live-view `key` messages map `KeyboardEvent.code` to evdev codes
   (X keycode = evdev + 8) and stay physical, which is what `code` means. Agent `key("a")` resolves
   the keysym through the known keymap, so letters are right whatever the layout.
 - **Unicode text** (live-view `text`, agent typing): for keysyms missing from the keymap, map a
@@ -218,8 +219,8 @@ unexpectedly; xfwm4/metacity pull in more of a desktop environment. No panel or 
 - **OpenApp:** match the target against desktop entries (`XDG_DATA_DIRS`,
   `~/.local/share/applications`; desktop ID or `Name=`, case-insensitive), else an executable on
   `PATH`. mobd serve launches it itself with the desktop's environment, in the **desktop's**
-  process group, not the turn's: the runner's group is killed when a turn is cancelled
-  (`internal/runner/cli/cli.go`), and apps opened through `open_app` should survive it. Apps the
+  cgroup (`apps/` in its scope) and its own session, not the turn's process group: the runner's
+  group is killed when a turn is cancelled (`internal/runner/cli/cli.go`), and apps opened through `open_app` should survive it. Apps the
   agent starts from its shell must detach (`setsid`, output redirected) to outlive a cancelled
   turn; the MCP instructions say so. The MCP argument `name_or_bundle_id` keeps its name; its
   description says "desktop file ID" on Linux.
@@ -240,12 +241,15 @@ mobd no longer needs a graphical login session. It runs as a systemd unit; today
   `Restart=on-failure`, captured `PATH`) and enables linger (`loginctl enable-linger`), so mobd
   starts at boot without anyone logging in. Agents run as the user, with their `codex`/`claude`
   logins, git and SSH keys. `--login` = `systemctl --user enable`; `stop` = stop + disable;
-  `logs` = `journalctl --user -u mobd -f`. `restart` and upgrades leave desktops running; mobd
+  `logs` follows `~/.mobd/mobd.log` (the unit appends to it, as on macOS). `restart` and upgrades leave desktops running; mobd
   re-attaches to them. Keep capturing `PATH` and absolute `codex`/`claude`
   paths at `start`, as `service.go` does (nvm and `~/.npm-global/bin` are missing from systemd).
-- **Option: system unit** for dedicated servers: `/etc/systemd/system/mobd.service` with
-  `User=mobd`, home `/var/lib/mobd`, shipped by the `.deb` but disabled. The runners must be logged
-  in as that user.
+- **Option: dedicated user** for servers: a `mobd` system user (home `/var/lib/mobd`) with linger
+  runs the same user unit in its own user manager (`mobd setup-system-user`, shipped by the
+  `.deb`). A system unit in `system.slice` is not used: it could not move runners into desktop
+  scopes under a user manager, and its own cgroup would take the desktops down with it
+  ([design](linux-design.md#28-service-manager-internalservice)). The runners must be logged in as
+  that user.
 - **`mobd stop` and desktops:** desktops are not mobd's children, so stopping mobd does not end
   them by itself. With desktops open, `mobd stop` asks
   `Close 3 desktops (2 asleep)? Open windows will be lost; files and browser profiles are kept. [y/N]`.
@@ -256,8 +260,8 @@ mobd no longer needs a graphical login session. It runs as a systemd unit; today
   and close every desktop; `~/.mobd` and `<dataDir>/desktops` (profiles, downloads) are kept.
   `apt purge` keeps user data too; the docs say which directories to delete by hand.
 - **Desktop supervision:** each desktop runs in its own systemd transient scope
-  (`mobd-desktop-<session>.scope`, created over D-Bus with `StartTransientUnit`, under the user
-  manager or, for the system unit, under `mobd.service`'s slice with `Delegate=yes`): Xvfb, then
+  (`mobd-desktop-<session>.scope`, created over D-Bus with `StartTransientUnit` under the user
+  manager, `Delegate=yes`): Xvfb, then
   dbus-daemon, then openbox (each waits for the previous one: Xvfb readiness via `-displayfd` or by
   connecting). The scope gives the freezer, per-desktop memory accounting (`memory.current`) and
   lets the desktop outlive mobd. Runners of that session's turns start in a child cgroup of the
@@ -266,13 +270,13 @@ mobd no longer needs a graphical login session. It runs as a systemd unit; today
   every supported release).
   - **Xvfb or dbus-daemon exits:** the desktop is dead. The running turn's desktop calls fail with
     a clear error, live-view sessions get `ended` with the reason, an SSE `desktop` event says
-    `stopped`, and the next turn creates a new one. Three crashes within a few minutes mark the
+    `closed` (reason `crashed`), and the next turn creates a new one. Three crashes within a few minutes mark the
     session's desktop failed until the next turn *(threshold to tune)*.
   - **openbox exits:** restarted in place; X clients survive a WM restart.
   - **The kernel OOM killer** may kill an app inside a desktop (usually a browser tab or the
-    browser); the desktop continues and the apps show it. mobd itself runs with
-    `OOMScoreAdjust=-500` and Xvfb with a lower score than apps, so the display and the daemon
-    are the last to go.
+    browser); the desktop continues and the apps show it. Apps and runners get a raised
+    `oom_score_adj` (an unprivileged user manager can raise scores but not lower them
+    *(to verify)*), so mobd and Xvfb are the last to go.
 - **Display numbers:** allocated from `desktopDisplayBase` (default 100) upward, skipping numbers
   with a live `/tmp/.X<N>-lock`, so mobd displays are easy to recognize and never collide with a
   real `:0`. Each desktop gets a random MIT-MAGIC-COOKIE in its own Xauthority file: Xvfb also
@@ -286,7 +290,7 @@ mobd no longer needs a graphical login session. It runs as a systemd unit; today
   desktop on the next turn. Desktops of sessions that no longer exist are closed. mobd touches
   nothing it did not record.
 - **Runtime directory:** `$XDG_RUNTIME_DIR/mobd/d<N>` (0700; bus socket, Xauthority), or
-  `<dataDir>/run/d<N>` when `XDG_RUNTIME_DIR` is unset (system unit). Paths stay short for the
+  `<dataDir>/run/d<N>` when `XDG_RUNTIME_DIR` is unset. Paths stay short for the
   108-byte `sun_path`.
 
 ## Concurrency
@@ -296,7 +300,9 @@ Desktops no longer compete, so the global "one desktop, FIFO" rule becomes:
 - **One running turn per conversation:** already enforced (`ErrSessionBusy`).
 - **`maxRunning`** keeps its name and meaning, "turns running at once across all sessions", but
   now limits CPU, memory and API use, not desktop access. Its default stays 1 on macOS and becomes
-  4 on Linux when session desktops are on *(to tune)*. `/health` keeps reporting it.
+  4 on Linux when session desktops are on *(to tune)*; `mobd init` must then stop writing
+  `"maxRunning": 1` into new configs (`internal/config/config.go` `Init`). `/health` keeps
+  reporting it.
 - **`maxDesktops`** (new, `MOBD_MAX_DESKTOPS`, default `0` = no cap): an optional hard cap for
   admins who want one. At the cap a turn that needs a new desktop waits; mobd never closes another
   desktop to make room.
@@ -328,7 +334,7 @@ closing desktops:
   do not). Waking a swapped-out desktop takes a moment longer.
 - **Disk, reported the same way:** mobd measures each desktop's directory (profiles, cache,
   downloads; a walk every few minutes, cached) and the free space of the data dir's filesystem.
-  Below `diskWarnPercent` (proposed 10%) or `diskWarnBytes` (5 GB): a `disk` check in `/health`, a
+  Below `diskWarnPercent` (proposed 10%) or `diskWarnBytes` (5 GB), whichever is lower: a `disk` check in `/health`, a
   `disk` SSE event and the same banner, listing conversations by disk use. Below `diskFloorBytes`
   (proposed 1 GB) mobd starts no new desktops. Browser wrappers cap the cache
   (`--disk-cache-size`, Firefox `browser.cache.disk.capacity`) so caches do not dominate.
@@ -340,19 +346,21 @@ closing desktops:
 
 ### Encoders
 
-Each viewer is one encode; asleep desktops are never encoded. NVIDIA consumer GPUs limit concurrent NVENC sessions
-  (a driver limit of a few sessions *(to verify the current number)*); VA-API has no hard limit but
-  finite throughput; OpenH264 costs roughly one CPU core per 1080p30 stream *(to measure)*. When a
-  hardware encoder refuses a new session, mobd falls back to the next encoder for that stream.
-  Sharing one encode among viewers of the same desktop and size is a later optimisation.
+Each viewer is one encode; asleep desktops are never encoded. NVIDIA consumer GPUs limit
+concurrent NVENC sessions (a driver limit of a few sessions *(to verify the current number)*);
+VA-API has no hard limit but finite throughput; OpenH264 costs roughly one CPU core per 1080p30
+stream *(to measure)*. When a hardware encoder refuses a new session, mobd falls back to the next
+encoder for that stream. Sharing one encode among viewers of the same desktop and size is a later
+optimisation.
 
 ## Agent environment
 
 - **Runner env:** today codex and claude get `os.Environ()` (`internal/runner/codex/runner.go`,
   `internal/runner/claude/runner.go`) and `mobd mcp` gets `MOB_API`, `MOB_TASK_ID`,
   `MOB_TASK_TOKEN` through `MCPEnv` (`internal/api/media.go` `runOptions`). Runners launched for a
-  session additionally get `DISPLAY`, `XAUTHORITY`, `DBUS_SESSION_BUS_ADDRESS` and
-  `XDG_RUNTIME_DIR` of that session's desktop, and a per-session `bin` directory first on `PATH`
+  session additionally get `DISPLAY`, `XAUTHORITY` and `DBUS_SESSION_BUS_ADDRESS` of
+  that session's desktop (`XDG_RUNTIME_DIR` stays the user's, so `systemctl --user` and agents
+  keep working), and a per-session `bin` directory first on `PATH`
   (browser wrappers, below). This needs a `runner.Options.Env` field.
 - **Desktop calls are forwarded.** `mobd mcp` is its own process and calls `internal/desktop`
   directly (`hostDesktop`, `internal/mcpserver/server.go`). On Linux it uses a `proxyBackend` that
@@ -373,7 +381,7 @@ Each viewer is one encode; asleep desktops are never encoded. NVIDIA consumer GP
     (without lock and cache files) when a session's profile is created, so sites the user logged
     into once are logged in for every new conversation. There is no keyring on a virtual desktop,
     so the wrappers pass `--password-store=basic`; a seed must be created the same way or Chrome
-    cannot decrypt its cookies. The simplest way to make one: a `mobd desktop seed` command opens
+    cannot decrypt its cookies. The simplest way to make one: a `mobd desktops seed` command opens
     a desktop for a "seed" session that the user prepares through the live view.
   - profiles survive sleep, closing the desktop and reboots, and are removed with the session.
 - **HOME and XDG dirs:** **shared by default.** A per-session `HOME` or `XDG_CONFIG_HOME` would
@@ -403,12 +411,12 @@ as today.
   `Start`/`Display`/`NewInput` (`internal/api/server.go` `New`); these become per-desktop.
 - **`GET /screen?sessionId=…`**: same rule, except that an asleep desktop is not woken: mobd
   returns its last frame with `X-Mob-Desktop-State: asleep`.
-- **`GET /desktops`**: `[{sessionId, display, width, height, scale, state: running|asleep,
-  memoryBytes, diskBytes, startedAt, lastUsedAt, running, viewers}]`. `DELETE /desktops/{sessionId}` closes
+- **`GET /desktops`**: `{desktops: [{sessionId, title, display, width, height, scale, state,
+  memoryBytes, diskBytes, startedAt, lastUsedAt, activeTaskId, viewers}], memory, disk}`. `DELETE /desktops/{sessionId}` closes
   one (besides archiving or deleting the conversation). `POST /desktops/{sessionId}` starts or
   wakes one without a turn, so a user can log in somewhere before the agent runs.
-- **SSE:** `GET /events` gains `desktop` events `{sessionId, state: starting|running|asleep|stopped,
-  reason}` and `memory` events `{level: ok|low|critical, availableBytes, totalBytes}` and `disk` events
+- **SSE:** `GET /events` gains `desktop` events `{sessionId, state: starting|running|asleep|waking|closing|closed|failed,
+  reason}` (a crash is `closed` with reason `crashed`) and `memory` events `{level: ok|low|critical, availableBytes, totalBytes}` and `disk` events
   `{level, freeBytes, totalBytes}`.
 - **`/health`:** adds `desktops: {count, asleep, memoryBytes, diskBytes}`, `maxDesktops`, and `memory` and `disk` checks. The macOS permission checks are
   generalized to backend checks: on Linux `xvfb`, `windowManager`, `dbus`, `encoder` (detail e.g.
@@ -473,7 +481,7 @@ as today.
 - **Packages:** keep the R2 layout and add `linux-x86_64` / `linux-aarch64` keys to `release.json`.
   - `mobd_<v>_linux_amd64.tar.gz` / `_arm64`: `mobd`, LICENSE, README, unit templates; SHA256SUMS.
   - `mobd_<v>_amd64.deb` / `_arm64.deb`: `/usr/bin/mobd`, the disabled system unit. **Depends:**
-    `xvfb`, `openbox`, `dbus-x11` (or `dbus-daemon`), `xkb-data`, `gstreamer1.0-plugins-base`,
+    `xvfb`, `openbox`, `dbus-x11` (or `dbus-daemon`), `xkb-data`, `x11-xkb-utils` (setxkbmap), `gstreamer1.0-plugins-base`,
     `gstreamer1.0-plugins-bad` (va, nvcodec, openh264 elements). **Recommends:** `fonts-dejavu`,
     `fonts-noto-cjk` (a bare Xvfb machine has almost no fonts, so pages render boxes),
     `xdg-utils`, `gstreamer1.0-vaapi` on 22.04. **Suggests:** a browser.
