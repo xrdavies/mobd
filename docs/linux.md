@@ -5,6 +5,11 @@
 > (`internal/desktop/backend_linux.go`) and the API answers 501 for `/screen` and `/stream`.
 > Items marked *(to verify)* are behaviour we have not confirmed on real machines.
 > The Windows plan is separate: [Windows](windows.md).
+>
+> Decided by the owner: desktops sleep (freeze) when idle and are closed only when the user
+> archives or deletes the conversation or closes its desktop; low memory is reported to the user
+> (warning below 15% available), never solved by closing desktops. Ubuntu and Debian are supported; other distributions get build and
+> configuration instructions.
 
 On macOS mobd drives the one real desktop of the logged-in user, shared by every task and
 serialized by the FIFO desktop queue (`maxRunning`, default 1, `internal/api/server.go`
@@ -19,15 +24,15 @@ machine is not watched or controlled (see [Not supported in v1](#not-supported-i
 
 | | Linux |
 | --- | --- |
-| Desktop model | one virtual X display per conversation (session), created on demand, closed when idle |
+| Desktop model | one virtual X display per conversation (session), created on demand, frozen when idle, closed only when the user deletes the conversation or closes the desktop |
 | Display server | Xvfb, one per desktop, plus openbox and a private D-Bus session bus |
 | Capture | XShm + XDamage on that display (pure Go, [jezek/xgb](https://github.com/jezek/xgb)) |
 | Encode | GStreamer: VA-API, then NVENC, then OpenH264 (not bundled); never x264 |
 | Input | XTest on our own display: no permission prompt |
 | Permissions | none |
 | Process model | `systemd --user` unit with linger (default) or a system unit with a dedicated user |
-| Concurrency | one running turn per conversation, `maxRunning` turns overall, `maxDesktops` live desktops |
-| Packages | `.deb` (Ubuntu 22.04/24.04), tarball; `.rpm` later |
+| Concurrency | one running turn per conversation, `maxRunning` turns overall; memory is reported, never reclaimed by closing desktops |
+| Distributions | Ubuntu 22.04/24.04 and Debian 12/13 supported (`.deb`, tarball); others build and configure it themselves from a guide |
 | Tests | real end-to-end desktop and stream tests on hosted Ubuntu CI runners |
 
 ## Desktop model
@@ -35,11 +40,69 @@ machine is not watched or controlled (see [Not supported in v1](#not-supported-i
 - **One desktop per conversation.** A desktop is created when a turn of that session is
   dispatched (see [Concurrency](#concurrency)) and kept across turns, so the agent's browser,
   windows and half-finished forms are still there on the next turn.
-- **Idle close:** a desktop with no running turn and no live-view viewer closes after
-  `desktopIdleTimeout` (proposed default 60 min). It also closes when its session is archived
-  (`PATCH /sessions/{id}` with `archived: true`) or deleted (`DELETE /sessions/{id}`), and is
-  recreated on demand by the next turn. Closing loses open windows, not files: profiles and
-  downloads live in the session's directory (see [Agent environment](#agent-environment)).
+- **A desktop is never closed behind the user's back.** It is the conversation's working state
+  (open windows, tabs, half-filled forms, unsaved text), so mobd only freezes it:
+
+  | State | When | Resume |
+  | --- | --- | --- |
+  | **Running** | a turn is active, someone watches it, or it is still busy (see [When a desktop sleeps](#when-a-desktop-sleeps)) | — |
+  | **Asleep** | idle by every signal for `desktopSleepAfter` (proposed default 10 min) | instant, everything as it was |
+  | **Closed** | only when the user archives the conversation (`PATCH /sessions/{id}` with `archived: true`), deletes it (`DELETE /sessions/{id}`) or closes its desktop (`DELETE /desktops/{sessionId}`, a "Close desktop" action in the apps) | the next turn starts a new one: files and browser profile kept, windows gone |
+
+  Archiving closes the desktop to free its memory; the apps confirm first ("Open windows on this
+  conversation's desktop will be closed. Files and browser logins are kept."). An unarchived
+  conversation gets a new desktop with its next turn. A turn, `POST /stream`, or `POST /desktops/…` wakes an asleep
+  desktop; a snapshot does not.
+- **Sleeping = cgroup freezer.** Every desktop lives in its own cgroup (a systemd transient scope,
+  see [Process model](#process-model)): Xvfb, openbox, dbus, the apps, and the runners of its
+  turns. Writing `cgroup.freeze = 1` stops every process in it, including apps the agent started
+  from its shell with `setsid`, which a process-group `SIGSTOP` would miss. An asleep desktop uses
+  no CPU; its memory stays allocated (and can be swapped out, see [Memory](#memory)). After
+  waking, web pages may have dropped their network connections while frozen, so some reconnect or
+  need a reload; the windows themselves are intact.
+- **What sleeps with the desktop:** everything in its cgroup: the apps, and any command or server
+  the agent left running in the background (`setsid npm run dev &`, a long download). Turns never
+  sleep: a desktop with an active turn, including one waiting for a question or approval, stays
+  awake, and a desktop that is still doing work is not put to sleep (next section). If a frozen
+  background job matters, waking the desktop resumes it where it stopped; network connections it
+  held may have timed out.
+- **Restarts:** desktops survive a mobd restart or upgrade (they are not mobd's children; mobd
+  re-attaches at start, see [Process model](#process-model)). A **machine reboot** cannot keep
+  them: windows are lost, files and browser profiles are kept, and browsers restore their tabs.
+  The apps say "the desktop was restarted after the office machine rebooted". Checkpointing a
+  running X server and browser to disk (CRIU) is not practical.
+- **When a desktop sleeps:** mobd checks every desktop once a minute. It goes to sleep only after
+  **all** of these have held for `desktopSleepAfter`:
+  1. **No active turn** for the session: none running, queued, or waiting for an answer
+     (task store).
+  2. **Nobody watching:** no live-view session (stream manager); snapshots do not count (below).
+  3. **No CPU work:** the desktop's cgroup used less than `desktopSleepCPU` (proposed 2% of one
+     core) on average (`cpu.stat` `usage_usec`). A build, test run, server handling requests or
+     page still loading keeps it awake.
+  4. **No screen changes:** no XDamage events on the display (mobd keeps a damage subscription on
+     every desktop; it costs nothing while the screen is still). A playing video, a progress bar
+     or a terminal printing output keeps it awake.
+
+  Any signal resets the timer. Signals 3 and 4 catch background work the agent left behind, so
+  "idle" means really idle, not just "no turn". A job that waits silently for minutes (a long
+  `sleep`, a slow network transfer with no output) can still be frozen; the agent's MCP
+  instructions tell it to finish or report background work before ending a turn. The apps show
+  the state (`running`/`asleep`) per conversation.
+- **Viewers do not keep a desktop awake forever.** An open but unattended live view or a polling
+  snapshot would otherwise block sleep indefinitely (signal 2):
+  - **Snapshots never wake or hold a desktop.** Before freezing, mobd keeps the desktop's last
+    frame; `GET /screen` on an asleep desktop returns it with `X-Mob-Desktop-State: asleep` and
+    does not count as watching. Only a live view (`POST /stream`), a turn or
+    `POST /desktops/{sessionId}` wakes it.
+  - **Clients pause an unattended live view** *(client work, all platforms including macOS)*:
+    after `liveIdlePause` (proposed 10 min) with no input from the user and no new frame, the
+    app ends the stream and shows "Live view paused · click to resume".
+  - **Clients stop when nobody can see the view:** a hidden or minimised window, or a phone app in
+    the background, ends the live view and stops snapshot polling (the desktop app already stops
+    snapshots when its window is hidden).
+
+  Once the stream ends, the normal timer applies and the desktop sleeps after
+  `desktopSleepAfter`; resuming the view wakes it instantly.
 - **Why per conversation, not per task:** a conversation is the unit the user continues ("now
   submit the form"), and its turns already run one at a time (a session with an active turn
   rejects a new one with `ErrSessionBusy`, `internal/task/store.go`). A per-task desktop would
@@ -174,24 +237,36 @@ mobd no longer needs a graphical login session. It runs as a systemd unit; today
 - **Option: system unit** for dedicated servers: `/etc/systemd/system/mobd.service` with
   `User=mobd`, home `/var/lib/mobd`, shipped by the `.deb` but disabled. The runners must be logged
   in as that user.
-- **Desktop supervision:** each desktop is one supervised process group started by mobd serve:
-  Xvfb, then dbus-daemon, then openbox (each waits for the previous one: Xvfb readiness via
-  `-displayfd` or by connecting). Children get `Pdeathsig=SIGKILL` so a crashed mobd does not
-  leave displays behind.
+- **Desktop supervision:** each desktop runs in its own systemd transient scope
+  (`mobd-desktop-<session>.scope`, created over D-Bus with `StartTransientUnit`, under the user
+  manager or, for the system unit, under `mobd.service`'s slice with `Delegate=yes`): Xvfb, then
+  dbus-daemon, then openbox (each waits for the previous one: Xvfb readiness via `-displayfd` or by
+  connecting). The scope gives the freezer, per-desktop memory accounting (`memory.current`) and
+  lets the desktop outlive mobd. Runners of that session's turns start in a child cgroup of the
+  same scope, so the turn-cancel kill (process group, `internal/runner/cli/cli.go`) still works
+  and the runner's shell-started apps sleep with the desktop. Requires cgroup v2 (default on
+  every supported release).
   - **Xvfb or dbus-daemon exits:** the desktop is dead. The running turn's desktop calls fail with
     a clear error, live-view sessions get `ended` with the reason, an SSE `desktop` event says
     `stopped`, and the next turn creates a new one. Three crashes within a few minutes mark the
     session's desktop failed until the next turn *(threshold to tune)*.
   - **openbox exits:** restarted in place; X clients survive a WM restart.
+  - **The kernel OOM killer** may kill an app inside a desktop (usually a browser tab or the
+    browser); the desktop continues and the apps show it. mobd itself runs with
+    `OOMScoreAdjust=-500` and Xvfb with a lower score than apps, so the display and the daemon
+    are the last to go.
 - **Display numbers:** allocated from `desktopDisplayBase` (default 100) upward, skipping numbers
   with a live `/tmp/.X<N>-lock`, so mobd displays are easy to recognize and never collide with a
   real `:0`. Each desktop gets a random MIT-MAGIC-COOKIE in its own Xauthority file: Xvfb also
   listens on the abstract socket `@/tmp/.X11-unix/X<N>`, so without a cookie any local user could
   connect.
-- **Stale cleanup at start:** mobd records each desktop (`display`, pids, paths) in
-  `<dataDir>/desktops/<sessionId>/desktop.json`. At startup it kills recorded pids whose
-  `/proc/<pid>/cmdline` still matches, removes their lock and socket files and runtime
-  directories, and touches nothing it did not record.
+- **Re-attach at start:** mobd records each desktop (`display`, scope, pids, Xauthority, bus,
+  state) in `<dataDir>/desktops/<sessionId>/desktop.json`. At startup it re-attaches to every
+  recorded desktop whose scope is alive and whose Xvfb answers with the recorded cookie, keeping
+  its state (an asleep desktop stays asleep). Records whose processes are gone (after a reboot)
+  are marked closed and their lock, socket and runtime files removed; their sessions start a new
+  desktop on the next turn. Desktops of sessions that no longer exist are closed. mobd touches
+  nothing it did not record.
 - **Runtime directory:** `$XDG_RUNTIME_DIR/mobd/d<N>` (0700; bus socket, Xauthority), or
   `<dataDir>/run/d<N>` when `XDG_RUNTIME_DIR` is unset (system unit). Paths stay short for the
   108-byte `sun_path`.
@@ -203,26 +278,43 @@ Desktops no longer compete, so the global "one desktop, FIFO" rule becomes:
 - **One running turn per conversation:** already enforced (`ErrSessionBusy`).
 - **`maxRunning`** keeps its name and meaning, "turns running at once across all sessions", but
   now limits CPU, memory and API use, not desktop access. Its default stays 1 on macOS and becomes
-  `maxDesktops` on Linux when session desktops are on. `/health` keeps reporting it.
-- **`maxDesktops`** (new, `MOBD_MAX_DESKTOPS`, proposed default 4): cap on live virtual desktops.
-- **`desktopIdleTimeout`** (new, default `60m`), **`desktopSize`**, **`desktopScale`**,
+  4 on Linux when session desktops are on *(to tune)*. `/health` keeps reporting it.
+- **`maxDesktops`** (new, `MOBD_MAX_DESKTOPS`, default `0` = no cap): an optional hard cap for
+  admins who want one. At the cap a turn that needs a new desktop waits; mobd never closes another
+  desktop to make room.
+- **`desktopSleepAfter`** (new, default `10m`), **`desktopSize`**, **`desktopScale`**,
   **`desktopKeyboardLayout`**, **`desktopDisplayBase`**: as above.
 
-When a turn is dispatched (`scheduleLocked`) and its session has no live desktop:
+When a turn is dispatched (`scheduleLocked`): an asleep desktop of its session is woken; a session
+without a desktop gets a new one unless the [memory guard](#memory) or `maxDesktops` says no, in
+which case the turn stays queued with the reason ("waiting: the office machine is low on memory").
+Turns whose session already has a desktop may pass it, so one waiting turn does not block the
+queue.
 
-1. under `maxDesktops`: start one;
-2. at the cap: **evict the least recently used idle desktop** (no running turn, no viewer) and
-   start one; the evicted session's next turn recreates its desktop (profile kept, windows lost);
-3. every desktop busy: the turn stays queued ("waiting for a desktop", `queuePosition` as today).
-   Turns whose session already has a desktop may pass it, so one waiting turn does not block
-   the queue.
+### Memory
 
-Sizing notes for the docs:
+Desktops are only closed by the user, so memory is managed by **telling the user**, not by
+closing desktops:
 
-- **Memory:** Xvfb at 1080p is ~10–20 MB plus the framebuffer (8 MB), openbox and dbus a few MB
-  each. The browser dominates: 0.5–1.5 GB per desktop with a few tabs. 4 desktops fit a 16 GB
-  machine comfortably.
-- **Encoders:** each viewer is one encode. NVIDIA consumer GPUs limit concurrent NVENC sessions
+- **Usage per desktop** comes from its cgroup (`memory.current`), the machine's from
+  `/proc/meminfo` (`MemAvailable`) and pressure from PSI (`/proc/pressure/memory`).
+- **Low (warning):** `MemAvailable` below `memoryWarnPercent` (proposed 15%) or sustained memory
+  pressure. `/health` gets a `memory` check with the detail, `GET /events` sends a `memory` event,
+  and the apps show a banner: "The office machine is low on memory. Close the desktops or delete
+  the conversations you no longer need." with the desktops listed largest first, each with
+  **Close desktop** and **Delete conversation**.
+- **Critical:** below `memoryFloorPercent` (proposed 5%) mobd starts **no new desktops**; turns that
+  need one wait (above). Running and asleep desktops are untouched.
+- **Swap or zram** lets the kernel move asleep desktops out of RAM, so many more conversations
+  can stay open; the docs recommend it (Ubuntu desktop installs have a swap file; servers often
+  do not). Waking a swapped-out desktop takes a moment longer.
+- **Sizing:** Xvfb at 1080p is ~10–20 MB plus the framebuffer (8 MB), openbox and dbus a few MB
+  each. The browser dominates: 0.5–1.5 GB per desktop with a few tabs. Without swap, about 8–10
+  open conversations with a browser fit a 16 GB machine.
+
+### Encoders
+
+Each viewer is one encode; asleep desktops are never encoded. NVIDIA consumer GPUs limit concurrent NVENC sessions
   (a driver limit of a few sessions *(to verify the current number)*); VA-API has no hard limit but
   finite throughput; OpenH264 costs roughly one CPU core per 1080p30 stream *(to measure)*. When a
   hardware encoder refuses a new session, mobd falls back to the next encoder for that stream.
@@ -257,7 +349,7 @@ Sizing notes for the docs:
     so the wrappers pass `--password-store=basic`; a seed must be created the same way or Chrome
     cannot decrypt its cookies. The simplest way to make one: a `mobd desktop seed` command opens
     a desktop for a "seed" session that the user prepares through the live view.
-  - profiles survive idle close and eviction and are removed with the session.
+  - profiles survive sleep, closing the desktop and reboots, and are removed with the session.
 - **HOME and XDG dirs:** **shared by default.** A per-session `HOME` or `XDG_CONFIG_HOME` would
   isolate apps but would also hide the runners' and tools' logins (`gh` keeps its token in
   `~/.config/gh`). `desktopIsolateConfig: true` can later give each session its own
@@ -270,7 +362,8 @@ Sizing notes for the docs:
   desktop today). Later option: a pool of per-session Unix users, which needs root to start
   runners.
 - **Cleanup:** deleting a session removes `<dataDir>/desktops/<sessionId>` (profiles, downloads,
-  state); archiving closes the desktop and keeps the files. `/tmp` stays shared.
+  state) after closing its desktop; archiving closes the desktop and keeps the files and profiles.
+  `/tmp` stays shared.
 
 ## API and clients
 
@@ -278,18 +371,19 @@ Gated by a new `/health` feature **`sessionDesktops`**; without it (macOS, Windo
 as today.
 
 - **`POST /stream`** body gains `"sessionId"`. With `sessionDesktops` it is required: 404 for an
-  unknown session, 409 "the conversation has no desktop yet" when none is live. A viewer counts as
-  activity, so a watched desktop is never closed for idleness. When the desktop stops, the
+  unknown session, 409 "the conversation has no desktop yet" when none exists. It wakes an asleep
+  desktop, and a viewer keeps it awake. When the desktop stops, the
   session gets `ended` with the reason. The stream manager today takes one global
   `Start`/`Display`/`NewInput` (`internal/api/server.go` `New`); these become per-desktop.
-- **`GET /screen?sessionId=…`**: same rule.
-- **`GET /desktops`**: `[{sessionId, display, width, height, scale, state, startedAt, lastUsedAt,
-  running, viewers}]`. `DELETE /desktops/{sessionId}` closes one. Optional
-  `POST /desktops/{sessionId}` starts one without a turn, so a user can log in somewhere before the
-  agent runs.
-- **SSE:** `GET /events` gains `desktop` events `{sessionId, state: starting|running|stopped,
-  reason}`.
-- **`/health`:** adds `desktops: {count, max}` and `maxDesktops`. The macOS permission checks are
+- **`GET /screen?sessionId=…`**: same rule, except that an asleep desktop is not woken: mobd
+  returns its last frame with `X-Mob-Desktop-State: asleep`.
+- **`GET /desktops`**: `[{sessionId, display, width, height, scale, state: running|asleep,
+  memoryBytes, startedAt, lastUsedAt, running, viewers}]`. `DELETE /desktops/{sessionId}` closes
+  one (besides archiving or deleting the conversation). `POST /desktops/{sessionId}` starts or
+  wakes one without a turn, so a user can log in somewhere before the agent runs.
+- **SSE:** `GET /events` gains `desktop` events `{sessionId, state: starting|running|asleep|stopped,
+  reason}` and `memory` events `{level: ok|low|critical, availableBytes, totalBytes}`.
+- **`/health`:** adds `desktops: {count, asleep, memoryBytes}`, `maxDesktops` and a `memory` check. The macOS permission checks are
   generalized to backend checks: on Linux `xvfb`, `windowManager`, `dbus`, `encoder` (detail e.g.
   "vah264enc (VA-API)" or "openh264enc (software)"), and `fonts` (a warning; see
   [Packaging](#networking-packaging-testing)). `accessibility` and `screenRecording`
@@ -297,8 +391,10 @@ as today.
   so API v3 clients show no false warning; `display` reports the desktop cap instead of sleep/lock.
 - **Clients:** with `sessionDesktops`, the live view follows the open conversation: opening
   another conversation re-POSTs `/stream` (one session per client already replaces the old one).
-  Before the first turn it shows "no desktop yet; it starts with the first turn". The desktop list
-  can show which conversations have a live desktop.
+  Before the first turn it shows "no desktop yet; it starts with the first turn". A conversation's
+  menu gets **Close desktop** (confirming that open windows will be lost); the chat list marks
+  conversations with a running or asleep desktop; the low-memory banner lists desktops by memory.
+  Archiving and deleting a conversation warn that its desktop closes too.
 - **macOS unchanged:** one desktop, `sessionId` accepted and ignored, no `sessionDesktops`
   feature, FIFO desktop queue with `maxRunning` 1.
 - **MCP text:** instructions and tool descriptions stop saying "office Mac", "Quartz",
@@ -326,6 +422,18 @@ as today.
   `firewall-cmd --add-port=9527/udp --permanent`. Tailscale works the same (`tailscale serve` /
   Funnel for the WebSocket path, UDP over the tailnet). On a server without a desktop, host-only
   ICE candidates still cover LAN and tailnet addresses.
+- **Supported distributions:** Ubuntu 22.04 and 24.04, Debian 12 and 13, amd64 and arm64. These
+  get the `.deb`, CI tests and support. The glibc floor is 2.35 (Ubuntu 22.04); Debian 12 has
+  2.36.
+- **Other distributions** (Fedora, RHEL/Rocky/Alma, Arch, openSUSE, …): not packaged or tested. A
+  guide, `docs/linux-build.md` (written in phase 4), tells users how to do it themselves:
+  - build: Go, a C compiler, `pkg-config` and the GStreamer development headers, then `make build`
+    (cgo links the system GStreamer, so the binary matches their glibc);
+  - runtime packages by name per family (e.g. `xorg-x11-server-Xvfb`, `openbox` from EPEL on RHEL,
+    `gstreamer1-plugins-bad-free`, `openh264` from Cisco's repository on Fedora/RHEL);
+  - the systemd user unit and linger, cgroup v2 check, firewall (`firewall-cmd`), SELinux notes;
+  - `mobd status` and `/health` checks to confirm the setup.
+  The tarball (built on Ubuntu 22.04) also runs where glibc ≥ 2.35 and the libraries are present.
 - **Packages:** keep the R2 layout and add `linux-x86_64` / `linux-aarch64` keys to `release.json`.
   - `mobd_<v>_linux_amd64.tar.gz` / `_arm64`: `mobd`, LICENSE, README, unit templates; SHA256SUMS.
   - `mobd_<v>_amd64.deb` / `_arm64.deb`: `/usr/bin/mobd`, the disabled system unit. **Depends:**
@@ -348,13 +456,15 @@ as today.
     paste and `list_windows` through the MCP proxy change what a snapshot shows;
   - `cmd/stream-probe` receives and decodes a stream for the session, over WebRTC and with `-ws`,
     with `-pli`, `-click` and `-type`;
-  - two sessions run at once on separate displays; `maxDesktops` eviction and queueing; idle close
-    with a short timeout; archive and delete; killing Xvfb mid-turn; stale cleanup after a
-    `kill -9` of mobd.
+  - two sessions run at once on separate displays; sleep after a short `desktopSleepAfter` and
+    wake with windows intact (a counter in an `xterm` does not advance while asleep); a busy
+    background process or a changing screen keeps it awake; archive, close and delete end the
+    desktop; the memory guard with a low fake threshold; killing
+    Xvfb mid-turn; restarting and `kill -9` of mobd re-attach to running and asleep desktops.
 
   The mob clients can also be tested end to end against a Linux mobd in CI. Hardware encoders
   (VA-API, NVENC) still need manual or self-hosted runs.
-- **Manual matrix** (extend `docs/office-smoke-checklist.md`): Ubuntu 24.04 and 22.04, desktop PC
+- **Manual matrix** (extend `docs/office-smoke-checklist.md`): Ubuntu 24.04 and 22.04, Debian 12, desktop PC
   with Intel VA-API, NVIDIA NVENC, a GPU-less VM; several sessions watched at once; Chrome and
   Firefox with a seed profile; HiDPI scale 2; `stream-probe` first-picture time, bitrate and fps
   against the macOS baseline.
@@ -395,41 +505,42 @@ Rough effort assumes one engineer familiar with the codebase.
 | Phase | Scope | Effort |
 | --- | --- | --- |
 | **0. Portable core** | the list above. Result: mobd runs runners on Linux and Windows (no desktop), and `GOOS=windows` builds. | 1.5–2 weeks |
-| **1. Desktop manager** | Xvfb/openbox/dbus supervision, display numbers, Xauthority, stale cleanup, idle close, archive/delete, runner env, `maxDesktops` and eviction, `/desktops`, SSE events, health checks, systemd unit. | 1.5–2 weeks |
+| **1. Desktop manager** | systemd scopes, Xvfb/openbox/dbus supervision, display numbers, Xauthority, re-attach after restart, sleep and wake (cgroup freezer), close and delete, runners in the desktop's cgroup, memory guard, `/desktops`, SSE events, health checks, systemd unit. | 2–2.5 weeks |
 | **2. X11 backend** | xgb capture and snapshots, XTest input, key tables, Unicode, clipboard, EWMH windows, `OpenApp`, MCP text, CI desktop tests. | 1.5 weeks |
 | **3. Streaming** | GStreamer shim, encoder probe and fallback, per-session `POST /stream` and `/screen`, stream-probe in CI. | 1.5–2 weeks |
-| **4. Agent environment and release** | browser wrappers, per-session profiles, seed profile, downloads, `.deb` and tarball, `install.sh`, CI release matrix, docs. | 1–1.5 weeks |
-| **5. Later** | cursor shape, shared encodes, attach mode, per-session users, GPU, audio, `.rpm`. | as needed |
+| **4. Agent environment and release** | browser wrappers, per-session profiles, seed profile, downloads, `.deb` and tarball, `install.sh`, CI release matrix, `linux-build.md` for other distributions, docs. | 1–1.5 weeks |
+| **5. Later** | cursor shape, shared encodes, attach mode, per-session users, GPU, audio. | as needed |
 
 Linux first remains the recommendation: phase 0 is mostly Unix code that already works, there are
 no permission prompts or code-signing costs, and every desktop path is testable in CI.
 
 ## Risks
 
-1. **Memory and CPU:** browsers on software rendering, several at once, and software encoding on
-   GPU-less machines. Mitigated by `maxDesktops`, idle close, and encoding only while watched.
+1. **Memory:** desktops are never closed automatically, so open conversations accumulate. Asleep
+   desktops cost no CPU but keep their RAM. Mitigated by swap, the low-memory banner and the
+   critical floor that stops new desktops; it depends on users acting on the reminder.
+   **CPU:** browsers on software rendering and software encoding on GPU-less machines; encoding
+   runs only while watched.
 2. **Encoder variability:** VA-API driver differences (Intel iHD vs i965, Mesa AMD), NVENC session
    limits. Probe at start, fall back per stream.
 3. **OpenH264 licensing:** cannot be bundled; on GPU-less servers it is the only encoder.
 4. **Apps that assume a full desktop session:** no keyring, no portal, no notification daemon, no
    GPU. Some apps may warn or misbehave *(to collect while testing)*.
-5. **Lost windows:** idle close and eviction lose open windows and unsaved state; only profiles and
-   files survive.
+5. **Lost windows on reboot:** a machine reboot (or an Xvfb crash) loses open windows and unsaved
+   state; only profiles and files survive. Pages may need a reload after waking from sleep.
 6. **Same-user isolation:** sessions can read each other's files and profiles.
 
 ## Open questions for the owner
 
 1. Browser profiles: per-session by default (proposed) or one shared profile? Is a seed profile
    enough for "logged in everywhere"?
-2. `desktopIdleTimeout` default: 60 min (proposed), shorter to save memory, or longer so a user can
-   come back the next day?
-3. `maxDesktops` default 4, and at the cap: evict the least recently used idle desktop (proposed)
-   or always queue?
-4. Should every turn get a desktop, or should clients be able to mark a turn "no desktop"?
-5. Should mobd ever support the physical desktop (attach to an X11 display; Wayland is out)?
-6. Service default: `systemd --user` with linger (proposed) or a system unit with a dedicated user?
-7. OpenH264: download Cisco's binary at install, rely on the distro package, or refuse to stream
+2. `desktopSleepAfter` 10 min and `desktopSleepCPU` 2% of a core (proposed)? Stop new desktops at
+   5% available memory (proposed; the 15% warning is decided)?
+3. Should every turn get a desktop, or should clients be able to mark a turn "no desktop"?
+4. Should mobd ever support the physical desktop (attach to an X11 display; Wayland is out)?
+5. Service default: `systemd --user` with linger (proposed) or a system unit with a dedicated user?
+6. OpenH264: download Cisco's binary at install, rely on the distro package, or refuse to stream
    without a hardware encoder?
-8. Desktop keyboard layout: fixed `us`, configurable, or follow the client?
-9. Should the live view map a Mac client's Cmd to Ctrl when the desktop is Linux?
-10. Should `mobd mcp` use the desktop proxy on macOS too (one code path)?
+7. Desktop keyboard layout: fixed `us`, configurable, or follow the client?
+8. Should the live view map a Mac client's Cmd to Ctrl when the desktop is Linux?
+9. Should `mobd mcp` use the desktop proxy on macOS too (one code path)?
