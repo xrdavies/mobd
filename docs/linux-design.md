@@ -269,6 +269,10 @@ type Info struct {
 
 type State string // "starting" "running" "asleep" "waking" "closing" "closed" "failed"
 
+// As built (step 0.5): the type is DesktopState (desktop.State() is already the display-state
+// function), and Close takes a CloseReason instead of CloseOptions: the API cancels a running
+// turn of the session before closing (owner decision), so AfterTurn and ErrTurnActive are gone.
+
 // Shared wraps one Backend: PerSession false, Get/Ensure always return it, Reserve always ok,
 // Turn returns an empty TurnEnv, Close/Remove are no-ops, List is empty, Source.Hold is
 // Backend.KeepAwake. Used on macOS and Windows.

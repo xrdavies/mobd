@@ -49,6 +49,8 @@ const (
 // never larger than the view, the display or the quality profile. Without an offer the session
 // waits for the WebSocket only.
 type Request struct {
+	// SessionID picks the conversation's desktop where each has its own (Linux); ignored otherwise.
+	SessionID string `json:"sessionId,omitempty"`
 	Offer     string `json:"offer,omitempty"`
 	MaxWidth  int    `json:"maxWidth"`
 	MaxHeight int    `json:"maxHeight"`
@@ -78,6 +80,9 @@ var profiles = map[string]profile{
 
 // Config connects the manager to the desktop and to pairing; tests substitute fakes.
 type Config struct {
+	// Source returns the desktop a session streams, by conversation ("" without one). When nil,
+	// Start, Display, KeepAwake and NewInput describe the one desktop.
+	Source    func(sessionID string) (Source, error)
 	Start     func(context.Context, desktop.StreamOptions) (desktop.Stream, error)
 	Display   func() (desktop.Display, error)
 	KeepAwake func(reason string) (func(), error)
@@ -155,7 +160,11 @@ func (m *Manager) Open(clientID string, req Request) (Answer, error) {
 	if !ok || req.MaxWidth < 0 || req.MaxHeight < 0 || req.MaxWidth > 8192 || req.MaxHeight > 8192 {
 		return Answer{}, fmt.Errorf("%w: needs quality auto/high/low and a view of at most 8192 pixels", ErrBadRequest)
 	}
-	disp, err := m.cfg.Display()
+	source, err := m.source(req.SessionID)
+	if err != nil {
+		return Answer{}, err
+	}
+	disp, err := source.Display()
 	if err != nil {
 		return Answer{}, err
 	}
@@ -172,7 +181,7 @@ func (m *Manager) Open(clientID string, req Request) (Answer, error) {
 	if old != nil {
 		old.close()
 	}
-	s := &session{m: m, id: randomID(), client: clientID, finish: finish,
+	s := &session{m: m, id: randomID(), client: clientID, finish: finish, source: source,
 		display: [2]int{int(float64(disp.Width) * scale), int(float64(disp.Height) * scale)}, profile: p}
 	s.ctx, s.cancel = context.WithCancel(ctx)
 	s.rate = newRateController(p, w, h, time.Now())
@@ -231,6 +240,8 @@ type session struct {
 	cancel         context.CancelFunc
 	finish         func()
 	pc             *webrtc.PeerConnection
+	source         Source
+	desktopErr     atomic.Pointer[error] // why the desktop closed under the session
 	src            desktop.Stream
 	release        func()
 	once           sync.Once
@@ -257,7 +268,7 @@ type session struct {
 
 func (s *session) start(offer string, opts desktop.StreamOptions) (string, error) {
 	// Wake the display first: capture finds no display while it sleeps.
-	if release, err := s.m.cfg.KeepAwake("mobd live desktop"); err == nil {
+	if release, err := s.source.Hold("mobd live desktop"); err == nil {
 		s.release = release
 		if after := s.m.cfg.KeepAwakeAfter; after > 0 {
 			s.release = func() { time.AfterFunc(after, release) }
@@ -265,21 +276,36 @@ func (s *session) start(offer string, opts desktop.StreamOptions) (string, error
 	} else if !errors.Is(err, desktop.ErrUnsupported) {
 		log.Printf("stream %s: %v", s.id, err)
 	}
-	src, err := s.m.cfg.Start(s.ctx, opts)
+	src, err := s.source.StartStream(s.ctx, opts)
 	if errors.Is(err, desktop.ErrScreenUnavailable) && s.release != nil {
 		// A display that was asleep needs a moment after the wake-up request.
 		select {
 		case <-time.After(1500 * time.Millisecond):
 		case <-s.ctx.Done():
 		}
-		src, err = s.m.cfg.Start(s.ctx, opts)
+		src, err = s.source.StartStream(s.ctx, opts)
 	}
 	if err != nil {
 		return "", err
 	}
 	s.src = src
-	if s.m.cfg.NewInput != nil {
-		s.ctl = &controller{s: s, input: s.m.cfg.NewInput()}
+	if input := s.source.NewInput(); input != nil {
+		s.ctl = &controller{s: s, input: input}
+	}
+	if done := s.source.Done(); done != nil {
+		// The desktop closing ends the stream; forward then sends "ended" with the reason.
+		go func() {
+			select {
+			case <-done:
+				err := s.source.Err()
+				if err == nil {
+					err = errDesktopClosed
+				}
+				s.desktopErr.Store(&err)
+				src.Close()
+			case <-s.ctx.Done():
+			}
+		}()
 	}
 	s.connected = make(chan struct{})
 	answer := ""
@@ -422,7 +448,11 @@ func (s *session) forward() {
 			break
 		}
 	}
-	if err := s.src.Err(); err != nil {
+	err := s.src.Err()
+	if p := s.desktopErr.Load(); p != nil {
+		err = *p
+	}
+	if err != nil {
 		log.Printf("stream %s: %v", s.id, err)
 		// Tell the viewer why (for example a locked screen) before the connection closes.
 		if s.ctl != nil {

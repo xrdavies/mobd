@@ -82,18 +82,7 @@ const (
 )
 
 // NewInput returns an input session for this OS's backend.
-func NewInput() *Input {
-	return newInput(current.Remote(), func() (float64, float64, error) {
-		d, err := current.Displays()
-		if err != nil {
-			return 0, 0, err
-		}
-		if len(d) == 0 || d[0].Width <= 0 || d[0].Height <= 0 {
-			return 0, 0, errors.New("no display")
-		}
-		return float64(d[0].Width), float64(d[0].Height), nil
-	})
-}
+func NewInput() *Input { return On(current).NewInput() }
 
 func newInput(r RemoteInput, display func() (float64, float64, error)) *Input {
 	return &Input{remote: r, display: display, keys: map[string]bool{}}

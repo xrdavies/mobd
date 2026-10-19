@@ -1,7 +1,6 @@
 package api
 
 import (
-	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -34,6 +33,8 @@ type Server struct {
 	health    healthCache
 
 	streams *stream.Manager
+	// desktops gives each session its desktop: the shared one, or its own on Linux.
+	desktops desktop.Provider
 
 	// self is how `mobd mcp` reaches this server; empty uses cfg.SelfURL().
 	self string
@@ -52,8 +53,9 @@ type Server struct {
 }
 
 // New serves the given runners; cfg.DefaultRunner (or the first runner) starts
-// new conversations. Callers validate DefaultRunner before calling New.
-func New(cfg config.Config, store *task.Store, auth *pairing.Store, runners ...runner.Runner) *Server {
+// new conversations. Callers validate DefaultRunner before calling New. desktops gives each
+// session its desktop; nil means this OS's one shared desktop.
+func New(cfg config.Config, store *task.Store, auth *pairing.Store, desktops desktop.Provider, runners ...runner.Runner) *Server {
 	if auth == nil {
 		panic("pairing store is required")
 	}
@@ -75,20 +77,23 @@ func New(cfg config.Config, store *task.Store, auth *pairing.Store, runners ...r
 		cancels:   make(map[string]context.CancelFunc), done: make(chan struct{}),
 		tokens: make(map[string]string), waiters: make(map[string]chan struct{}),
 	}
+	if desktops == nil {
+		desktops = desktop.Shared(desktop.Current())
+	}
+	s.desktops = desktops
 	streams, err := stream.NewManager(stream.Config{
-		Start: desktop.StartStream, KeepAwake: desktop.KeepAwake, KeepAwakeAfter: 30 * time.Second,
-		Display: func() (desktop.Display, error) {
-			d, err := desktop.Current().Displays()
-			if err != nil || len(d) == 0 {
-				return desktop.Display{}, cmp.Or(err, errors.New("no display"))
+		Source: func(sessionID string) (stream.Source, error) {
+			d, err := desktops.Get(sessionID)
+			if err != nil {
+				return nil, err
 			}
-			return d[0], nil
+			return stream.FromDesktop(d.Source()), nil
 		},
+		KeepAwakeAfter: 30 * time.Second,
 		Attach: func(parent context.Context, client string) (context.Context, func(), error) {
 			return auth.Attach(parent, client, http.MethodPost, "/stream")
 		},
-		NewInput: func() stream.Input { return desktop.NewInput() },
-		UDP:      cfg.StreamUDP,
+		UDP: cfg.StreamUDP,
 	})
 	if err != nil {
 		panic(err)

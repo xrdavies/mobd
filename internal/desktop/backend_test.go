@@ -48,7 +48,7 @@ func TestUnsupportedBackend(t *testing.T) {
 	if _, err := CurrentPermissions(); !errors.Is(err, ErrUnsupported) {
 		t.Fatalf("permissions: %v", err)
 	}
-	if mainScale() != 1 {
+	if On(current).mainScale() != 1 {
 		t.Fatal("unknown scale should default to 1")
 	}
 }

@@ -235,7 +235,7 @@ func serve(cfg config.Config) error {
 	if _, err := runner.NewRegistry(cfg.DefaultRunner, runners...); err != nil {
 		return fmt.Errorf("defaultRunner: %w", err)
 	}
-	srv := api.New(cfg, store, auth, runners...)
+	srv := api.New(cfg, store, auth, nil, runners...)
 
 	httpSrv := &http.Server{
 		Addr:              cfg.ListenAddr,

@@ -25,7 +25,9 @@ const maxUpload = 20 << 20
 var validModel = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$`)
 
 // snapshot is swapped in tests.
-var snapshot = desktop.Snapshot
+var snapshot = func(ctx context.Context, d desktop.Desktop, opts desktop.SnapshotOptions) (desktop.Image, desktop.DesktopState, error) {
+	return d.Snapshot(ctx, opts)
+}
 
 func (s *Server) handleScreen(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
@@ -53,7 +55,20 @@ func (s *Server) handleScreen(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
-	img, err := snapshot(ctx, desktop.SnapshotOptions{MaxWidth: maxWidth, Format: format, Quality: quality})
+	d, err := s.desktops.Get(q.Get("sessionId"))
+	if errors.Is(err, desktop.ErrNoDesktop) {
+		writeErr(w, http.StatusConflict, err.Error())
+		return
+	}
+	if err != nil {
+		writeErr(w, http.StatusServiceUnavailable, err.Error())
+		return
+	}
+	img, state, err := snapshot(ctx, d, desktop.SnapshotOptions{MaxWidth: maxWidth, Format: format, Quality: quality})
+	if state != "" && state != desktop.StateRunning {
+		// An asleep conversation desktop answers with its last frame and is not woken.
+		w.Header().Set("X-Mob-Desktop-State", string(state))
+	}
 	if errors.Is(err, desktop.ErrUnsupported) {
 		writeErr(w, http.StatusNotImplemented, err.Error())
 		return

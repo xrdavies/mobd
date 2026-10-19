@@ -27,6 +27,8 @@ func (s *Server) handleStreamOpen(w http.ResponseWriter, r *http.Request) {
 			answer.WSTicket = ticket
 		}
 		writeJSON(w, http.StatusCreated, answer)
+	case errors.Is(err, desktop.ErrNoDesktop):
+		writeErr(w, http.StatusConflict, err.Error())
 	case errors.Is(err, stream.ErrBadRequest):
 		writeErr(w, http.StatusBadRequest, err.Error())
 	case errors.Is(err, desktop.ErrUnsupported):

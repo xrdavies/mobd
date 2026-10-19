@@ -27,7 +27,7 @@ func newTestServer(t *testing.T, cfg config.Config, tasks *task.Store, runners .
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := New(cfg, tasks, auth, runners...)
+	s := New(cfg, tasks, auth, nil, runners...)
 	t.Cleanup(func() { s.Close(); auth.Close() })
 	return s
 }

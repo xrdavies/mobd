@@ -818,11 +818,12 @@ func TestScreen(t *testing.T) {
 	s := testServer(t, "")
 	var got desktop.SnapshotOptions
 	frame := []byte("jpeg-bytes")
-	snapshot = func(_ context.Context, opts desktop.SnapshotOptions) (desktop.Image, error) {
+	restore := snapshot
+	t.Cleanup(func() { snapshot = restore })
+	stubSnapshot(func(opts desktop.SnapshotOptions) (desktop.Image, error) {
 		got = opts
 		return desktop.Image{Data: frame, MIME: "image/" + opts.Format, Width: 32, Height: 16}, nil
-	}
-	t.Cleanup(func() { snapshot = desktop.Snapshot })
+	})
 
 	rr := doJSON(t, s, http.MethodGet, "/screen?maxWidth=32&quality=65", "")
 	if rr.Code != http.StatusOK || rr.Header().Get("Content-Type") != "image/jpeg" || !bytes.Equal(rr.Body.Bytes(), frame) {
@@ -848,15 +849,15 @@ func TestScreen(t *testing.T) {
 	if rr := doJSON(t, s, http.MethodGet, "/screen?format=gif", ""); rr.Code != http.StatusBadRequest {
 		t.Fatalf("bad format: %d", rr.Code)
 	}
-	snapshot = func(context.Context, desktop.SnapshotOptions) (desktop.Image, error) {
+	stubSnapshot(func(desktop.SnapshotOptions) (desktop.Image, error) {
 		return desktop.Image{}, fmt.Errorf("%w: the office computer is locked", desktop.ErrScreenUnavailable)
-	}
+	})
 	if rr := doJSON(t, s, http.MethodGet, "/screen", ""); rr.Code != http.StatusServiceUnavailable || !strings.Contains(rr.Body.String(), "locked") {
 		t.Fatalf("locked: %d %s", rr.Code, rr.Body)
 	}
-	snapshot = func(context.Context, desktop.SnapshotOptions) (desktop.Image, error) {
+	stubSnapshot(func(desktop.SnapshotOptions) (desktop.Image, error) {
 		return desktop.Image{}, desktop.ErrUnsupported
-	}
+	})
 	if rr := doJSON(t, s, http.MethodGet, "/screen", ""); rr.Code != http.StatusNotImplemented {
 		t.Fatalf("unsupported: %d", rr.Code)
 	}
@@ -924,5 +925,13 @@ func TestTurnRunnerValidation(t *testing.T) {
 		if rr.Code != tc.code || !strings.Contains(rr.Body.String(), tc.want) {
 			t.Fatalf("%s → %d %s", tc.body, rr.Code, rr.Body.String())
 		}
+	}
+}
+
+// stubSnapshot makes /screen return f's capture for any desktop.
+func stubSnapshot(f func(desktop.SnapshotOptions) (desktop.Image, error)) {
+	snapshot = func(_ context.Context, _ desktop.Desktop, opts desktop.SnapshotOptions) (desktop.Image, desktop.DesktopState, error) {
+		img, err := f(opts)
+		return img, desktop.StateRunning, err
 	}
 }
