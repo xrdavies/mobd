@@ -87,8 +87,8 @@ make serve ARGS='--config ./config.dev.json'
 A plain `make build` is ad-hoc signed, so macOS treats every rebuild as a new app and drops
 its Screen Recording and Accessibility grants. On a Mac you rebuild often, sign dev builds
 with a self-signed code-signing certificate kept in its own keychain
-(`make build SIGN_IDENTITY="mobd dev"`, see `tools/devsign.sh`): grant once, and later
-rebuilds keep the grants.
+(`make build SIGN_IDENTITY="mobd dev"`): grant once, and later rebuilds keep the grants.
+Setup and design: [Signing dev builds](docs/dev-signing.md).
 
 ### Connect clients
 
@@ -366,6 +366,7 @@ CORS covers API responses and SSE, plus `OPTIONS` preflight for `GET`/`POST`/`PA
 - [Connection setup](docs/connection-setup.md), [pairing](docs/pairing.md): networks, client pairing and authentication.
 - [Office smoke checklist](docs/office-smoke-checklist.md), [security](docs/security.md): deployment and verification.
 - [Live desktop streaming](docs/desktop-streaming.md): capture, encoding, WebRTC and WebSocket transports, rate control and input.
+- [Signing dev builds](docs/dev-signing.md): keep macOS grants across rebuilds.
 - [Linux](docs/linux.md) (draft plan, not implemented): one virtual desktop per conversation (Xvfb), concurrency, packaging and phases.
 - [Linux design](docs/linux-design.md) (detailed design for review, not implemented): packages, interfaces, desktop state machine, API, CLI and PR-sized phases.
 - [Windows](docs/windows.md) (draft plan, not implemented): backend for the logged-in user's desktop, session model, packaging and phases.
