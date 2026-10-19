@@ -21,6 +21,7 @@ func xvfbArgs(n, width, height, scale int, xauth string) []string {
 		"-nolisten", "tcp",
 		"-auth", xauth,
 		"-s", "0",
+		"-br", // a black root, not X's weave
 		"-noreset",
 		"+extension", "RANDR",
 	}

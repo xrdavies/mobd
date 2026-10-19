@@ -126,7 +126,7 @@ func TestDisplayFree(t *testing.T) {
 func TestXvfbArgs(t *testing.T) {
 	got := xvfbArgs(101, 1280, 800, 2, "/run/x/Xauthority")
 	want := []string{":101", "-screen", "0", "2560x1600x24", "-dpi", "192", "-nolisten", "tcp",
-		"-auth", "/run/x/Xauthority", "-s", "0", "-noreset", "+extension", "RANDR"}
+		"-auth", "/run/x/Xauthority", "-s", "0", "-br", "-noreset", "+extension", "RANDR"}
 	if !slices.Equal(got, want) {
 		t.Errorf("args %q", got)
 	}

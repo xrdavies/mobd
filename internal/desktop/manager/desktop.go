@@ -54,6 +54,13 @@ type desk struct {
 	freezeFailures int
 	// Guard samples (guard.go): memory, directory size, and the OOM kill count (-1 unknown).
 	memBytes, diskBytes, oomKills int64
+	// X (xconn.go): the connection while running, when the screen last changed, and the frame
+	// kept from before sleep.
+	x         xconn
+	changedAt time.Time
+	lastFrame []byte
+
+	ops sync.RWMutex // X calls hold it shared; dropping the connection holds it exclusively
 }
 
 // child is a process the desktop started.
@@ -348,6 +355,9 @@ func (d *desk) start(ctx context.Context) (err error) {
 		return err
 	}
 	rec.PIDs["openbox"] = wm.pid
+	if err := d.connectX(ctx, rec); err != nil {
+		return err
+	}
 
 	rec.State = desktop.StateRunning
 	d.commit(rec)
@@ -400,6 +410,7 @@ func (d *desk) fail(rec record, err error) error {
 func (d *desk) abort(rec record, scoped bool, cause error) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
+	d.dropX()
 	if scoped {
 		if err := d.m.opts.Systemd.StopUnit(ctx, rec.Unit); err != nil {
 			log.Printf("desktop %s: stop %s: %v", d.sid, rec.Unit, err)
@@ -435,6 +446,7 @@ func (d *desk) close(ctx context.Context, reason desktop.CloseReason) error {
 	asleep := rec.State == desktop.StateAsleep || rec.State == desktop.StateWaking
 	rec.State = desktop.StateClosing
 	d.commit(rec)
+	d.dropX()
 	if asleep && rec.Cgroup != "" {
 		// Frozen processes would sit out SIGTERM until systemd's timeout.
 		tctx, cancel := context.WithTimeout(ctx, freezeTimeout)
@@ -455,6 +467,7 @@ func (d *desk) close(ctx context.Context, reason desktop.CloseReason) error {
 	}
 	rec.State, rec.Reason, rec.PIDs, rec.Turn = desktop.StateClosed, string(reason), nil, nil
 	d.commit(rec)
+	d.forgetLastFrame()
 	d.end(errors.New("the conversation's desktop was closed"))
 	log.Printf("desktop %s: closed (%s)", d.sid, reason)
 	return nil
@@ -470,19 +483,25 @@ func (d *desk) SessionID() string           { return d.sid }
 func (d *desk) State() desktop.DesktopState { return d.record().State }
 func (d *desk) Source() desktop.Source      { return source{d} }
 
-// Backend is the desktop's X11 backend; until it exists (phase 2) a running desktop answers
-// every call with ErrUnsupported.
+// Backend is the running desktop's X11 backend.
 func (d *desk) Backend() (desktop.Backend, error) {
 	switch d.State() {
 	case desktop.StateRunning:
-		return desktop.Current(), nil
+		if x := d.conn(); x != nil {
+			return guarded{d, x}, nil
+		}
 	case desktop.StateAsleep:
 		return nil, desktop.ErrDesktopAsleep
 	}
 	return nil, desktop.ErrNoDesktop
 }
 
+// Snapshot captures a running desktop; an asleep one answers with its last frame, unwoken.
 func (d *desk) Snapshot(ctx context.Context, opts desktop.SnapshotOptions) (desktop.Image, desktop.DesktopState, error) {
+	if st := d.State(); st == desktop.StateAsleep {
+		img, err := d.lastFrameImage(opts)
+		return img, st, err
+	}
 	b, err := d.Backend()
 	if err != nil {
 		return desktop.Image{}, d.State(), err

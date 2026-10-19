@@ -118,6 +118,7 @@ func (d *desk) reattach(ctx context.Context, rec record) error {
 	frozen := st.FreezerState == "frozen"
 	if rec.State == desktop.StateAsleep && frozen {
 		// A frozen X server cannot answer; trust the unit and wake it when needed.
+		d.loadLastFrame()
 		return d.adopt(rec, desktop.StateAsleep)
 	}
 	if frozen || rec.State == desktop.StateWaking {
@@ -135,7 +136,11 @@ func (d *desk) reattach(ctx context.Context, rec record) error {
 	xctx, cancel := context.WithTimeout(ctx, attachTimeout)
 	err = m.xready(xctx, rec.Display, cookie)
 	cancel()
+	if err == nil {
+		err = d.connectX(ctx, rec)
+	}
 	if err != nil {
+		d.dropX()
 		return d.stopStale(ctx, rec, err)
 	}
 	return d.adopt(rec, desktop.StateRunning)

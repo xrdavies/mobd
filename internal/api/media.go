@@ -73,6 +73,11 @@ func (s *Server) handleScreen(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusNotImplemented, err.Error())
 		return
 	}
+	if errors.Is(err, desktop.ErrNoDesktop) {
+		// Starting, or asleep without a frame from before.
+		writeErrCode(w, http.StatusConflict, "no_desktop", err.Error())
+		return
+	}
 	if err != nil {
 		// Includes ErrScreenUnavailable: its message says the computer is locked or asleep.
 		writeErr(w, http.StatusServiceUnavailable, err.Error())

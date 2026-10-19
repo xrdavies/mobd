@@ -73,6 +73,7 @@ type Manager struct {
 	tmp          string // where X servers keep locks and sockets
 	look         func(string) (string, error)
 	xready       func(ctx context.Context, display int, cookie []byte) error
+	openX        func(ctx context.Context, display int, cookie []byte, scale int, onChange func()) (xconn, error)
 	busReady     func(ctx context.Context, path string) error
 	kill         func(pid int) error
 	killGroup    func(pgid int) error
@@ -119,6 +120,7 @@ func New(opts Options) (*Manager, error) {
 		procRoot: "/proc", statfs: statfs, oomdActive: oomdActive, lingering: lingering,
 	}
 	m.xready = func(ctx context.Context, n int, cookie []byte) error { return xHandshake(ctx, m.tmp, n, cookie) }
+	m.openX = m.openX11
 	// Levels are known before the first turn is scheduled.
 	m.sampleMemory()
 	m.sampleDisk(false)

@@ -3,7 +3,11 @@
 package manager
 
 import (
+	"bytes"
 	"context"
+	"image"
+	_ "image/jpeg"
+	_ "image/png"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -217,7 +221,13 @@ func TestRealCrashMidTurn(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("runner still alive after its turn ended")
 	}
-	if st, _ := sd.UnitState(ctx, rec.Unit); st.ActiveState != "inactive" {
+	// The runner dies while the stop job runs; the unit is inactive once the job is done.
+	st, _ := sd.UnitState(ctx, rec.Unit)
+	for i := 0; st.ActiveState != "inactive" && i < 100; i++ {
+		time.Sleep(50 * time.Millisecond)
+		st, _ = sd.UnitState(ctx, rec.Unit)
+	}
+	if st.ActiveState != "inactive" {
 		t.Errorf("unit after the turn: %+v", st)
 	}
 }
@@ -407,4 +417,94 @@ func TestRealSleep(t *testing.T) {
 	if st, _ := sd.UnitState(ctx, rec.Unit); st.ActiveState != "inactive" {
 		t.Errorf("unit after close: %+v", st)
 	}
+}
+
+// TestRealScreen: a snapshot shows an xterm; an xterm printing the time keeps the desktop
+// awake by screen changes alone; once quiet it sleeps and snapshots return the last frame.
+func TestRealScreen(t *testing.T) {
+	sd, ctx := realUser(t)
+	if _, err := exec.LookPath("xterm"); err != nil {
+		t.Skip("xterm not installed")
+	}
+	root := t.TempDir()
+	m := realManager(t, sd, root)
+	defer m.Shutdown()
+	// CPU use high enough that only screen changes can keep it awake.
+	m.opts.SleepAfter, m.opts.SleepCPU = 1500*time.Millisecond, 0.9
+	id := strings.Repeat("a", 32)
+	defer m.Remove(context.Background(), id)
+	d, err := m.Ensure(ctx, id, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	lit := func(opts desktop.SnapshotOptions) (int, desktop.DesktopState) {
+		t.Helper()
+		img, st, err := d.Snapshot(ctx, opts)
+		if err != nil {
+			t.Fatalf("snapshot (%s): %v", st, err)
+		}
+		dec, _, err := image.Decode(bytes.NewReader(img.Data))
+		if err != nil {
+			t.Fatal(err)
+		}
+		n := 0
+		b := dec.Bounds()
+		for y := b.Min.Y; y < b.Max.Y; y += 4 {
+			for x := b.Min.X; x < b.Max.X; x += 4 {
+				if r, g, bl, _ := dec.At(x, y).RGBA(); r|g|bl > 0x2000 {
+					n++
+				}
+			}
+		}
+		return n, st
+	}
+	if n, _ := lit(desktop.SnapshotOptions{Format: "png"}); n != 0 {
+		t.Errorf("empty desktop has %d lit samples", n)
+	}
+	rec := m.desks[id].record()
+	cmd := exec.Command("xterm", "-geometry", "80x24+40+40", "-e", "sh", "-c", "while :; do date +%T.%N; sleep 0.2; done")
+	cmd.Env = append(os.Environ(), rec.env()...)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	dir, err := proc.IntoCgroup(cmd, filepath.Join(cgroup.DefaultRoot, rec.Cgroup, "apps"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	dir.Close()
+	go cmd.Wait()
+	deadline := time.Now().Add(10 * time.Second)
+	n := 0
+	for n < 500 && time.Now().Before(deadline) {
+		time.Sleep(200 * time.Millisecond)
+		n, _ = lit(desktop.SnapshotOptions{Format: "png"})
+	}
+	if n < 500 {
+		t.Fatalf("xterm not on the snapshot: %d lit samples", n)
+	}
+	before, _ := lit(desktop.SnapshotOptions{Format: "jpeg", Quality: 80, MaxWidth: 640})
+
+	// Changes are reported at most every 500 ms: ticks and the idle time leave room for that.
+	tick := func() { time.Sleep(1200 * time.Millisecond); m.sleepIdle(ctx) }
+	m.sleepIdle(ctx)
+	for range 4 {
+		tick()
+	}
+	if st := d.State(); st != desktop.StateRunning {
+		t.Fatalf("slept while the xterm printed: %s", st)
+	}
+	_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGSTOP) // the xterm stops printing
+	defer syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+	for range 4 {
+		tick()
+	}
+	if st := d.State(); st != desktop.StateAsleep {
+		t.Fatalf("not asleep once quiet: %s", st)
+	}
+	after, st := lit(desktop.SnapshotOptions{Format: "jpeg", Quality: 80, MaxWidth: 640})
+	if st != desktop.StateAsleep || after < before/2 {
+		t.Errorf("asleep snapshot: %s, %d lit samples (awake %d)", st, after, before)
+	}
+	t.Logf("lit samples: xterm %d, asleep frame %d", before, after)
 }

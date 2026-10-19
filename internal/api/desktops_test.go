@@ -23,10 +23,20 @@ type perSession struct{ desktop.Provider }
 
 func (perSession) PerSession() bool { return true }
 func (perSession) Get(id string) (desktop.Desktop, error) {
-	if id != "asleep" {
-		return nil, desktop.ErrNoDesktop
+	switch id {
+	case "asleep":
+		return asleepDesktop{}, nil
+	case "noframe":
+		return noFrameDesktop{}, nil
 	}
-	return asleepDesktop{}, nil
+	return nil, desktop.ErrNoDesktop
+}
+
+// noFrameDesktop is asleep with no frame from before.
+type noFrameDesktop struct{ desktop.Desktop }
+
+func (noFrameDesktop) Snapshot(context.Context, desktop.SnapshotOptions) (desktop.Image, desktop.DesktopState, error) {
+	return desktop.Image{}, desktop.StateAsleep, desktop.ErrNoDesktop
 }
 
 type asleepDesktop struct{ desktop.Desktop }
@@ -49,6 +59,9 @@ func TestScreenUsesTheConversationDesktop(t *testing.T) {
 	rr := doJSON(t, s, http.MethodGet, "/screen?sessionId=asleep", "")
 	if rr.Code != http.StatusOK || rr.Header().Get("X-Mob-Desktop-State") != "asleep" || rr.Body.String() != "last frame" {
 		t.Fatalf("asleep: %d %v %q", rr.Code, rr.Header(), rr.Body)
+	}
+	if rr := doJSON(t, s, http.MethodGet, "/screen?sessionId=noframe", ""); rr.Code != http.StatusConflict || !strings.Contains(rr.Body.String(), `"no_desktop"`) {
+		t.Fatalf("asleep without a frame: %d %s", rr.Code, rr.Body)
 	}
 	if rr := doJSON(t, s, http.MethodPost, "/stream", `{"sessionId":"none","offer":""}`); rr.Code != http.StatusConflict {
 		t.Fatalf("stream without desktop: %d %s", rr.Code, rr.Body)

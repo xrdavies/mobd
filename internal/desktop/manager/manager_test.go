@@ -3,9 +3,13 @@
 package manager
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
+	"image"
+	"image/color"
+	"image/draw"
 	"os"
 	"path/filepath"
 	"slices"
@@ -179,7 +183,45 @@ func (s *fakeSpawner) spec(name string) proc.Spec {
 	return proc.Spec{}
 }
 
+// testX is a desktop's X connection: a grey screen whose shade tests change.
+type testX struct {
+	desktop.Backend
+	mu       sync.Mutex
+	shade    uint8
+	onChange func()
+	done     chan struct{}
+	once     sync.Once
+}
+
+func (x *testX) Snapshot(_ context.Context, opts desktop.SnapshotOptions) (desktop.Image, error) {
+	select {
+	case <-x.done:
+		return desktop.Image{}, errors.New("closed")
+	default:
+	}
+	x.mu.Lock()
+	shade := x.shade
+	x.mu.Unlock()
+	img := image.NewRGBA(image.Rect(0, 0, 64, 40))
+	draw.Draw(img, img.Bounds(), &image.Uniform{color.RGBA{shade, shade, shade, 255}}, image.Point{}, draw.Src)
+	return desktop.EncodeImage(img, cmp.Or(opts.Format, "png"), opts.MaxWidth, opts.Quality)
+}
+func (x *testX) Done() <-chan struct{} { return x.done }
+func (x *testX) Close()                { x.once.Do(func() { close(x.done) }) }
+
+// paint changes the screen, as an app drawing.
+func (x *testX) paint(shade uint8) {
+	x.mu.Lock()
+	x.shade = shade
+	x.mu.Unlock()
+	x.onChange()
+}
+
 type fixture struct {
+	xs    []*testX // every connection opened, newest last
+	xmu   sync.Mutex
+	failX error // the next X connection fails
+
 	busy bool // CPU use reported by sleep tests' cpuFS
 
 	m      *Manager
@@ -264,7 +306,28 @@ func (f *fixture) newManager(t *testing.T, sessions SessionLookup) *Manager {
 	m.watch = f.sp.watch
 	m.owns = f.sp.owns
 	m.bootID = func() string { return "boot-1" }
+	m.openX = func(_ context.Context, _ int, _ []byte, _ int, onChange func()) (xconn, error) {
+		f.xmu.Lock()
+		defer f.xmu.Unlock()
+		if err := f.failX; err != nil {
+			f.failX = nil
+			return nil, err
+		}
+		x := &testX{Backend: desktop.Current(), shade: 0x80, onChange: onChange, done: make(chan struct{})}
+		f.xs = append(f.xs, x)
+		return x, nil
+	}
 	return m
+}
+
+// lastX is the newest X connection.
+func (f *fixture) lastX() *testX {
+	f.xmu.Lock()
+	defer f.xmu.Unlock()
+	if len(f.xs) == 0 {
+		return nil
+	}
+	return f.xs[len(f.xs)-1]
 }
 
 // setMemory writes the fake /proc/meminfo and PSI.

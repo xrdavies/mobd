@@ -26,11 +26,19 @@ const (
 func (d *desk) supervise(done chan struct{}) {
 	for {
 		d.mu.Lock()
-		xvfb, bus, wm := d.procs["xvfb"], d.procs["dbus"], d.procs["openbox"]
+		xvfb, bus, wm, x := d.procs["xvfb"], d.procs["dbus"], d.procs["openbox"], d.x
 		d.mu.Unlock()
+		var xdone <-chan struct{}
+		if x != nil {
+			xdone = x.Done()
+		}
 		select {
 		case <-done:
 			return
+		case <-xdone:
+			if !d.xLost(done, x) {
+				return
+			}
 		case <-exited(xvfb):
 			d.crashed(done, "Xvfb exited")
 			return
@@ -74,6 +82,8 @@ func live(s desktop.DesktopState) bool {
 // when the turn ends.
 func (d *desk) crashLocked(why string) {
 	m := d.m
+	d.dropX()
+	d.forgetLastFrame()
 	rec := d.record()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()

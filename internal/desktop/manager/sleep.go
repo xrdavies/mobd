@@ -98,7 +98,7 @@ func (d *desk) idle(now time.Time) bool {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	busy := err != nil || d.cpuAt.IsZero() || rec.Turn != nil || reserved || d.viewers > 0 ||
-		d.freezeFailures >= maxFreezeFailures
+		d.freezeFailures >= maxFreezeFailures || d.changedAt.After(d.cpuAt)
 	if err == nil && !d.cpuAt.IsZero() {
 		if elapsed := now.Sub(d.cpuAt); elapsed > 0 {
 			busy = busy || float64(usage-d.cpuPrev)/float64(elapsed) >= m.opts.SleepCPU
@@ -141,7 +141,13 @@ func (d *desk) sleep(ctx context.Context) {
 	if rec.State != desktop.StateRunning || rec.Turn != nil || viewers > 0 || d.m.reservedFor(d.sid) {
 		return
 	}
+	d.saveLastFrame(ctx)
+	d.dropX()
 	if err := d.freezeLocked(ctx, rec); err != nil {
+		if cerr := d.connectX(ctx, rec); cerr != nil {
+			d.crashLocked("lost the X connection after a failed freeze: " + cerr.Error())
+			return
+		}
 		d.mu.Lock()
 		d.freezeFailures++
 		failures := d.freezeFailures
@@ -231,6 +237,9 @@ func (d *desk) wakeLocked(ctx context.Context) error {
 			err = d.m.xready(xctx, rec.Display, cookie)
 			xcancel()
 		}
+	}
+	if err == nil {
+		err = d.connectX(ctx, rec)
 	}
 	if err != nil {
 		log.Printf("desktop %s: cannot wake: %v", d.sid, err)
