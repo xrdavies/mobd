@@ -178,9 +178,7 @@ first-picture time, bitrate and frame rate. `-ws` uses the WebSocket fallback; `
   mobd would be configured with the relay URL and a shared secret, issue short-lived per-session
   TURN credentials (HMAC of `expiry:clientId`) and return them as `iceServers` in `POST /stream`.
   Clients configure nothing.
-- **Linux (Ubuntu) backend:** xdg-desktop-portal ScreenCast + PipeWire (X11 XShm/XDamage fallback),
-  VAAPI encoding (OpenH264 fallback, patent terms to confirm), portal RemoteDesktop + libei input
-  (X11 XTest). Store the portal `restore_token` and replace it after every start. x264 is not used (GPL).
-- **Windows backend:** Windows.Graphics.Capture / DXGI duplication, Media Foundation, SendInput.
+- **Linux and Windows backends:** see the draft plan in [Linux and Windows](linux-windows.md)
+  (capture, encode, input, permissions, session model, packaging and phases).
 - **macOS login window:** a privileged helper to reach the screen before any user signs in.
 - Not planned for now: audio, file transfer, clipboard sync, multi-monitor selection (main display only).

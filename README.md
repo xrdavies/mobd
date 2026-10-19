@@ -360,3 +360,4 @@ CORS covers API responses and SSE, plus `OPTIONS` preflight for `GET`/`POST`/`PA
 - [Connection setup](docs/connection-setup.md), [pairing](docs/pairing.md): networks, client pairing and authentication.
 - [Office smoke checklist](docs/office-smoke-checklist.md), [security](docs/security.md): deployment and verification.
 - [Live desktop streaming](docs/desktop-streaming.md): capture, encoding, WebRTC and WebSocket transports, rate control and input.
+- [Linux and Windows](docs/linux-windows.md) (draft plan, not implemented): backends, session model, packaging and phases.
