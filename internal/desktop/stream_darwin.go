@@ -17,18 +17,14 @@ import (
 	"unsafe"
 )
 
-// unitBuffer holds about half a second at 30 fps; a slower consumer loses frames, not latency.
-const unitBuffer = 16
-
 type macStream struct {
 	id     uintptr
 	native unsafe.Pointer
-	units  chan AccessUnit
+	queue  *UnitQueue
 
-	mu      sync.Mutex // guards closed and err against the native callbacks
-	closed  bool
-	err     error
-	needKey atomic.Bool // a unit was dropped: discard deltas until the next keyframe
+	mu     sync.Mutex // guards closed and err against the native callbacks
+	closed bool
+	err    error
 }
 
 var (
@@ -45,7 +41,9 @@ func (macOS) StartStream(ctx context.Context, opts StreamOptions) (Stream, error
 	if timeout <= 0 {
 		return nil, context.DeadlineExceeded
 	}
-	s := &macStream{id: nextStream.Add(1), units: make(chan AccessUnit, unitBuffer)}
+	s := &macStream{id: nextStream.Add(1)}
+	// The keyframe request is asynchronous; safe from the encoder's callback.
+	s.queue = NewUnitQueue(func() { C.mob_stream_keyframe(s.native) })
 	streams.Store(s.id, s)
 	cursor := 0
 	if opts.ShowCursor {
@@ -75,7 +73,7 @@ func streamError(rc C.int, detail string) error {
 	return fmt.Errorf("screen stream failed: %s", detail)
 }
 
-func (s *macStream) Units() <-chan AccessUnit { return s.units }
+func (s *macStream) Units() <-chan AccessUnit { return s.queue.Units() }
 
 func (s *macStream) SetBitrate(kbps int) {
 	if s.live() {
@@ -124,7 +122,7 @@ func (s *macStream) Close() {
 	s.closed = true
 	s.mu.Unlock()
 	C.mob_stream_stop(s.native)
-	close(s.units)
+	s.queue.Close()
 }
 
 func (s *macStream) deliver(u AccessUnit) {
@@ -133,19 +131,7 @@ func (s *macStream) deliver(u AccessUnit) {
 	if s.closed {
 		return
 	}
-	if s.needKey.Load() && !u.Key {
-		return
-	}
-	select {
-	case s.units <- u:
-		if u.Key {
-			s.needKey.Store(false)
-		}
-	default:
-		if !s.needKey.Swap(true) {
-			C.mob_stream_keyframe(s.native) // asynchronous; safe from the encoder's callback
-		}
-	}
+	s.queue.Deliver(u)
 }
 
 //export mobStreamFrame

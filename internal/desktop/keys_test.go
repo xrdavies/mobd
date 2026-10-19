@@ -18,6 +18,8 @@ func TestParseHotkey(t *testing.T) {
 		{"ctrl+shift+tab", "tab", []string{"control", "shift"}},
 		{"alt+f4", "f4", []string{"option"}},
 		{"CMD+V", "v", []string{"command"}},
+		{"super+l", "l", []string{"command"}},
+		{"win+e", "e", []string{"command"}},
 	} {
 		key, mods, err := ParseHotkey(tc.spec)
 		if err != nil || key != tc.key || !reflect.DeepEqual(mods, tc.mods) {
