@@ -3,7 +3,6 @@ package api
 import (
 	"context"
 	"crypto/rand"
-	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -75,13 +74,8 @@ func (s *Server) questionTimeout() time.Duration {
 // question and blocks until the user answers, it times out, the turn ends
 // (the agent drops the request) or mobd shuts down.
 func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	s.mu.Lock()
-	want := s.tokens[id]
-	s.mu.Unlock()
-	got := r.Header.Get("X-Mob-Task-Token")
-	if want == "" || subtle.ConstantTimeCompare([]byte(got), []byte(want)) != 1 {
-		writeErr(w, http.StatusUnauthorized, "unknown task token")
+	id, ok := s.taskAuth(w, r)
+	if !ok {
 		return
 	}
 	var req askRequest

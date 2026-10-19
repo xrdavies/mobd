@@ -198,6 +198,10 @@ func (s *Server) runOptions(t *task.Task) runner.Options {
 			return s.ask(ctx, t.ID, askRequest{Kind: kind, Text: text, Details: details})
 		},
 	}
+	if s.desktops.PerSession() {
+		// mobd mcp then drives this conversation's desktop through mobd serve (MOB_DESKTOP_PROXY).
+		opts.MCPEnv["MOB_DESKTOP_PROXY"] = "1"
+	}
 	for _, id := range t.Attachments {
 		if path, _, err := s.artifacts.Path(id); err == nil {
 			opts.Images = append(opts.Images, path)

@@ -3,6 +3,8 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"net/http/httptest"
 	"net/http"
 	"path/filepath"
 	"slices"
@@ -87,5 +89,76 @@ func TestHealthOnLinuxNamesNoMacGrantsAndListsSessionDesktops(t *testing.T) {
 	// The shared desktop (macOS) does not advertise per-conversation desktops.
 	if slices.Contains(newTestServer(t, cfg, task.NewStore(), codex.New(cfg)).features(), "sessionDesktops") {
 		t.Fatal("shared desktop lists sessionDesktops")
+	}
+}
+
+// fakeBackend records the agent's clicks on a conversation desktop.
+type fakeBackend struct {
+	desktop.Backend
+	clicks []string
+}
+
+func (f *fakeBackend) Click(x, y float64, right bool, count int) error {
+	f.clicks = append(f.clicks, fmt.Sprintf("%g,%g,%t,%d", x, y, right, count))
+	return nil
+}
+
+type runningDesktop struct {
+	desktop.Desktop
+	b desktop.Backend
+}
+
+func (r runningDesktop) Backend() (desktop.Backend, error) { return r.b, nil }
+
+type ensureProvider struct {
+	desktop.Provider
+	sessions []string
+	d        desktop.Desktop
+}
+
+func (p *ensureProvider) Ensure(_ context.Context, id, _ string) (desktop.Desktop, error) {
+	p.sessions = append(p.sessions, id)
+	return p.d, nil
+}
+
+func TestAgentDesktopCallsReachTheTurnsConversationDesktop(t *testing.T) {
+	cfg := config.Config{DataDir: t.TempDir()}
+	auth, err := pairing.Open(filepath.Join(t.TempDir(), "auth.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := &fakeBackend{}
+	p := &ensureProvider{Provider: desktop.Shared(desktop.Current()), d: runningDesktop{b: b}}
+	store := task.NewStore()
+	s := New(cfg, store, auth, p, codex.New(cfg))
+	t.Cleanup(func() { s.Close(); auth.Close() })
+	tk, err := store.Create("click it")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.mu.Lock()
+	s.tokens[tk.ID] = "turn-token"
+	s.mu.Unlock()
+	call := func(op, token, body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, "/internal/tasks/"+tk.ID+"/desktop/"+op, strings.NewReader(body))
+		req.Header.Set("X-Mob-Task-Token", token)
+		rr := httptest.NewRecorder()
+		s.Handler().ServeHTTP(rr, req)
+		return rr
+	}
+	if rr := call("click", "wrong", `{}`); rr.Code != http.StatusUnauthorized {
+		t.Fatalf("bad token: %d", rr.Code)
+	}
+	if rr := call("click", "turn-token", `{"x":10,"y":20,"button":"right","count":2}`); rr.Code != http.StatusOK {
+		t.Fatalf("click: %d %s", rr.Code, rr.Body)
+	}
+	if len(b.clicks) != 1 || b.clicks[0] != "10,20,true,2" || len(p.sessions) != 1 || p.sessions[0] != tk.SessionID {
+		t.Fatalf("clicks %v sessions %v (want %s)", b.clicks, p.sessions, tk.SessionID)
+	}
+	if rr := call("click", "turn-token", `{"button":"middle","count":1}`); rr.Code != http.StatusUnprocessableEntity || !strings.Contains(rr.Body.String(), "button") {
+		t.Fatalf("invalid click: %d %s", rr.Code, rr.Body)
+	}
+	if rr := call("format-disk", "turn-token", `{}`); rr.Code != http.StatusNotFound {
+		t.Fatalf("unknown op: %d", rr.Code)
 	}
 }

@@ -189,7 +189,7 @@ func New(d Desktop, version string, asker Asker) *mcp.Server {
 // Run serves this computer's desktop over stdio until the client disconnects.
 // Nothing else may write to stdout: it is the MCP transport.
 func Run(ctx context.Context, version string) error {
-	if err := New(hostDesktop{}, version, askerFromEnv()).Run(ctx, &mcp.StdioTransport{}); err != nil && ctx.Err() == nil {
+	if err := New(desktopFromEnv(), version, askerFromEnv()).Run(ctx, &mcp.StdioTransport{}); err != nil && ctx.Err() == nil {
 		fmt.Fprintln(os.Stderr, "mob-mcp:", err)
 		return err
 	}

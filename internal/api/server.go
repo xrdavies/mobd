@@ -159,6 +159,7 @@ func (s *Server) Handler() http.Handler {
 		writeJSON(w, http.StatusOK, map[string]string{"service": "mobd", "message": "Open or paste the complete invitation link in a pairing-capable mob client."})
 	})
 	public.HandleFunc("POST /internal/tasks/{id}/ask", s.handleAsk)
+	public.HandleFunc("POST /internal/tasks/{id}/desktop/{op}", s.handleInternalDesktop)
 	public.Handle("/", s.withAuth(mux))
 	return s.withCORS(public)
 }
