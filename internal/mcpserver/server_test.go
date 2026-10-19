@@ -111,3 +111,21 @@ func TestDefaultsAndErrors(t *testing.T) {
 		t.Fatal("invalid arguments accepted")
 	}
 }
+
+func TestWordingPerSystem(t *testing.T) {
+	mac := wordingFor("macos")
+	if mac.instructions != instructions || mac.via != " via Quartz" {
+		t.Fatalf("macOS wording changed: %+v", mac)
+	}
+	linux := wordingFor("linux")
+	for _, s := range []string{linux.instructions, linux.keyHint, linux.openApp, linux.via} {
+		for _, mac := range []string{"macOS", "Quartz", "office Mac", "bundle"} {
+			if strings.Contains(s, mac) {
+				t.Errorf("Linux wording mentions %q: %s", mac, s)
+			}
+		}
+	}
+	if !strings.Contains(linux.instructions, "office Linux computer") {
+		t.Fatal(linux.instructions)
+	}
+}

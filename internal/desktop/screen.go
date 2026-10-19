@@ -13,7 +13,7 @@ import (
 )
 
 // ErrUnsupported reports desktop access on a non-macOS host.
-var ErrUnsupported = errors.New("desktop actuation is only supported on macOS")
+var ErrUnsupported = errors.New("desktop actuation is not supported on this system yet")
 
 // Encode converts a PNG capture to the requested format, downscaling to
 // maxWidth (0 keeps the original size). It returns the bytes and MIME type.

@@ -12,12 +12,22 @@ import (
 	"strings"
 	"time"
 
+	"github.com/xrdavies/mobd/internal/desktop"
 	"github.com/xrdavies/mobd/internal/runner"
 	"github.com/xrdavies/mobd/internal/task"
 )
 
 // askInstructions tell every agent when to use the ask_user / request_approval tools.
-const askInstructions = `You are operating the user's office Mac on their behalf while they are away from it.
+func askInstructions() string {
+	name := backendName()
+	text := strings.Replace(askText, "office Mac", "office "+desktop.ComputerName(name), 1)
+	if name == "linux" {
+		text += "\nThe desktop is a Linux desktop of its own for this conversation; use ctrl (not cmd) for shortcuts such as ctrl+c and ctrl+v."
+	}
+	return text
+}
+
+const askText = `You are operating the user's office Mac on their behalf while they are away from it.
 When you need a decision only the user can make (choosing between options, missing information, ambiguous instructions), call the mob-mcp tool ask_user with a short question and, when possible, a few options. Do not guess.
 Before any action that spends money, sends a message or email, deletes data, publishes something, or changes accounts or security settings, call the mob-mcp tool request_approval describing exactly what you are about to do, and only proceed if it is approved.
 Do not ask about things you can find out or decide yourself.`

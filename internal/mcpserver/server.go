@@ -14,6 +14,33 @@ import (
 	"github.com/xrdavies/mobd/internal/desktop"
 )
 
+// wording is what the tools tell agents about the office computer's system.
+type wording struct {
+	instructions, keyHint, openApp, via string
+}
+
+func wordingFor(backend string) wording {
+	if backend == "macos" {
+		return wording{
+			instructions: instructions,
+			keyHint:      "Prefer cmd+q to quit on macOS.",
+			openApp:      "Launch a macOS application by name (e.g. Safari) or bundle id (e.g. com.apple.Safari).",
+			via:          " via Quartz",
+		}
+	}
+	return wording{
+		instructions: fmt.Sprintf(`MOB office %s desktop actuation (mob-mcp).
+
+Use screenshot to observe the screen, then click/type_text/key to act.
+Coordinates for click are in points (logical pixels); see screenshot metadata for scale_factor.
+Shortcuts use ctrl, not cmd (ctrl+c, ctrl+v); in terminals use ctrl+shift+c/v.
+Human control of the desktop goes through the live view (/stream); do not use this server for remote human input.
+`, desktop.ComputerName(backend)),
+		keyHint: "Use ctrl for shortcuts (ctrl+c, ctrl+v, ctrl+q).",
+		openApp: "Launch an application by name (e.g. Firefox), desktop file ID (e.g. org.gnome.Calculator) or command on PATH.",
+	}
+}
+
 const instructions = `MOB office Mac desktop actuation (mob-mcp).
 
 Use screenshot to observe the screen, then click/type_text/key to act.
@@ -61,7 +88,7 @@ type clickArgs struct {
 }
 
 type typeArgs struct {
-	Text string `json:"text" jsonschema:"Text to type (uses pasteboard + Cmd+V)."`
+	Text string `json:"text" jsonschema:"Text to type (pasted into the focused element)."`
 }
 
 type keyArgs struct {
@@ -73,7 +100,7 @@ type windowsArgs struct {
 }
 
 type openArgs struct {
-	NameOrBundleID string `json:"name_or_bundle_id" jsonschema:"Application name (e.g. Safari) or bundle identifier (e.g. com.apple.Safari)."`
+	NameOrBundleID string `json:"name_or_bundle_id" jsonschema:"Application name, or its identifier (macOS bundle id such as com.apple.Safari; Linux desktop file ID such as firefox)."`
 }
 
 type empty struct{}
@@ -85,7 +112,8 @@ func text(s string) *mcp.CallToolResult {
 // New builds the MCP server around a desktop implementation. A non-nil asker
 // adds ask_user and request_approval.
 func New(d Desktop, version string, asker Asker) *mcp.Server {
-	s := mcp.NewServer(&mcp.Implementation{Name: "mob-mcp", Version: version}, &mcp.ServerOptions{Instructions: instructions})
+	w := wordingFor(desktop.Current().Name())
+	s := mcp.NewServer(&mcp.Implementation{Name: "mob-mcp", Version: version}, &mcp.ServerOptions{Instructions: w.instructions})
 
 	mcp.AddTool(s, &mcp.Tool{Name: "screenshot", Description: "Capture the primary display. Returns PNG image plus JSON metadata " +
 		"(scale_factor, point/pixel sizes). Use point coordinates for click()."},
@@ -112,7 +140,7 @@ func New(d Desktop, version string, asker Asker) *mcp.Server {
 			if err := d.Click(a.X, a.Y, a.Button, a.Count); err != nil {
 				return nil, nil, err
 			}
-			return text(fmt.Sprintf("clicked %s x=%g y=%g count=%d via Quartz", a.Button, a.X, a.Y, a.Count)), nil, nil
+			return text(fmt.Sprintf("clicked %s x=%g y=%g count=%d%s", a.Button, a.X, a.Y, a.Count, w.via)), nil, nil
 		})
 
 	mcp.AddTool(s, &mcp.Tool{Name: "type_text", Description: "Type Unicode text into the currently focused UI element."},
@@ -124,13 +152,12 @@ func New(d Desktop, version string, asker Asker) *mcp.Server {
 			return text(msg), nil, nil
 		})
 
-	mcp.AddTool(s, &mcp.Tool{Name: "key", Description: "Press a key or chord such as return, tab, escape, cmd+c, ctrl+shift+tab. " +
-		"Prefer cmd+q to quit on macOS."},
+	mcp.AddTool(s, &mcp.Tool{Name: "key", Description: "Press a key or chord such as return, tab, escape, cmd+c, ctrl+shift+tab. " + w.keyHint},
 		func(ctx context.Context, _ *mcp.CallToolRequest, a keyArgs) (*mcp.CallToolResult, any, error) {
 			if err := d.Key(a.Combo); err != nil {
 				return nil, nil, err
 			}
-			return text(fmt.Sprintf("pressed %q via Quartz", a.Combo)), nil, nil
+			return text(fmt.Sprintf("pressed %q%s", a.Combo, w.via)), nil, nil
 		})
 
 	mcp.AddTool(s, &mcp.Tool{Name: "list_windows", Description: "List visible windows: app, title, bounds, pid (JSON)."},
@@ -144,8 +171,7 @@ func New(d Desktop, version string, asker Asker) *mcp.Server {
 			return text(string(out)), nil, nil
 		})
 
-	mcp.AddTool(s, &mcp.Tool{Name: "open_app", Description: "Launch a macOS application by name (e.g. Safari) or bundle id " +
-		"(e.g. com.apple.Safari)."},
+	mcp.AddTool(s, &mcp.Tool{Name: "open_app", Description: w.openApp},
 		func(ctx context.Context, _ *mcp.CallToolRequest, a openArgs) (*mcp.CallToolResult, any, error) {
 			msg, err := d.OpenApp(ctx, a.NameOrBundleID)
 			if err != nil {
@@ -160,7 +186,7 @@ func New(d Desktop, version string, asker Asker) *mcp.Server {
 	return s
 }
 
-// Run serves the macOS desktop over stdio until the client disconnects.
+// Run serves this computer's desktop over stdio until the client disconnects.
 // Nothing else may write to stdout: it is the MCP transport.
 func Run(ctx context.Context, version string) error {
 	if err := New(hostDesktop{}, version, askerFromEnv()).Run(ctx, &mcp.StdioTransport{}); err != nil && ctx.Err() == nil {

@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 	"os/exec"
+	"slices"
 	"sync"
 	"time"
 
@@ -16,7 +17,19 @@ import (
 // APIVersion is advertised on /health; clients gate features on it.
 const APIVersion = 3
 
-var features = []string{"queue", "activities", "sessionAdmin", "events", "screen", "uploads", "taskOptions", "runners", "questions", "steer", "pairing", "stream", "streamResize"}
+var baseFeatures = []string{"queue", "activities", "sessionAdmin", "events", "screen", "uploads", "taskOptions", "runners", "questions", "steer", "pairing", "stream", "streamResize"}
+
+// features adds what this server's desktops can do: sessionDesktops where each conversation
+// has its own desktop (Linux).
+func (s *Server) features() []string {
+	if s.desktops.PerSession() {
+		return append(slices.Clone(baseFeatures), "sessionDesktops")
+	}
+	return baseFeatures
+}
+
+// backendName is the desktop backend's name; swapped in tests.
+var backendName = func() string { return desktop.Current().Name() }
 
 // check is one readiness item; Unknown means mobd cannot tell yet.
 type check struct {
@@ -34,7 +47,7 @@ type healthCache struct {
 
 const healthTTL = 10 * time.Second
 
-// runnerHealth is a runner's capabilities plus its readiness on this Mac.
+// runnerHealth is a runner's capabilities plus its readiness on the office computer.
 type runnerHealth struct {
 	runner.Info
 	Available bool   `json:"available"`
@@ -54,7 +67,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok": true, "service": "mobd", "apiVersion": APIVersion,
 		"runner": s.runners.Default(), "runners": runners, "mobMcp": s.cfg.MobMCPCommand,
-		"maxRunning": max(s.cfg.MaxRunning, 1), "features": features,
+		"maxRunning": max(s.cfg.MaxRunning, 1), "features": s.features(),
 		// models/efforts describe the default runner (API v3 clients read these).
 		"models": def.Info().Models, "efforts": def.Info().Efforts, "checks": checks,
 		"streamSessions": s.streams.Count(),
@@ -77,8 +90,20 @@ func (s *Server) readiness(ctx context.Context) map[string]check {
 	if s.cfg.UsesBuiltinMCP() {
 		checks["actuation"] = check{OK: true, Detail: "built-in (mobd mcp)"}
 	}
-	checks["accessibility"], checks["screenRecording"] = permissionChecks()
-	checks["display"] = displayCheck()
+	if name := backendName(); name == "macos" {
+		checks["accessibility"], checks["screenRecording"] = permissionChecks()
+		checks["display"] = displayCheck()
+	} else {
+		// API v3 clients warn on a failed check, so grants other systems do not have read as ok.
+		notNeeded := check{OK: true, Detail: "not needed on " + desktop.OSName(name)}
+		checks["accessibility"], checks["screenRecording"] = notNeeded, notNeeded
+		checks["display"] = check{Unknown: true, Detail: "no desktop on this " + desktop.ComputerName(name) + " yet"}
+	}
+	if c, ok := s.desktops.(desktop.Checker); ok {
+		for name, v := range c.Checks(ctx) {
+			checks[name] = check{OK: v.OK, Unknown: v.Unknown, Detail: v.Detail}
+		}
+	}
 	s.health.at, s.health.checks = time.Now(), checks
 	return checks
 }

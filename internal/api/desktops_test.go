@@ -2,8 +2,11 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"path/filepath"
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/xrdavies/mobd/internal/config"
@@ -47,5 +50,42 @@ func TestScreenUsesTheConversationDesktop(t *testing.T) {
 	}
 	if rr := doJSON(t, s, http.MethodPost, "/stream", `{"sessionId":"none","offer":""}`); rr.Code != http.StatusConflict {
 		t.Fatalf("stream without desktop: %d %s", rr.Code, rr.Body)
+	}
+}
+
+func TestHealthOnLinuxNamesNoMacGrantsAndListsSessionDesktops(t *testing.T) {
+	restore := backendName
+	backendName = func() string { return "linux" }
+	t.Cleanup(func() { backendName = restore })
+	cfg := config.Config{DataDir: t.TempDir()}
+	auth, err := pairing.Open(filepath.Join(t.TempDir(), "auth.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := New(cfg, task.NewStore(), auth, perSession{desktop.Shared(desktop.Current())}, codex.New(cfg))
+	t.Cleanup(func() { s.Close(); auth.Close() })
+	var health struct {
+		Features []string         `json:"features"`
+		Checks   map[string]check `json:"checks"`
+	}
+	rr := doJSON(t, s, http.MethodGet, "/health", "")
+	if err := json.Unmarshal(rr.Body.Bytes(), &health); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(health.Features, "sessionDesktops") {
+		t.Fatalf("features %v", health.Features)
+	}
+	for _, name := range []string{"accessibility", "screenRecording"} {
+		if c := health.Checks[name]; !c.OK || c.Detail != "not needed on Linux" {
+			t.Fatalf("%s: %+v", name, c)
+		}
+	}
+	text := askInstructions()
+	if !strings.Contains(text, "office Linux computer") || !strings.Contains(text, "ctrl+c") {
+		t.Fatal(text)
+	}
+	// The shared desktop (macOS) does not advertise per-conversation desktops.
+	if slices.Contains(newTestServer(t, cfg, task.NewStore(), codex.New(cfg)).features(), "sessionDesktops") {
+		t.Fatal("shared desktop lists sessionDesktops")
 	}
 }

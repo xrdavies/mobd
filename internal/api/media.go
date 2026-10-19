@@ -190,7 +190,7 @@ func (s *Server) runOptions(t *task.Task) runner.Options {
 	s.mu.Unlock()
 	opts := runner.Options{
 		SaveImage:    s.artifacts.Save,
-		Instructions: askInstructions,
+		Instructions: askInstructions(),
 		// The agent's MCP call must outlive the user's answer time.
 		ToolTimeout: s.questionTimeout() + time.Minute,
 		MCPEnv:      map[string]string{"MOB_API": s.selfURL(), "MOB_TASK_ID": t.ID, "MOB_TASK_TOKEN": token},
