@@ -94,10 +94,12 @@ internal/
     handler.go            Handler(Deps): pairing routes + desktop routes
   service/
     service.go            Manager interface, shared preflight (ports, control socket, PATH, bins, service.json)
-    launchd_darwin.go     today's launchd code (moved from service.go)
-    systemd_linux.go      NEW  user unit, linger, systemctl --user
-    unit_linux.go         NEW  unit file rendering (golden-tested)
-    unsupported.go        NEW  //go:build !darwin && !linux (Windows adds schtasks_windows.go)
+    launchd.go            today's launchd code (moved from service.go)
+    systemd.go            NEW  user unit, linger, systemctl --user
+    unit.go               NEW  unit file rendering (tested)
+    new_{darwin,linux,other}.go  NEW  New() per OS; Windows adds schtasks
+                          (implementations carry no build tags, so both are tested with fake
+                          launchctl/systemctl on any host; only New() is per OS)
     tail.go               NEW  Go tail -F for `mobd logs` (no /usr/bin/tail)
   desktop/                shared types and OS backends (no session knowledge)
     backend.go            Backend interface unchanged; Checker (optional)
@@ -1301,7 +1303,7 @@ checked on a real office Mac (live view, agent input, pairing, `mobd start/stop`
 | 0.1 | CI workflow | `.github/workflows/ci.yml` (test-macos, test-linux, build-matrix allowed to fail for windows) | PRs run tests |
 | 0.2 | `filelock` + `proc` | `internal/filelock/*`, `internal/proc/*`, `pairing/store.go`, `control/control{,_unix,_windows}.go`, `runner/cli/cli.go` | `GOOS=windows go build ./...` passes; build-matrix required |
 | 0.3 | config dir and defaults | `config/dir.go`, `config.go` (`ControlSocketDefault`, per-OS `maxRunning`, `init` without it, all section 5 keys parsed and validated, inert), `cmd/mobd/pairing.go`, README table | config tests; existing configs load |
-| 0.4 | service `Manager` interface + systemd | `service/{service,launchd_darwin,systemd_linux,unit_linux,tail,unsupported}.go`, `main.go` | golden unit; `mobd start/stop/status/logs` work on an Ubuntu VM; macOS unchanged |
+| 0.4 | service `Manager` interface + systemd | `service/{service,launchd,systemd,unit,tail,new_*}.go`, `main.go` | golden unit; `mobd start/stop/status/logs` work on an Ubuntu VM; macOS unchanged |
 | 0.5 | `Ops` + `Provider` + `Shared` | `desktop/{ops,provider,encode,errors}.go`, `desktop.go`, `api/server.go` (`New` signature), `stream/stream.go` (`Source`, `Request.SessionID`), `cmd/mobd/provider_*.go`, tests | all existing tests pass with `nil` provider |
 | 0.6 | per-backend health and wording | `api/health.go` (computed features, `Checker`), `desktop/errors.go`, `backend_linux.go` comment, `questions.go` per-OS instructions | darwin health golden unchanged; Linux says "not needed on Linux" |
 | 0.7 | desktop proxy | `api/internal_desktop.go`, `api/questions.go` (`taskAuth`), `mcpserver/{proxy,server}.go`, `media.go` (`MOB_DESKTOP_PROXY`) | proxy tests; macOS still direct |

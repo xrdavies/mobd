@@ -1,18 +1,15 @@
-// Package service manages the current user's macOS LaunchAgent.
+// Package service runs mobd in the background as the current user: a LaunchAgent on macOS, a
+// systemd user unit on Linux. Both share the preflight and the files in config.Dir().
 package service
 
 import (
-	"bytes"
 	"encoding/json"
-	"encoding/xml"
 	"errors"
 	"fmt"
 	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
-	"strconv"
 	"strings"
 	"time"
 
@@ -20,66 +17,57 @@ import (
 	"github.com/xrdavies/mobd/internal/control"
 )
 
-const label = "com.xrdavies.mobd"
-
-type Manager struct {
-	Dir, Plist, Target string
-	run                func(...string) ([]byte, error)
+// Manager starts, stops and inspects the background service.
+type Manager interface {
+	Start(cfg config.Config, args []string, login bool) error
+	Stop() error // stops the service and disables login startup
+	Status() error
+	Logs() error // follows LogPath
+	SavedArgs() ([]string, error)
+	LoginEnabled() bool
+	Dir() string
+	LogPath() string
 }
 
-func New() (*Manager, error) {
-	if runtime.GOOS != "darwin" {
-		return nil, errors.New("background service management requires macOS; use mobd serve")
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return nil, err
-	}
-	return &Manager{
-		Dir:    filepath.Join(home, ".mobd"),
-		Plist:  filepath.Join(home, "Library", "LaunchAgents", label+".plist"),
-		Target: "gui/" + strconv.Itoa(os.Getuid()) + "/" + label,
-		run:    func(args ...string) ([]byte, error) { return exec.Command("/bin/launchctl", args...).CombinedOutput() },
-	}, nil
+// prepared is what prepare leaves for the service definition.
+type prepared struct {
+	exe, snapshot, logPath string
 }
 
-func (m *Manager) loaded() bool { _, err := m.run("print", m.Target); return err == nil }
-
-func (m *Manager) Start(cfg config.Config, args []string, login bool) error {
-	if m.loaded() {
-		return errors.New("mobd service is already loaded; use mobd status or mobd restart")
-	}
-	if err := os.MkdirAll(m.Dir, 0700); err != nil {
-		return err
+// prepare checks that the endpoints are free, then writes service.json (the config with
+// absolute runner paths: services do not load shell profiles), the log file and the saved args.
+func prepare(dir string, cfg config.Config, args []string) (prepared, error) {
+	var p prepared
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return p, err
 	}
 	// Reject an occupied endpoint before claiming another process is our service.
 	listener, err := net.Listen("tcp", cfg.ListenAddr)
 	if err != nil {
-		return fmt.Errorf("listen %s: %w", cfg.ListenAddr, err)
+		return p, fmt.Errorf("listen %s: %w", cfg.ListenAddr, err)
 	}
 	if err := listener.Close(); err != nil {
-		return err
+		return p, err
 	}
 	if cfg.StreamPort > 0 {
 		udp, err := net.ListenUDP("udp", &net.UDPAddr{Port: cfg.StreamPort})
 		if err != nil {
-			return fmt.Errorf("live desktop UDP port %d: %w", cfg.StreamPort, err)
+			return p, fmt.Errorf("live desktop UDP port %d: %w", cfg.StreamPort, err)
 		}
 		if err := udp.Close(); err != nil {
-			return err
+			return p, err
 		}
 	}
 	// Do not mistake a foreground daemon's management socket for our new service.
 	_, release, err := control.Listen(cfg.ControlSocket)
 	if err != nil {
-		return err
+		return p, err
 	}
 	release()
-	exe, err := os.Executable()
-	if err != nil {
-		return err
+	if p.exe, err = os.Executable(); err != nil {
+		return p, err
 	}
-	// Resolve the CLI in the invoking shell; launchd does not load shell profiles.
+	// Resolve the CLI in the invoking shell; the service manager does not load shell profiles.
 	for _, bin := range []*string{&cfg.CodexBin, &cfg.ClaudeBin} {
 		if found, err := exec.LookPath(*bin); err == nil {
 			*bin, _ = filepath.Abs(found)
@@ -87,27 +75,33 @@ func (m *Manager) Start(cfg config.Config, args []string, login bool) error {
 	}
 	data, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
-		return err
+		return p, err
 	}
-	snapshot := filepath.Join(m.Dir, "service.json")
-	if err := writePrivate(snapshot, data); err != nil {
-		return err
+	p.snapshot = filepath.Join(dir, "service.json")
+	if err := writePrivate(p.snapshot, data); err != nil {
+		return p, err
 	}
-	logPath := filepath.Join(m.Dir, "mobd.log")
-	file, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
+	p.logPath = filepath.Join(dir, "mobd.log")
+	file, err := os.OpenFile(p.logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
 	if err != nil {
-		return err
+		return p, err
 	}
 	if err := file.Close(); err != nil {
-		return err
+		return p, err
 	}
-	plist := filepath.Join(m.Dir, "mobd.plist")
-	if login {
-		plist = m.Plist
+	args, err = absArgs(args)
+	if err != nil {
+		return p, err
 	}
-	if err := os.MkdirAll(filepath.Dir(plist), 0700); err != nil {
-		return err
+	argsData, err := json.Marshal(args)
+	if err != nil {
+		return p, err
 	}
+	return p, writePrivate(filepath.Join(dir, "service-args.json"), argsData)
+}
+
+// absArgs makes path flags absolute, so a restart from another directory finds the same files.
+func absArgs(args []string) ([]string, error) {
 	args = append([]string(nil), args...)
 	for i := 0; i < len(args); i++ {
 		name, value, equal := strings.Cut(args[i], "=")
@@ -117,13 +111,13 @@ func (m *Manager) Start(cfg config.Config, args []string, login bool) error {
 		if !equal {
 			i++
 			if i >= len(args) {
-				return errors.New("missing path argument")
+				return nil, errors.New("missing path argument")
 			}
 			value = args[i]
 		}
-		value, err = filepath.Abs(value)
+		value, err := filepath.Abs(value)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		if equal {
 			args[i] = name + "=" + value
@@ -131,24 +125,14 @@ func (m *Manager) Start(cfg config.Config, args []string, login bool) error {
 			args[i] = value
 		}
 	}
-	argsData, err := json.Marshal(args)
-	if err != nil {
-		return err
-	}
-	if err := writePrivate(filepath.Join(m.Dir, "service-args.json"), argsData); err != nil {
-		return err
-	}
-	data = agentPlist(exe, snapshot, cfg.CodexWorkDir, logPath, os.Getenv("PATH"))
-	if err := writePrivate(plist, data); err != nil {
-		return err
-	}
-	domain := m.Target[:strings.LastIndex(m.Target, "/")]
-	if out, err := m.run("bootstrap", domain, plist); err != nil {
-		return fmt.Errorf("launchctl bootstrap: %w: %s", err, out)
-	}
+	return args, nil
+}
+
+// waitHealthy waits for the started service to answer on its management socket.
+func waitHealthy(socket, logPath string) error {
 	deadline := time.Now().Add(15 * time.Second)
 	for {
-		if err := Health(cfg.ControlSocket); err == nil {
+		if err := Health(socket); err == nil {
 			return nil
 		}
 		if time.Now().After(deadline) {
@@ -156,6 +140,34 @@ func (m *Manager) Start(cfg config.Config, args []string, login bool) error {
 		}
 		time.Sleep(250 * time.Millisecond)
 	}
+}
+
+// savedArgs keeps an explicitly selected config/flags across a plain restart.
+func savedArgs(dir string) ([]string, error) {
+	data, err := os.ReadFile(filepath.Join(dir, "service-args.json"))
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var args []string
+	err = json.Unmarshal(data, &args)
+	return args, err
+}
+
+// printStatus prints the running service's endpoints from its snapshot and checks its health.
+func printStatus(dir string, login bool) error {
+	data, err := os.ReadFile(filepath.Join(dir, "service.json"))
+	if err != nil {
+		return err
+	}
+	var cfg config.Config
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return err
+	}
+	fmt.Printf("mobd: loaded; listen=%s; health=%s/health; login=%t\n", cfg.ListenAddr, LocalURL(cfg.ListenAddr), login)
+	return Health(cfg.ControlSocket)
 }
 
 func writePrivate(path string, data []byte) error {
@@ -170,76 +182,6 @@ func writePrivate(path string, data []byte) error {
 		return err
 	}
 	return os.Rename(file.Name(), path)
-}
-
-func agentPlist(exe, cfg, workdir, logs, path string) []byte {
-	escape := func(s string) string { var b bytes.Buffer; _ = xml.EscapeText(&b, []byte(s)); return b.String() }
-	return []byte(fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0"><dict>
-<key>Label</key><string>%s</string>
-<key>ProgramArguments</key><array><string>%s</string><string>serve</string><string>--config</string><string>%s</string></array>
-<key>WorkingDirectory</key><string>%s</string>
-<key>EnvironmentVariables</key><dict><key>PATH</key><string>%s</string></dict>
-<key>StandardOutPath</key><string>%s</string>
-<key>StandardErrorPath</key><string>%s</string>
-<key>RunAtLoad</key><true/>
-<key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>
-<key>ExitTimeOut</key><integer>30</integer>
-</dict></plist>
-`, label, escape(exe), escape(cfg), escape(workdir), escape(path), escape(logs), escape(logs)))
-}
-
-// SavedArgs keeps an explicitly selected config/flags across a plain restart.
-func (m *Manager) SavedArgs() ([]string, error) {
-	data, err := os.ReadFile(filepath.Join(m.Dir, "service-args.json"))
-	if os.IsNotExist(err) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	var args []string
-	err = json.Unmarshal(data, &args)
-	return args, err
-}
-
-func (m *Manager) LoginEnabled() bool { _, err := os.Stat(m.Plist); return err == nil }
-
-func (m *Manager) Stop() error {
-	if m.loaded() {
-		if out, err := m.run("bootout", m.Target); err != nil {
-			return fmt.Errorf("launchctl bootout: %w: %s", err, out)
-		}
-	}
-	for _, path := range []string{m.Plist, filepath.Join(m.Dir, "mobd.plist")} {
-		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-			return err
-		}
-	}
-	return nil
-}
-
-func (m *Manager) Status() error {
-	if !m.loaded() {
-		return errors.New("mobd: stopped")
-	}
-	data, err := os.ReadFile(filepath.Join(m.Dir, "service.json"))
-	if err != nil {
-		return err
-	}
-	var cfg config.Config
-	if err := json.Unmarshal(data, &cfg); err != nil {
-		return err
-	}
-	fmt.Printf("mobd: loaded; listen=%s; health=%s/health; login=%t\n", cfg.ListenAddr, LocalURL(cfg.ListenAddr), m.LoginEnabled())
-	return Health(cfg.ControlSocket)
-}
-
-func (m *Manager) Logs() error {
-	cmd := exec.Command("/usr/bin/tail", "-n", "100", "-F", filepath.Join(m.Dir, "mobd.log"))
-	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
-	return cmd.Run()
 }
 
 func LocalURL(addr string) string {

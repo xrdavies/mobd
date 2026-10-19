@@ -48,7 +48,7 @@ func TestStopFailurePreservesLogin(t *testing.T) {
 	if err := writePrivate(plist, []byte("config")); err != nil {
 		t.Fatal(err)
 	}
-	m := Manager{Dir: dir, Plist: plist, Target: "gui/123/test", run: func(args ...string) ([]byte, error) {
+	m := launchd{dir: dir, plist: plist, target: "gui/123/test", run: func(args ...string) ([]byte, error) {
 		if args[0] == "print" {
 			return nil, nil
 		}
@@ -89,7 +89,7 @@ func TestStartRejectsExistingManagementSocketBeforeWritingService(t *testing.T) 
 		t.Fatal(err)
 	}
 	defer release()
-	m := Manager{Dir: dir, Target: "test", run: func(args ...string) ([]byte, error) {
+	m := launchd{dir: dir, target: "test", run: func(args ...string) ([]byte, error) {
 		if args[0] != "print" {
 			t.Fatalf("unexpected launchctl: %v", args)
 		}

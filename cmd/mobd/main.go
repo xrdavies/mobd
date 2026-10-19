@@ -35,8 +35,8 @@ var version = "0.3.0"
 const usage = `Usage: mobd <command> [options]
   init       Create ~/.mobd/config.json (never overwrite)
   serve      Run in the foreground (also the default command)
-  start      Start a user LaunchAgent; --login enables start at login
-  stop       Stop the LaunchAgent and disable start at login
+  start      Start the background service (LaunchAgent / systemd user unit); --login starts it at login or boot
+  stop       Stop the background service and disable start at login
   restart    Reload configuration and restart; preserve login setting
   status     Show background service address and health
   logs       Follow background service logs
@@ -176,7 +176,7 @@ func run(args []string) error {
 		if err := manager.Start(cfg, args, login); err != nil {
 			return err
 		}
-		fmt.Printf("mobd started; listen=%s; health=%s/health\nconfig=%s; logs=%s\n", cfg.ListenAddr, service.LocalURL(cfg.ListenAddr), path, filepath.Join(manager.Dir, "mobd.log"))
+		fmt.Printf("mobd started; listen=%s; health=%s/health\nconfig=%s; logs=%s\n", cfg.ListenAddr, service.LocalURL(cfg.ListenAddr), path, manager.LogPath())
 		return nil
 	}
 	return serve(cfg)
