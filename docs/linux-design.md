@@ -1315,6 +1315,12 @@ checked on a real office Mac (live view, agent input, pairing, `mobd start/stop`
 
 Result: mobd runs turns on Linux without desktops (`desktopMode` behaves as `none` until phase 1).
 
+**Status (19 Oct 2026):** implemented on `feat/linux` (steps 0.1–0.8). macOS tests pass on a
+Mac, including the real ScreenCaptureKit/VideoToolbox stream to a WebRTC viewer; `go vet` is
+clean for macOS, Linux and Windows. Still to do before merging: the check on a real office Mac
+(live view, agent input, pairing, `mobd start/stop`) and `mobd start/stop/status/logs` on an
+Ubuntu machine.
+
 ### Phase 1: desktop manager
 
 | # | PR | Files | Done when |
