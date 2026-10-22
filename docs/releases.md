@@ -16,22 +16,8 @@
 3. 创建限定到该桶的 **Object Read & Write** R2 API 凭据，保存 Access Key ID
    和 Secret Access Key。上传使用 S3 API；最终用户不需要任何令牌。
 4. 不使用 `r2.dev` 作为正式下载地址，不在下载域名启用登录验证或浏览器挑战。
-5. 官网跨域读取 JSON，需要在桶设置 CORS（把域名替换成正式官网）：
-
-```json
-[
-  {
-    "AllowedOrigins": ["https://mob.example.com"],
-    "AllowedMethods": ["GET", "HEAD"],
-    "AllowedHeaders": ["*"],
-    "ExposeHeaders": ["ETag"],
-    "MaxAgeSeconds": 3600
-  }
-]
-```
-
-本地连接真实 R2 调试时可临时加入 `http://localhost:4321`；普通本地预览不需要。
-curl 不依赖浏览器 CORS，官网获取发布清单需要它。
+5. 不需要配置 CORS：官网（`mob-site`）在构建时读取发布清单，浏览器不直接请求 R2 的 JSON；
+   curl 和安装脚本也不依赖 CORS。
 
 ### 缓存规则
 
@@ -41,7 +27,7 @@ curl 不依赖浏览器 CORS，官网获取发布清单需要它。
 - `/mob/v*/*`、`/mobd/v*/*` 可缓存，尊重对象的缓存头。
 - `/mob/latest.json`、`/mobd/latest.json`、两端的 `releases.json` 和
   `/mobd/install.sh` **绕过缓存**。不要用全站长 TTL 覆盖它们。
-- 首次验证前不要缓存缺失文件的 404；调整 CORS/缓存规则后清理旧缓存。
+- 首次验证前不要缓存缺失文件的 404；调整缓存规则后清理旧缓存。
 
 官方参考：[R2 公共访问](https://developers.cloudflare.com/r2/buckets/public-buckets/)、
 [R2 缓存](https://developers.cloudflare.com/cache/interaction-cloudflare-products/r2/)、
@@ -73,8 +59,9 @@ curl 不依赖浏览器 CORS，官网获取发布清单需要它。
 | `DOWNLOAD_BASE_URL` | `https://mob-releases.0xd.app`；不能附加 `/mobd` 路径、认证信息或查询参数 |
 | `R2_ACCOUNT_ID` | Cloudflare 的 32 位账户 ID |
 | `R2_BUCKET` | 发布桶名称，如 `mob-releases` |
+| `RELEASE_LINUX` | 可选，仓库级 Variable。设为 `true` 时同时构建并发布 Linux 的 tarball 和 `.deb`；未设置时只发布 macOS（目前不设置） |
 
-在 **mobd 仓库**单独创建 `release` environment 并配置上述 **8 个 Secrets、3 个 Variables**。
+在 **mobd 仓库**单独创建 `release` environment 并配置上述 **8 个 Secrets、3 个必需 Variables**（`RELEASE_LINUX` 可选，须配置为**仓库级** Variable：Settings → Secrets and variables → Actions → Variables；任务级 `if` 读不到 environment 变量。构建和 R2 发布都读取它）。
 上表在 **Environment variables** 中添加；Apple 凭据和 R2 访问密钥在 **Environment secrets** 中添加。
 可以复用同一 Developer ID 证书、Apple 公证账号和 R2 桶，但 mob 仓库的 environment
 配置不会自动继承；若使用组织级 Secrets，须给 mobd 仓库授权。这里不需要 Tauri 密钥。
@@ -100,10 +87,10 @@ R2 发布只需要 `contents: read`。Apple 凭据缺失或签名、公证失败
 git switch main
 git pull --ff-only
 # 如果有本地提交，先执行 git push origin main
-make release VERSION=v0.0.3
+make release VERSION=v0.1.0
 ```
 
-`v0.0.3` 是版本号示例；执行时选择高于已有标签的版本。
+`v0.1.0` 是版本号示例；执行时选择高于已有标签的版本。
 若只需重试已发布版本的 R2 分发，直接使用下方的 R2 工作流，不运行此命令。
 脚本 `.github/release/tag.mjs` 会：
 
@@ -115,7 +102,7 @@ make release VERSION=v0.0.3
 6. 在该提交创建附注标签，用 `git push --atomic` 同时推送 `main` 和标签，触发 **Release mobd**。
    推送被拒时两者都不会到达 GitHub，本地提交和标签保留，按提示重试。
 
-也可以直接运行 `node .github/release/tag.mjs v0.0.3`。除版本提交外，脚本不合并或推送其他提交；
+也可以直接运行 `node .github/release/tag.mjs v0.1.0`。除版本提交外，脚本不合并或推送其他提交；
 二进制版本仍由 CI 根据标签注入并校验。测试、打包和签名在
 Actions 中执行。本地可先运行 `make check`；只测试发布工具使用 `make release-test`。
 
@@ -135,7 +122,9 @@ Release 上传：`mobd_<版本>_darwin_arm64.tar.gz` 和 `SHA256SUMS`；开启 L
 归档保留 `LICENSE` 和 `README.md`；安装脚本校验这三个条目，但只安装 `mobd`。
 Node.js 用于发布脚本及分发测试；用户运行二进制不需要 Node.js 或 Go。
 
-在另一台 Apple Silicon Mac 上试装，编辑面向用户的 release notes，然后在 GitHub
+在另一台 Apple Silicon Mac 上试装，并确认已发布的 Mob 客户端能与它配对、对话、打开实时桌面。
+编辑面向用户的 release notes：用英文（官网是英文），不要直接使用带私有 PR 链接的自动生成说明；
+官网和 `release.json` 只渲染纯文本、`**粗体**`、链接和换行。然后在 GitHub
 的 Releases 页面打开草稿，点击 **Publish release**，保持 **Set as a pre-release**
 未勾选。脚本不会自动发布草稿。**Publish mobd downloads to R2** 随之运行：
 
@@ -154,7 +143,7 @@ Node.js 用于发布脚本及分发测试；用户运行二进制不需要 Node.
 GitHub Release 发布后，分发不需要重新构建或签名，按以下步骤运行：
 
 1. 打开 [Publish mobd downloads to R2](https://github.com/xrdavies/mobd/actions/workflows/publish-r2.yml)。
-2. 点击 **Run workflow**，Branch 选择 `main`，`tag` 填写要分发的已发布版本，如 `v0.0.3`；
+2. 点击 **Run workflow**，Branch 选择 `main`，`tag` 填写要分发的已发布版本，如 `v0.1.0`；
    前提是该版本已完成上一节的构建和 GitHub Release 发布。
 3. 点击绿色 **Run workflow**，等待 `publish` job 成功。
 4. 检查 `https://mob-releases.0xd.app/mobd/latest.json` 的版本和安装脚本是否可下载。
@@ -162,7 +151,7 @@ GitHub Release 发布后，分发不需要重新构建或签名，按以下步�
 安装了 GitHub CLI 的维护者也可以执行：
 
 ```bash
-gh workflow run publish-r2.yml --repo xrdavies/mobd --ref main -f tag=v0.0.3
+gh workflow run publish-r2.yml --repo xrdavies/mobd --ref main -f tag=v0.1.0
 ```
 
 仅更新安装脚本时使用下一节的 `installer_only`；完整分发会校验版本目录内
@@ -175,7 +164,7 @@ gh workflow run publish-r2.yml --repo xrdavies/mobd --ref main -f tag=v0.0.3
 
 ```bash
 gh workflow run publish-r2.yml --repo xrdavies/mobd --ref main \
-  -f tag=v0.0.2 -f installer_only=true
+  -f tag=v0.1.0 -f installer_only=true
 ```
 
 此模式先核对 R2 当前 stable 清单和归档校验和，再更新并验证 `mobd/install.sh`。
@@ -188,9 +177,9 @@ gh workflow run publish-r2.yml --repo xrdavies/mobd --ref main \
 
 ```text
 mobd/
-  v0.0.2/
-    mobd_0.0.2_darwin_arm64.tar.gz
-    mobd_0.0.2_linux_*.tar.gz, mobd_0.0.2_*.deb   （仅 RELEASE_LINUX）
+  v0.1.0/
+    mobd_0.1.0_darwin_arm64.tar.gz
+    mobd_0.1.0_linux_*.tar.gz, mobd_0.1.0_*.deb   （仅 RELEASE_LINUX）
     SHA256SUMS
     release.json
     install.sh
@@ -199,18 +188,20 @@ mobd/
   releases.json
 ```
 
-官网 `mob-site` 构建时读取 `mobd/releases.json`；桌面端和服务端无需同时发布，也无需相同版本号。
+官网 `mob-site` 构建时读取 `mobd/releases.json`：配置了 `SITE_DISPATCH_TOKEN` 时 R2 发布后立即重建，否则最多一小时内的定时构建会显示新版本。桌面端和服务端无需同时发布，也无需相同版本号。
 
 等 R2 工作流成功后，打开 `https://mob-releases.0xd.app/mobd/latest.json` 确认版本，
 并按下一节的安装步骤验证下载和签名。
 
 ### 失败与重试
 
-- 本地检查失败：根据提示处理工作区、分支或版本；此时尚未创建标签。
-- 标签推送失败：保留本地标签，避免丢失或改变发布提交。先用
-  `git ls-remote origin refs/tags/v0.0.3` 查看远端；若没有该标签，修复网络或权限后执行
-  `git -c push.followTags=false push origin refs/tags/v0.0.3:refs/tags/v0.0.3`（使用实际待发布标签）。
-  若标签已存在，查看 Actions；不要重新创建或强制移动标签。
+- 本地检查失败：根据提示处理工作区、分支或版本；此时尚未写入版本、提交或创建标签。
+- 版本文件格式不符：脚本在写入前停止，工作区保持干净；修正 `cmd/mobd/main.go` 后重试。
+- 推送失败：`main` 和标签是原子推送，二者都不会到达远端；本地保留版本提交和标签。先用
+  `git ls-remote origin refs/tags/v0.1.0` 查看远端；若没有该标签，修复网络或权限后执行脚本提示的
+  `git -c push.followTags=false push --atomic origin main refs/tags/v0.1.0:refs/tags/v0.1.0`（使用实际版本）。
+  若远端 `main` 已有新提交导致被拒：`git tag -d v0.1.0 && git reset --hard origin/main`，
+  再重新运行 `make release`。若标签已在远端，查看 Actions；不要重新创建或强制移动已推送的标签。
 - 构建、签名或公证失败：修正 GitHub 环境配置后，在 Actions 重跑失败任务，
   或手动运行 **Release mobd**，使用原标签。
 - 需要修改代码：提交并推送修改，使用新的更高版本标签。
@@ -239,7 +230,7 @@ curl -fsSL https://mob-releases.0xd.app/mobd/install.sh | sh
 ```sh
 curl -fsSL https://mob-releases.0xd.app/mobd/install.sh -o install.sh
 less install.sh
-sh install.sh --version 0.0.2 --install-dir "$HOME/.local/bin"
+sh install.sh --version 0.1.0 --install-dir "$HOME/.local/bin"
 ```
 
 脚本使用 macOS 自带的 curl、plutil、tar、shasum 和 codesign，不需要 jq、Python、
@@ -276,9 +267,11 @@ Codex/Claude 的安装和登录、辅助功能和屏幕录制权限是办公室�
 
 每次发布核对：
 
-- [ ] mobd 仓库 `release` 环境已配置 8 个 Secrets 和 3 个 Variables。
-- [ ] R2 下载域名公开可访问，CORS 允许官网，动态入口绕过缓存。
-- [ ] 签名与公证成功，在另一台 Apple Silicon Mac 上试装。
+- [ ] mobd 仓库 `release` 环境已配置 8 个 Secrets 和 3 个 Variables；`RELEASE_LINUX` 符合本次计划。
+- [ ] R2 下载域名公开可访问，动态入口绕过缓存。
+- [ ] `make release VERSION=vX.Y.Z` 成功：`main` 上有 `chore(release)` 提交，标签已推送。
+- [ ] 签名与公证成功，在另一台 Apple Silicon Mac 上试装；已发布的 Mob 客户端能配对并使用。
+- [ ] Release 正文已改为面向用户的英文说明。
 - [ ] 发布后无 GitHub 登录也能下载安装；旧配置和会话保留。
 - [ ] 校验失败、服务运行中、重复发布和升级行为符合预期。
-- [ ] 官网展示 mobd 真实版本；`mob/latest.json` 未被修改。
+- [ ] 官网（https://mob.0xd.app/download/）显示 mobd 新版本；`mob/latest.json` 未被修改。
