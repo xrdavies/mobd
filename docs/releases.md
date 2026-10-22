@@ -111,10 +111,12 @@ make release VERSION=v0.0.3
 2. 要求当前分支为 `main`，工作区和暂存区干净（包括未跟踪文件）。
 3. 在线读取 `origin/main` 和版本标签，确认当前提交已经推送、没有落后远端。
 4. 拒绝本地或远端已有的标签，以及低于远端已有稳定标签的版本。
-5. 在当前提交创建附注标签，只推送该标签，触发 **Release mobd macOS arm64**。
+5. 把版本写入 `cmd/mobd/main.go` 的 `version`，提交 `chore(release): vX.Y.Z`（文件已是该版本时不提交）。
+6. 在该提交创建附注标签，用 `git push --atomic` 同时推送 `main` 和标签，触发 **Release mobd**。
+   推送被拒时两者都不会到达 GitHub，本地提交和标签保留，按提示重试。
 
-也可以直接运行 `node .github/release/tag.mjs v0.0.3`。脚本不自动提交、合并或推送
-分支，也不修改源码中的版本号；二进制版本由 CI 根据标签注入。测试、打包和签名在
+也可以直接运行 `node .github/release/tag.mjs v0.0.3`。除版本提交外，脚本不合并或推送其他提交；
+二进制版本仍由 CI 根据标签注入并校验。测试、打包和签名在
 Actions 中执行。本地可先运行 `make check`；只测试发布工具使用 `make release-test`。
 
 推送标签成功表示构建请求已提交，**不表示构建或公开发布已经完成**。

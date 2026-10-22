@@ -1,5 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { bumpVersion } from './bump.mjs';
 import { checkPromotion, version } from './release.mjs';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
@@ -31,13 +32,21 @@ try {
     checkPromotion({ version: previous }, { version: nextVersion });
   }
 
-  git('tag', '-a', tag, head, '-m', `mobd ${tag}`);
-  try {
-    git('-c', 'push.followTags=false', 'push', 'origin', `${tagRef}:${tagRef}`);
-  } catch {
-    throw Error(`Push failed; local tag ${tag} was kept. Check git ls-remote origin ${tagRef}. If absent, retry: git -c push.followTags=false push origin ${tagRef}:${tagRef}. If present, check Actions. Do not move the tag.`);
+  // The release commit records the version in the repository's files; the tag points at it.
+  const changed = bumpVersion(root, nextVersion);
+  if (changed.length) {
+    git('add', '--', ...changed);
+    git('commit', '-q', '-m', `chore(release): ${tag}`);
   }
-  console.log(`Pushed ${tag} at ${head.slice(0, 12)}.`);
+  const commit = git('rev-parse', 'HEAD');
+  git('tag', '-a', tag, commit, '-m', `mobd ${tag}`);
+  try {
+    // Atomic: main and the tag land together or not at all.
+    git('-c', 'push.followTags=false', 'push', '--atomic', 'origin', 'HEAD:refs/heads/main', `${tagRef}:${tagRef}`);
+  } catch {
+    throw Error(`Push failed; the local ${changed.length ? 'release commit and ' : ''}tag ${tag} were kept. Check git ls-remote origin ${tagRef}. If absent, retry: git -c push.followTags=false push --atomic origin main ${tagRef}:${tagRef}. If present, check Actions. Do not move the tag.`);
+  }
+  console.log(`Pushed ${tag} at ${commit.slice(0, 12)}${changed.length ? ` (release commit: ${changed.join(', ')})` : ''}.`);
   console.log('Next: check Actions → Release mobd, test the draft archive, then publish the stable Release.');
   console.log('Wait for Publish mobd downloads to R2 to finish before announcing the release.');
 } catch (error) {

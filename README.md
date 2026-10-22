@@ -15,7 +15,7 @@ See [architecture](docs/architecture.md), [API reference](docs/mobd-v3.md)
 and [runners](docs/runners.md).
 
 Releasing: configure the GitHub `release` environment using the [release guide](docs/releases.md),
-then run `make release VERSION=vX.Y.Z` with a new stable version from a clean `main` matching `origin/main`
+then run `make release VERSION=vX.Y.Z` with a new stable version from a clean `main` matching `origin/main`; it commits the version to `cmd/mobd/main.go`, tags that commit and pushes both
 (Node.js 24+ and Git required). CI signs and notarizes the binary and creates a draft
 Release; test its archive, then publish the stable Release on GitHub to distribute it through R2.
 
