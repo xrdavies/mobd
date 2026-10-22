@@ -25,6 +25,7 @@ import (
 	"github.com/xrdavies/mobd/internal/runner"
 	"github.com/xrdavies/mobd/internal/runner/claude"
 	"github.com/xrdavies/mobd/internal/runner/codex"
+	"github.com/xrdavies/mobd/internal/runner/pi"
 	"github.com/xrdavies/mobd/internal/service"
 	"github.com/xrdavies/mobd/internal/task"
 )
@@ -259,12 +260,12 @@ func serve(cfg config.Config) error {
 	if err != nil {
 		return fmt.Errorf("open conversation state: %w", err)
 	}
-	available := map[string]runner.Runner{codex.Name: codex.New(cfg), claude.Name: claude.New(cfg)}
+	available := map[string]runner.Runner{codex.Name: codex.New(cfg), claude.Name: claude.New(cfg), pi.Name: pi.New(cfg)}
 	var runners []runner.Runner
 	for _, name := range cfg.Runners {
 		rn, ok := available[name]
 		if !ok {
-			return fmt.Errorf("unknown runner %q (known: codex, claude)", name)
+			return fmt.Errorf("unknown runner %q (known: codex, claude, pi)", name)
 		}
 		runners = append(runners, rn)
 	}

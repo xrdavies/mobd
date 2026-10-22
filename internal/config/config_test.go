@@ -115,6 +115,37 @@ func TestRunnerConfigurationAndServiceSnapshot(t *testing.T) {
 	}
 }
 
+func TestPiConfiguration(t *testing.T) {
+	cfg := loadTest(t, `{"runners":["pi"],"defaultRunner":"pi","piBin":"/opt/pi","piModels":["provider/model"],"piPermissions":"approve"}`)
+	if cfg.DefaultRunner != "pi" || cfg.PiBin != "/opt/pi" || cfg.PiPermissions != "approve" || !reflect.DeepEqual(cfg.PiModels, []string{"provider/model"}) {
+		t.Fatalf("Pi config: %+v", cfg)
+	}
+	data, err := json.Marshal(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := loadTest(t, string(data)); !reflect.DeepEqual(got, cfg) {
+		t.Fatal("Pi service snapshot changed")
+	}
+	t.Setenv("MOBD_PI_BIN", "/other/pi")
+	t.Setenv("MOBD_PI_MODELS", "local/one, local/two")
+	t.Setenv("MOBD_PI_PERMISSIONS", "bypass")
+	got := loadTest(t, string(data))
+	if got.PiBin != "/other/pi" || got.PiPermissions != "bypass" || !reflect.DeepEqual(got.PiModels, []string{"local/one", "local/two"}) {
+		t.Fatalf("Pi env: %+v", got)
+	}
+}
+
+func TestInvalidPiConfiguration(t *testing.T) {
+	for _, data := range []string{`{"piPermissions":"manual"}`, `{"runners":["pi"],"defaultRunner":"pi","piBin":""}`} {
+		path := filepath.Join(t.TempDir(), "config.json")
+		os.WriteFile(path, []byte(data), 0600)
+		if _, _, err := Load([]string{"--config", path}); err == nil {
+			t.Fatalf("accepted %s", data)
+		}
+	}
+}
+
 func TestDefaultsAndNoDotEnv(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("HOME", dir)
