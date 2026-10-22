@@ -5,16 +5,22 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { baseURL, checkPromotion, prepareDistribution, publish, publishInstaller, sha256 } from './release.mjs';
 
-function fixture(t) {
+const LINUX_ASSETS = ['mobd_1.2.3_linux_amd64.tar.gz', 'mobd_1.2.3_amd64.deb', 'mobd_1.2.3_linux_arm64.tar.gz', 'mobd_1.2.3_arm64.deb'];
+
+function assetsDir(t, names) {
   const root = mkdtempSync(join(tmpdir(), 'mob-release-test-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
-  const assets = join(root, 'assets'), output = join(root, 'output');
+  const assets = join(root, 'assets');
   mkdirSync(assets);
-  for (const name of ['mobd_1.2.3_darwin_arm64.tar.gz', 'mobd_1.2.3_linux_amd64.tar.gz', 'mobd_1.2.3_amd64.deb', 'mobd_1.2.3_linux_arm64.tar.gz', 'mobd_1.2.3_arm64.deb']) {
-    writeFileSync(join(assets, name), `fixture ${name}`);
-  }
-  const manifests = prepareDistribution(assets, output, { version: '1.2.3', base: 'https://download.example.com', team: 'A123456789', date: '2026-10-14T00:00:00Z', notes: 'New release' });
-  return { output, manifests };
+  for (const name of names) writeFileSync(join(assets, name), `fixture ${name}`);
+  return { assets, output: join(root, 'output') };
+}
+
+const options = { version: '1.2.3', base: 'https://download.example.com', team: 'A123456789', date: '2026-10-14T00:00:00Z', notes: 'New release', linux: true };
+
+function fixture(t) {
+  const { assets, output } = assetsDir(t, ['mobd_1.2.3_darwin_arm64.tar.gz', ...LINUX_ASSETS]);
+  return { output, manifests: prepareDistribution(assets, output, options) };
 }
 
 test('distribution identifies a missing download origin', () => {
@@ -49,6 +55,20 @@ test('manifests agree with payloads, pin the installer identity', t => {
   assert.ok(installer.includes("download_base='https://download.example.com'"));
   assert.ok(installer.includes("apple_team='A123456789'"));
   assert.ok(!installer.includes('@DOWNLOAD_BASE_URL@'));
+});
+
+test('a macOS-only release lists no Linux platforms and needs no Linux files', t => {
+  const { assets, output } = assetsDir(t, ['mobd_1.2.3_darwin_arm64.tar.gz']);
+  const manifests = prepareDistribution(assets, output, { ...options, linux: false });
+  assert.deepEqual(Object.keys(manifests.mobd.platforms), ['darwin-aarch64']);
+  assert.equal(readFileSync(join(output, 'mobd/v1.2.3/SHA256SUMS'), 'utf8').split('\n').filter(Boolean).length, 1);
+});
+
+test('a Linux release fails when any Linux file is missing', t => {
+  for (const missing of LINUX_ASSETS) {
+    const { assets, output } = assetsDir(t, ['mobd_1.2.3_darwin_arm64.tar.gz', ...LINUX_ASSETS.filter(name => name !== missing)]);
+    assert.throws(() => prepareDistribution(assets, output, options), /ENOENT/);
+  }
 });
 
 function remote(events, overrides = {}) {

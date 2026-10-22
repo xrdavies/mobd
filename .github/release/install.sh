@@ -81,6 +81,9 @@ main() {
   fetch "$prefix/release.json" "$temp_dir/release.json"
   [ "$(field version "$temp_dir/release.json")" = "$requested_version" ] || { printf 'Release version mismatch.\n' >&2; return 1; }
   expected=$(field "platforms.$platform.sha256" "$temp_dir/release.json")
+  [ -n "$expected" ] || [ "$os" = darwin ] || {
+    printf 'mobd %s has no Linux build yet. Linux releases are coming soon.\n' "$requested_version" >&2; return 1;
+  }
   printf '%s\n' "$expected" | grep -Eq '^[0-9a-f]{64}$' || { printf 'Invalid release checksum.\n' >&2; return 1; }
   printf 'Downloading mobd %s…\n' "$requested_version"
   fetch "$prefix/$archive" "$temp_dir/$archive"

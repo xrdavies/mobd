@@ -38,7 +38,7 @@ try {
     throw Error(`Push failed; local tag ${tag} was kept. Check git ls-remote origin ${tagRef}. If absent, retry: git -c push.followTags=false push origin ${tagRef}:${tagRef}. If present, check Actions. Do not move the tag.`);
   }
   console.log(`Pushed ${tag} at ${head.slice(0, 12)}.`);
-  console.log('Next: check Actions → Release mobd macOS arm64, test the draft archive, then publish the stable Release.');
+  console.log('Next: check Actions → Release mobd, test the draft archive, then publish the stable Release.');
   console.log('Wait for Publish mobd downloads to R2 to finish before announcing the release.');
 } catch (error) {
   console.error(error.message);

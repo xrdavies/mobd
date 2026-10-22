@@ -1,4 +1,4 @@
-name: Release mobd (macOS arm64, Linux amd64 and arm64)
+name: Release mobd
 on:
   push:
     tags: ['v*']
@@ -112,8 +112,10 @@ jobs:
           SIGNING_KEYCHAIN: ${{ steps.signing.outputs.keychain }}
         run: security delete-keychain "$SIGNING_KEYCHAIN"
   # Built on Ubuntu 22.04 for the glibc floor (2.35); GStreamer is linked from the system.
+  # Only when the repository variable RELEASE_LINUX is true (publish-r2.yml reads it too).
   linux:
     needs: prepare
+    if: vars.RELEASE_LINUX == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -157,6 +159,8 @@ jobs:
           if-no-files-found: error
   release:
     needs: [prepare, mobd, linux]
+    # A skipped linux job must not skip the release.
+    if: ${{ !cancelled() && !failure() }}
     runs-on: ubuntu-24.04
     environment: release
     permissions:

@@ -39,7 +39,7 @@ test('make release pushes only the requested annotated tag at the published comm
   const result = spawnSync('make', ['release', 'VERSION=v1.2.3'], { cwd: repo, env, encoding: 'utf8' });
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /Pushed v1\.2\.3/);
-  assert.match(result.stdout, /Release mobd macOS arm64/);
+  assert.match(result.stdout, /Actions → Release mobd,/);
   assert.equal(git('cat-file', '-t', 'refs/tags/v1.2.3'), 'tag');
   assert.equal(git('tag', '--list', 'v1.2.3', '--format=%(contents:subject)'), 'mobd v1.2.3');
   assert.equal(git('rev-parse', 'v1.2.3^{commit}'), head);

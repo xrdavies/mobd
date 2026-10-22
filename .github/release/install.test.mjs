@@ -70,7 +70,7 @@ test('running daemon, invalid versions and unsupported arguments never install',
 });
 
 // The Linux branch reads release.json as release.mjs writes it.
-test('installer on Linux picks the architecture and verifies its checksum', t => {
+function linuxFixture(t, linux) {
   const root = mkdtempSync(join(tmpdir(), 'mob-installer-linux-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const bin = join(root, 'bin'), home = join(root, 'home'), assets = join(root, 'assets'), out = join(root, 'out'), payload = join(root, 'payload');
@@ -90,12 +90,17 @@ test('installer on Linux picks the architecture and verifies its checksum', t =>
     writeFileSync(join(assets, `mobd_1.2.3_${arch}.deb`), 'deb');
   }
   writeFileSync(join(assets, 'mobd_1.2.3_darwin_arm64.tar.gz'), 'mac');
-  const manifest = prepareDistribution(assets, out, { version: '1.2.3', base: 'https://download.example.com', team: 'A123456789', date: '2026-10-14T00:00:00Z' }).mobd;
+  const manifest = prepareDistribution(assets, out, { version: '1.2.3', base: 'https://download.example.com', team: 'A123456789', date: '2026-10-14T00:00:00Z', linux }).mobd;
   const downloads = join(out, 'mobd/v1.2.3');
   writeFileSync(join(downloads, 'latest.json'), JSON.stringify(manifest, null, 2) + '\n');
   script('curl', `while [ "$#" -gt 0 ]; do case "$1" in https://*) url="$1" ;; -o) shift; dest="$1" ;; esac; shift; done\ncp "${downloads}/\${url##*/}" "$dest"`);
   const installer = join(downloads, 'install.sh');
   const run = (extra = {}) => spawnSync('sh', [installer], { encoding: 'utf8', env: { ...process.env, HOME: home, PATH: `${bin}:${process.env.PATH}`, ...extra } });
+  return { run, home, downloads };
+}
+
+test('installer on Linux picks the architecture and verifies its checksum', t => {
+  const { run, home, downloads } = linuxFixture(t, true);
   for (const [machine, arch] of [['x86_64', 'amd64'], ['aarch64', 'arm64']]) {
     const result = run({ TEST_ARCH: machine });
     assert.equal(result.status, 0, result.stderr);
@@ -106,4 +111,12 @@ test('installer on Linux picks the architecture and verifies its checksum', t =>
   writeFileSync(join(downloads, 'mobd_1.2.3_linux_arm64.tar.gz'), 'corrupt');
   assert.match(run({ TEST_ARCH: 'aarch64' }).stderr, /Checksum mismatch/);
   assert.match(run({ TEST_ARCH: 'riscv64' }).stderr, /x86_64 and arm64/);
+});
+
+test('installer on Linux explains a release without a Linux build', t => {
+  const { run, home } = linuxFixture(t, false);
+  const result = run({ TEST_ARCH: 'x86_64' });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /has no Linux build yet/);
+  assert.equal(existsSync(join(home, '.local/bin/mobd')), false);
 });
