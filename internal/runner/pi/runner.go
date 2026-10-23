@@ -34,6 +34,8 @@ type Runner struct {
 	cfg    config.Config
 	mu     sync.Mutex
 	active map[string]*turn
+	// The last binary that passed Check (path, size and time); a changed file is checked again.
+	checked string
 }
 
 func New(cfg config.Config) *Runner { return &Runner{cfg: cfg, active: map[string]*turn{}} }
@@ -47,7 +49,8 @@ func (r *Runner) Info() runner.Info {
 }
 
 func (r *Runner) Check(ctx context.Context) runner.Status {
-	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	// The first run of a new binary can be slow (macOS scans it), so allow more than a normal start.
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	out, err := exec.CommandContext(ctx, r.cfg.PiBin, "--version").Output()
 	if err != nil {
@@ -66,6 +69,34 @@ func (r *Runner) Check(ctx context.Context) runner.Status {
 	return runner.Status{OK: true, Detail: r.cfg.PiBin + " (" + version + ")"}
 }
 
+// binary identifies the installed Pi file, so an upgrade or replacement is checked again.
+func binary(path string) string {
+	info, err := os.Stat(path)
+	if err != nil {
+		return ""
+	}
+	return fmt.Sprintf("%s|%d|%d", path, info.Size(), info.ModTime().UnixNano())
+}
+
+// checkOnce runs Check before a turn only when this binary has not passed it yet.
+func (r *Runner) checkOnce(ctx context.Context, path string) error {
+	id := binary(path)
+	r.mu.Lock()
+	ok := id != "" && r.checked == id
+	r.mu.Unlock()
+	if ok {
+		return nil
+	}
+	status := r.Check(ctx)
+	if !status.OK {
+		return errors.New(status.Detail)
+	}
+	r.mu.Lock()
+	r.checked = id
+	r.mu.Unlock()
+	return nil
+}
+
 func (r *Runner) Start(ctx context.Context, t *task.Task, opts runner.Options, emit runner.EmitFunc) error {
 	if emit == nil {
 		emit = func(task.Event) error { return nil }
@@ -74,8 +105,8 @@ func (r *Runner) Start(ctx context.Context, t *task.Task, opts runner.Options, e
 	if err != nil {
 		return cli.Missing(Name, r.cfg.PiBin, "MOBD_PI_BIN", err, emit)
 	}
-	if status := r.Check(ctx); !status.OK {
-		return errors.New(status.Detail)
+	if err := r.checkOnce(ctx, path); err != nil {
+		return err
 	}
 	if t.ResumeID != "" {
 		resume := t.ResumeID

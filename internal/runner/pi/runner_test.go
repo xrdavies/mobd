@@ -269,6 +269,26 @@ func TestMissingResumeAndOldVersion(t *testing.T) {
 	}
 }
 
+func TestVersionIsCheckedOncePerBinary(t *testing.T) {
+	calls := filepath.Join(t.TempDir(), "versions.txt")
+	script := strings.Replace(fakePi(reply), `if [ "$1" = '--version' ]; then`, `if [ "$1" = '--version' ]; then echo x >> '`+calls+`';`, 1)
+	bin, dir := install(t, script)
+	r := testRunner(t, bin, dir)
+	for i := 0; i < 2; i++ {
+		if err := r.Start(context.Background(), &task.Task{ID: "t", Prompt: "hi"}, runner.Options{}, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got, _ := os.ReadFile(calls); string(got) != "x\n" {
+		t.Fatalf("version checks %q, want one", got)
+	}
+	// A replaced binary is checked again before the next turn.
+	os.WriteFile(bin, []byte("#!/bin/sh\nprintf '0.73.1\\n'"), 0700)
+	if err := r.Start(context.Background(), &task.Task{ID: "t", Prompt: "hi"}, runner.Options{}, nil); err == nil || !strings.Contains(err.Error(), "found 0.73.1") {
+		t.Fatalf("error %v", err)
+	}
+}
+
 func TestReadinessFailureNeverSendsPrompt(t *testing.T) {
 	for _, tc := range []struct{ name, from, to, want string }{
 		{"missing extension", `"commands":[{"name":"mob-ready"}]`, `"commands":[]`, "extension did not load"},
