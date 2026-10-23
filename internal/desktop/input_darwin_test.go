@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"image/jpeg"
-	"image/png"
 	"math"
 	"os"
 	"os/exec"
@@ -67,11 +66,11 @@ func TestMacOSSnapshotScalesAndEncodes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := png.DecodeConfig(bytes.NewReader(full))
-	if err != nil || cfg.Width != meta.PixelWidth || meta.PointWidth <= 0 || cfg.Width < 640 {
-		t.Fatalf("png %+v meta %+v err %v", cfg, meta, err)
+	cfg, err := jpeg.DecodeConfig(bytes.NewReader(full))
+	if err != nil || cfg.Width != meta.ImageWidth || cfg.Width > 1568 || meta.PointWidth <= 0 || meta.Format != "jpeg" {
+		t.Fatalf("jpeg %+v meta %+v err %v", cfg, meta, err)
 	}
-	t.Logf("full PNG %dx%d: %d KB in %s", cfg.Width, cfg.Height, len(full)/1024, time.Since(start).Round(time.Millisecond))
+	t.Logf("agent screenshot %dx%d: %d KB in %s", cfg.Width, cfg.Height, len(full)/1024, time.Since(start).Round(time.Millisecond))
 }
 
 func TestKeepAwakeReleasesItsAssertions(t *testing.T) {

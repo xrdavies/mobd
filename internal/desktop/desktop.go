@@ -69,6 +69,8 @@ type ScreenMeta struct {
 	PixelHeight     int     `json:"pixel_height"`
 	PointWidth      int     `json:"point_width"`
 	PointHeight     int     `json:"point_height"`
+	ImageWidth      int     `json:"image_width"`
+	ImageHeight     int     `json:"image_height"`
 	CoordinateSpace string  `json:"coordinate_space"`
 	Hint            string  `json:"hint"`
 }

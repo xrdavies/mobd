@@ -68,21 +68,55 @@ func (o Ops) mainScale() float64 {
 	return displays[0].Scale
 }
 
-// Screenshot captures the main display and describes its geometry.
+// agentMaxWidth caps the screenshot an agent sees. A full Retina PNG is several megabytes, and the
+// agent's history re-sends every image on each turn: a few of them push the request past what
+// model providers accept. Models scale large images down anyway.
+const agentMaxWidth = 1568
+
+// Screenshot captures the main display for an agent: a JPEG at the display's point size (at most
+// agentMaxWidth wide), so image coordinates are click coordinates on most screens.
 func (o Ops) Screenshot(ctx context.Context) ([]byte, ScreenMeta, error) {
-	img, err := o.B.Snapshot(ctx, SnapshotOptions{Format: "png"})
+	d, derr := o.Display()
+	img, err := o.B.Snapshot(ctx, SnapshotOptions{MaxWidth: screenshotWidth(d), Format: "jpeg", Quality: 80})
 	if err != nil {
 		return nil, ScreenMeta{}, err
 	}
-	scale := o.mainScale()
-	return img.Data, ScreenMeta{
-		Format: "png", ScaleFactor: scale,
-		PixelWidth: img.Width, PixelHeight: img.Height,
-		PointWidth:      int(math.Round(float64(img.Width) / scale)),
-		PointHeight:     int(math.Round(float64(img.Height) / scale)),
+	if derr != nil {
+		d = Display{}
+	}
+	return img.Data, screenMeta(d, img), nil
+}
+
+// screenshotWidth is the width to capture at: the display's point width, at most agentMaxWidth.
+func screenshotWidth(d Display) int {
+	if d.Width <= 0 {
+		return agentMaxWidth
+	}
+	return min(d.Width, agentMaxWidth)
+}
+
+// screenMeta describes a screenshot: the display in points and pixels, and the image's own size.
+func screenMeta(d Display, img Image) ScreenMeta {
+	scale := d.Scale
+	if scale <= 0 {
+		scale = 1
+	}
+	pw, ph := d.Width, d.Height
+	if pw <= 0 || ph <= 0 {
+		pw, ph = img.Width, img.Height
+	}
+	hint := "The image is in points: pass its coordinates to click(x,y) as they are."
+	if img.Width != pw {
+		hint = fmt.Sprintf("The image is scaled: multiply its coordinates by %.4g (point_width/image_width) for click(x,y), which takes points.", float64(pw)/float64(max(img.Width, 1)))
+	}
+	return ScreenMeta{
+		Format: "jpeg", ScaleFactor: scale,
+		PixelWidth: int(math.Round(float64(pw) * scale)), PixelHeight: int(math.Round(float64(ph) * scale)),
+		PointWidth: pw, PointHeight: ph,
+		ImageWidth: img.Width, ImageHeight: img.Height,
 		CoordinateSpace: "points",
-		Hint:            "Pass click(x,y) in points (logical pixels), not raw Retina pixels.",
-	}, nil
+		Hint:            hint,
+	}
 }
 
 // Click clicks at point coordinates on the main display.

@@ -6,6 +6,7 @@ import (
 	"image/color"
 	"image/jpeg"
 	"image/png"
+	"strings"
 	"testing"
 )
 
@@ -31,5 +32,25 @@ func TestEncodeScalesAndConverts(t *testing.T) {
 	}
 	if _, _, err := Encode(capture.Bytes(), "bmp", 0, 0); err == nil {
 		t.Fatal("unknown format accepted")
+	}
+}
+
+func TestAgentScreenshotIsPointSizedAndCapped(t *testing.T) {
+	if w := screenshotWidth(Display{Width: 1512, Height: 982, Scale: 2}); w != 1512 {
+		t.Fatalf("MacBook: %d", w)
+	}
+	if w := screenshotWidth(Display{Width: 2560, Height: 1440, Scale: 2}); w != agentMaxWidth {
+		t.Fatalf("5K display: %d", w)
+	}
+	if w := screenshotWidth(Display{}); w != agentMaxWidth {
+		t.Fatalf("unknown display: %d", w)
+	}
+	m := screenMeta(Display{Width: 1512, Height: 982, Scale: 2}, Image{Width: 1512, Height: 982})
+	if m.Format != "jpeg" || m.PixelWidth != 3024 || m.ImageWidth != 1512 || !strings.Contains(m.Hint, "as they are") {
+		t.Fatalf("point-sized meta %+v", m)
+	}
+	m = screenMeta(Display{Width: 2560, Height: 1440, Scale: 2}, Image{Width: 1568, Height: 882})
+	if m.PointWidth != 2560 || m.ImageWidth != 1568 || !strings.Contains(m.Hint, "1.633") {
+		t.Fatalf("scaled meta %+v", m)
 	}
 }

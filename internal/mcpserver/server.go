@@ -4,6 +4,7 @@
 package mcpserver
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -116,8 +117,8 @@ func New(d Desktop, version string, asker Asker) *mcp.Server {
 	w := wordingFor(desktop.Current().Name())
 	s := mcp.NewServer(&mcp.Implementation{Name: "mob-mcp", Version: version}, &mcp.ServerOptions{Instructions: w.instructions})
 
-	mcp.AddTool(s, &mcp.Tool{Name: "screenshot", Description: "Capture the primary display. Returns PNG image plus JSON metadata " +
-		"(scale_factor, point/pixel sizes). Use point coordinates for click()."},
+	mcp.AddTool(s, &mcp.Tool{Name: "screenshot", Description: "Capture the primary display. Returns a JPEG (at most 1568 px wide) plus JSON metadata " +
+		"(scale_factor, point, pixel and image sizes). Use point coordinates for click()."},
 		func(ctx context.Context, _ *mcp.CallToolRequest, _ empty) (*mcp.CallToolResult, any, error) {
 			data, meta, err := d.Screenshot(ctx)
 			if err != nil {
@@ -125,7 +126,7 @@ func New(d Desktop, version string, asker Asker) *mcp.Server {
 			}
 			metaJSON, _ := json.Marshal(meta)
 			return &mcp.CallToolResult{Content: []mcp.Content{
-				&mcp.ImageContent{Data: data, MIMEType: "image/png"},
+				&mcp.ImageContent{Data: data, MIMEType: "image/" + cmp.Or(meta.Format, "png")},
 				&mcp.TextContent{Text: string(metaJSON)},
 			}}, nil, nil
 		})
