@@ -12,5 +12,8 @@
   "claudeModels": ["opus", "sonnet", "haiku"],
   "claudePermissions": "bypass",
   "claudeSettingSources": "project",
+  "piBin": "pi",
+  "piModels": [],
+  "piPermissions": "bypass",
   "vncAddr": "127.0.0.1:5900"
 }

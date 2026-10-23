@@ -45,6 +45,9 @@ type Config struct {
 	ClaudeModels         []string      `json:"claudeModels"`
 	ClaudePermissions    string        `json:"claudePermissions"`
 	ClaudeSettingSources string        `json:"claudeSettingSources"`
+	PiBin                string        `json:"piBin"`
+	PiModels             []string      `json:"piModels"`
+	PiPermissions        string        `json:"piPermissions"`
 	QuestionTimeout      time.Duration `json:"-"`
 	RemovedVNCAddr       string        `json:"vncAddr,omitempty"`
 
@@ -159,6 +162,7 @@ func Load(args []string) (Config, string, error) {
 		CodexMode: "app-server", CodexPermissions: "bypass",
 		ClaudeBin: "claude", ClaudeModels: []string{"opus", "sonnet", "haiku"},
 		ClaudePermissions: "bypass", ClaudeSettingSources: "project",
+		PiBin: "pi", PiPermissions: "bypass",
 		QuestionTimeout: 30 * time.Minute,
 	}
 	defaultDesktop(&cfg)
@@ -188,6 +192,7 @@ func Load(args []string) (Config, string, error) {
 		"MOBD_DEFAULT_RUNNER": &cfg.DefaultRunner, "MOBD_CLAUDE_BIN": &cfg.ClaudeBin,
 		"MOBD_CLAUDE_WORKDIR": &cfg.ClaudeWorkDir, "MOBD_CLAUDE_PERMISSIONS": &cfg.ClaudePermissions,
 		"MOBD_CLAUDE_SETTING_SOURCES": &cfg.ClaudeSettingSources,
+		"MOBD_PI_BIN":                 &cfg.PiBin, "MOBD_PI_PERMISSIONS": &cfg.PiPermissions,
 	} {
 		if value, ok := os.LookupEnv(key); ok {
 			*dest = value
@@ -200,6 +205,7 @@ func Load(args []string) (Config, string, error) {
 	for key, dest := range map[string]*[]string{
 		"MOBD_CORS_ORIGINS": &cfg.CORSOrigins, "MOBD_CODEX_MODELS": &cfg.CodexModels,
 		"MOBD_RUNNERS": &cfg.Runners, "MOBD_CLAUDE_MODELS": &cfg.ClaudeModels,
+		"MOBD_PI_MODELS": &cfg.PiModels,
 	} {
 		if value, ok := os.LookupEnv(key); ok {
 			*dest = splitList(value)
@@ -278,15 +284,15 @@ func Load(args []string) (Config, string, error) {
 	if cfg.CodexMode != "app-server" && cfg.CodexMode != "exec" {
 		return cfg, path, errors.New("codexMode must be app-server or exec")
 	}
-	for name, value := range map[string]string{"codexPermissions": cfg.CodexPermissions, "claudePermissions": cfg.ClaudePermissions} {
+	for name, value := range map[string]string{"codexPermissions": cfg.CodexPermissions, "claudePermissions": cfg.ClaudePermissions, "piPermissions": cfg.PiPermissions} {
 		if value != "bypass" && value != "approve" {
 			return cfg, path, fmt.Errorf("%s must be bypass or approve", name)
 		}
 	}
 	enabled := make(map[string]bool)
 	for _, name := range cfg.Runners {
-		if name != "codex" && name != "claude" {
-			return cfg, path, fmt.Errorf("unknown runner %q (known: codex, claude)", name)
+		if name != "codex" && name != "claude" && name != "pi" {
+			return cfg, path, fmt.Errorf("unknown runner %q (known: codex, claude, pi)", name)
 		}
 		if enabled[name] {
 			return cfg, path, fmt.Errorf("duplicate runner %q", name)
@@ -295,6 +301,9 @@ func Load(args []string) (Config, string, error) {
 	}
 	if !enabled[cfg.DefaultRunner] {
 		return cfg, path, errors.New("defaultRunner must be an enabled runner")
+	}
+	if enabled["pi"] && cfg.PiBin == "" {
+		return cfg, path, errors.New("piBin must not be empty when pi is enabled")
 	}
 	for name, addr := range map[string]string{"listen": cfg.ListenAddr} {
 		_, port, err := net.SplitHostPort(addr)

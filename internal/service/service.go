@@ -70,7 +70,7 @@ func prepare(dir string, cfg config.Config, args []string) (prepared, error) {
 		return p, err
 	}
 	// Resolve the CLI in the invoking shell; the service manager does not load shell profiles.
-	for _, bin := range []*string{&cfg.CodexBin, &cfg.ClaudeBin} {
+	for _, bin := range []*string{&cfg.CodexBin, &cfg.ClaudeBin, &cfg.PiBin} {
 		if found, err := exec.LookPath(*bin); err == nil {
 			*bin, _ = filepath.Abs(found)
 		}

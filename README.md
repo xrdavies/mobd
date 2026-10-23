@@ -1,6 +1,6 @@
 # mobd
 
-Office control plane: HTTP task API + Codex and Claude Code runners. The same binary provides the desktop actuation MCP server (`mobd mcp`), launched by the agent for each task.
+Office control plane: HTTP task API + Codex, Claude Code and Pi runners. The same binary provides the desktop actuation MCP server (`mobd mcp`), launched by the agent for each task.
 
 Desktop clients connect over HTTP/SSE and the live desktop stream (WebRTC, with a WebSocket fallback). The desktop app lives in
 [xrdavies/mob](https://github.com/xrdavies/mob); this repository builds independently.
@@ -51,7 +51,8 @@ mobd start --login               # opt into startup at user login
 mobd serve                      # foreground; Ctrl-C to stop
 ```
 
-Install and authenticate the agent CLI you plan to use (Codex or Claude Code).
+Install and authenticate the agent CLI you plan to use (Codex, Claude Code or Pi).
+Pi is opt-in: add `"pi"` to `runners`; see [Pi setup and tests](docs/runners.md#pi).
 On macOS, mobd requests Accessibility and Screen Recording when it starts if
 they are missing; approve the system prompts for the app that launches mobd.
 You can also grant them in System Settings → Privacy & Security. The live desktop is
@@ -158,7 +159,7 @@ A managed relay is planned, not implemented.
 
 ### Configuration
 
-JSON `mcpArgs`, `corsOrigins`, `codexModels`, `claudeModels` and `runners` are arrays of strings. `questionTimeout` is a Go duration string such as `"30m"`.
+JSON `mcpArgs`, `corsOrigins`, `codexModels`, `claudeModels`, `piModels` and `runners` are arrays of strings. `questionTimeout` is a Go duration string such as `"30m"`.
 
 Priority: **command-line flags > exported `MOBD_*` variables > JSON > defaults**.
 The default config is `~/.mobd/config.json`; a missing default file is allowed,
@@ -374,6 +375,9 @@ curl -H "Authorization: Bearer $MOBD_TOKEN" -s localhost:8080/artifacts/ARTIFACT
 | `claudeBin` | `MOBD_CLAUDE_BIN` | `claude` | Claude Code executable |
 | `claudeWorkdir` | `MOBD_CLAUDE_WORKDIR` | Codex workdir | Claude working directory |
 | `claudeModels` | `MOBD_CLAUDE_MODELS` | `opus,sonnet,haiku` | Claude model picker |
+| `piBin` | `MOBD_PI_BIN` | `pi` | Pi CLI (tested with 1.4.0; requires 1.4.x or later 1.x); uses `workdir` |
+| `piModels` | `MOBD_PI_MODELS` | empty | Pi model picker; prefer exact `provider/model` IDs |
+| `piPermissions` | `MOBD_PI_PERMISSIONS` | `bypass` | `approve` asks before shell commands, edits, writes and other non-allowlisted tools |
 
 Conversation desktops (Linux; accepted and validated everywhere):
 
