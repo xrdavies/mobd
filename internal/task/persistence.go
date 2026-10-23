@@ -108,6 +108,7 @@ func OpenStore(path string) (*Store, error) {
 			t.Waiting = false
 			session := s.data.Sessions[t.SessionID]
 			session.Status, session.UpdatedAt = t.Status, t.UpdatedAt
+			bump(session, t)
 			recovered = true
 		}
 		message := string(t.Status)

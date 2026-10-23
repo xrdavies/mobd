@@ -26,20 +26,22 @@ type Task struct {
 	// ResumeID is the runner's opaque handle for continuing the conversation.
 	ResumeID string `json:"resumeId,omitempty"`
 	// LegacyThreadID is read from state written before resumeId; never written.
-	LegacyThreadID string     `json:"threadId,omitempty"`
-	EventID        int64      `json:"eventId"`
-	Prompt         string     `json:"prompt"`
-	Status         Status     `json:"status"`
-	Runner         string     `json:"runner"`
-	Model          string     `json:"model,omitempty"`
-	Effort         string     `json:"effort,omitempty"`
-	Attachments    []string   `json:"attachments,omitempty"`
-	Usage          *Usage     `json:"usage,omitempty"`
-	CreatedAt      time.Time  `json:"createdAt"`
-	UpdatedAt      time.Time  `json:"updatedAt"`
-	StartedAt      *time.Time `json:"startedAt,omitempty"`
-	FinishedAt     *time.Time `json:"finishedAt,omitempty"`
-	Error          *string    `json:"error"`
+	LegacyThreadID string `json:"threadId,omitempty"`
+	EventID        int64  `json:"eventId"`
+	// Rev is the conversation revision of this turn's last change (see Session.Rev).
+	Rev         int64      `json:"rev,omitempty"`
+	Prompt      string     `json:"prompt"`
+	Status      Status     `json:"status"`
+	Runner      string     `json:"runner"`
+	Model       string     `json:"model,omitempty"`
+	Effort      string     `json:"effort,omitempty"`
+	Attachments []string   `json:"attachments,omitempty"`
+	Usage       *Usage     `json:"usage,omitempty"`
+	CreatedAt   time.Time  `json:"createdAt"`
+	UpdatedAt   time.Time  `json:"updatedAt"`
+	StartedAt   *time.Time `json:"startedAt,omitempty"`
+	FinishedAt  *time.Time `json:"finishedAt,omitempty"`
+	Error       *string    `json:"error"`
 	// Waiting is true while the turn waits for the user to answer a question.
 	Waiting bool `json:"waiting,omitempty"`
 	// QueuePosition is computed on read (1-based) while the task waits for the desktop.
@@ -157,7 +159,10 @@ type Session struct {
 	Archived       bool      `json:"archived"`
 	CreatedAt      time.Time `json:"createdAt"`
 	UpdatedAt      time.Time `json:"updatedAt"`
-	Messages       []Message `json:"messages,omitempty"`
+	// Rev goes up on every change in the conversation (a turn, its steps, messages or questions,
+	// or the title and flags). Clients pass it back as ?since= to fetch only what changed.
+	Rev      int64     `json:"rev,omitempty"`
+	Messages []Message `json:"messages,omitempty"`
 }
 
 // Event is streamed over SSE and retained for late subscribers.

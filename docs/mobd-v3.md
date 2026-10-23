@@ -124,6 +124,19 @@ type Activity = {
 
 The App builds the conversation timeline by merging `messages` and `activities` by time (`createdAt` / `startedAt`). Both come from one snapshot in `GET /sessions/{id}`.
 
+**Incremental fetch.** Every conversation has a revision `rev` that goes up on any change in it (a
+turn's status, steps, messages, questions or usage, or the title and flags); each turn carries the
+`rev` of its last change. `GET /sessions/{id}` answers `{session, tasks, activities, questions, rev,
+full}`. A client that already holds the conversation passes `?since=<rev>` and gets only the turns
+changed after that revision, plus any still queued or running, each with all of its messages,
+steps and questions; `session.messages` then holds only those turns' messages. With `full: false`
+the client replaces those turns in what it holds and keeps the rest; with `full: true` (no `since`,
+`since=0`, or a `since` ahead of mobd's revision, e.g. after restoring an older state) it replaces
+everything. Turns are never deleted on their own; a deleted conversation answers 404.
+
+JSON answers of 1 KB or more are gzip-compressed for clients that send `Accept-Encoding: gzip`;
+event streams, images, video and WebSocket upgrades are never compressed.
+
 ## Desktop queue
 
 - `MOBD_MAX_RUNNING` (default **1**) limits how many tasks run at once, across all sessions.

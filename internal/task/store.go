@@ -368,6 +368,7 @@ func (s *Store) UpdateSession(id string, patch SessionPatch) (*Session, error) {
 	if patch.Archived != nil {
 		session.Archived = *patch.Archived
 	}
+	bump(session, nil)
 	next := s.next()
 	next.Sessions[id] = session
 	if err := s.swap(next); err != nil {
@@ -448,6 +449,52 @@ func (s *Store) Session(id string) (*Session, []*Task, []Activity, error) {
 		}
 	}
 	return cloneSession(session), tasks, activities, nil
+}
+
+// SessionSince is Session for a client that already holds the conversation at revision since:
+// only turns changed after it, or still queued or running (their queue position is computed on
+// read), with their messages, steps and questions. full is true when everything is returned:
+// since is 0, or ahead of the store (state restored from an older copy).
+func (s *Store) SessionSince(id string, since int64) (session *Session, tasks []*Task, activities []Activity, questions []Question, full bool, err error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	stored, ok := s.data.Sessions[id]
+	if !ok {
+		return nil, nil, nil, nil, false, ErrNotFound
+	}
+	full = since <= 0 || since > stored.Rev
+	tasks, activities, questions = make([]*Task, 0), make([]Activity, 0), make([]Question, 0)
+	positions := s.queuePositions()
+	changed := map[string]bool{}
+	for _, taskID := range s.data.Order {
+		t := s.data.Tasks[taskID]
+		if t.SessionID != id || !(full || t.Rev > since || !t.Status.Terminal()) {
+			continue
+		}
+		changed[taskID] = true
+		tasks = append(tasks, s.view(t, positions))
+		activities = append(activities, s.data.Activities[taskID]...)
+		questions = append(questions, s.data.Questions[taskID]...)
+	}
+	session = cloneSession(stored)
+	if !full {
+		messages := make([]Message, 0)
+		for _, m := range session.Messages {
+			if changed[m.TaskID] {
+				messages = append(messages, m)
+			}
+		}
+		session.Messages = messages
+	}
+	return session, tasks, activities, questions, full, nil
+}
+
+// bump records a change in the conversation, and in turn t when it is given. Callers pass copies.
+func bump(session *Session, t *Task) {
+	session.Rev++
+	if t != nil {
+		t.Rev = session.Rev
+	}
 }
 
 // Activities returns the persisted steps of one task.
@@ -633,6 +680,7 @@ func (s *Store) CanCancel(id string) (*Task, error) {
 // Caller holds mu and passes copies of the objects it changed; nil activities
 // leave the task's steps unchanged.
 func (s *Store) commit(t *Task, session *Session, added bool, activities []Activity) error {
+	bump(session, t)
 	next := s.next()
 	next.Tasks[t.ID], next.Sessions[session.ID] = t, session
 	if added {
@@ -713,6 +761,7 @@ func (s *Store) commitQuestions(stored *Task, questions []Question, changed Ques
 	t.UpdatedAt, t.EventID = now, t.EventID+1
 	session := cloneSession(s.data.Sessions[t.SessionID])
 	session.Waiting, session.UpdatedAt = t.Waiting, now
+	bump(session, t)
 	next := s.next()
 	next.Tasks[t.ID], next.Sessions[session.ID] = t, session
 	next.Questions = maps.Clone(s.data.Questions)

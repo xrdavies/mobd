@@ -182,7 +182,7 @@ func (s *Server) Handler() http.Handler {
 	public.HandleFunc("POST /internal/tasks/{id}/ask", s.handleAsk)
 	public.HandleFunc("POST /internal/tasks/{id}/desktop/{op}", s.handleInternalDesktop)
 	public.Handle("/", s.withAuth(mux))
-	return s.withCORS(public)
+	return s.withCORS(withGzip(public))
 }
 
 func (s *Server) withCORS(next http.Handler) http.Handler {
@@ -363,14 +363,27 @@ func (s *Server) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// handleGetSession returns a conversation. With ?since=REV (the rev of an earlier answer) it
+// returns only the turns changed after it, with their messages, steps and questions; "full"
+// says whether the client should replace what it holds or merge the turns into it.
 func (s *Server) handleGetSession(w http.ResponseWriter, r *http.Request) {
-	session, tasks, activities, err := s.store.Session(r.PathValue("id"))
+	var since int64
+	if raw := r.URL.Query().Get("since"); raw != "" {
+		n, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil || n < 0 {
+			writeErr(w, http.StatusBadRequest, "since must be a revision number")
+			return
+		}
+		since = n
+	}
+	session, tasks, activities, questions, full, err := s.store.SessionSince(r.PathValue("id"), since)
 	if err != nil {
 		writeErr(w, http.StatusNotFound, "session not found")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"session": session, "tasks": tasks, "activities": activities, "questions": s.store.Questions(session.ID),
+		"session": session, "tasks": tasks, "activities": activities, "questions": questions,
+		"rev": session.Rev, "full": full,
 	})
 }
 

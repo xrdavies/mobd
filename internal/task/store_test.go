@@ -411,3 +411,71 @@ func TestQueueReasons(t *testing.T) {
 		t.Errorf("notified %q\nwant %q", notified, want)
 	}
 }
+
+func TestSessionSinceReturnsOnlyChangedTurns(t *testing.T) {
+	s := NewStore()
+	first, _ := s.Create("first")
+	sid := first.SessionID
+	_ = s.AppendEvent(first.ID, Event{Type: "activity", Activity: &Activity{ID: "a1", Kind: "command", Title: "ls"}})
+	_ = s.AppendEvent(first.ID, Event{Type: "message", MessageID: "m1", Message: "done"})
+	if _, err := s.UpdateStatus(first.ID, StatusSucceeded, ""); err != nil {
+		t.Fatal(err)
+	}
+	session, tasks, acts, _, full, err := s.SessionSince(sid, 0)
+	if err != nil || !full || len(tasks) != 1 || len(acts) != 1 || len(session.Messages) != 2 || session.Rev == 0 || tasks[0].Rev != session.Rev {
+		t.Fatalf("full: %+v %d tasks %d acts full=%v err=%v", session, len(tasks), len(acts), full, err)
+	}
+	rev := session.Rev
+
+	// Nothing changed: only the header.
+	session, tasks, acts, questions, full, _ := s.SessionSince(sid, rev)
+	if full || len(tasks) != 0 || len(acts) != 0 || len(questions) != 0 || len(session.Messages) != 0 || session.Rev != rev {
+		t.Fatalf("unchanged: %+v %d tasks full=%v", session, len(tasks), full)
+	}
+
+	// A new turn: only it, with its own messages; it stays included while it runs.
+	second, err := s.CreateTurn(sid, "second")
+	if err != nil {
+		t.Fatal(err)
+	}
+	session, tasks, _, _, full, _ = s.SessionSince(sid, rev)
+	if full || len(tasks) != 1 || tasks[0].ID != second.ID || len(session.Messages) != 1 || session.Messages[0].TaskID != second.ID {
+		t.Fatalf("new turn: %+v %+v", tasks, session.Messages)
+	}
+	if _, tasks, _, _, _, _ = s.SessionSince(sid, session.Rev); len(tasks) != 1 {
+		t.Fatalf("a queued turn is always included: %+v", tasks)
+	}
+	_, _ = s.UpdateStatus(second.ID, StatusSucceeded, "")
+	done, _, _, _, _, _ := s.SessionSince(sid, 0)
+
+	// A title change moves the revision but sends no turns.
+	title := "renamed"
+	if _, err := s.UpdateSession(sid, SessionPatch{Title: &title}); err != nil {
+		t.Fatal(err)
+	}
+	session, tasks, _, _, full, _ = s.SessionSince(sid, done.Rev)
+	if full || len(tasks) != 0 || session.Title != "renamed" || session.Rev != done.Rev+1 {
+		t.Fatalf("title: %+v %d tasks", session, len(tasks))
+	}
+
+	// A revision ahead of the store (state restored from an older copy) gets everything.
+	if _, tasks, _, _, full, _ = s.SessionSince(sid, session.Rev+100); !full || len(tasks) != 2 {
+		t.Fatalf("ahead: %d tasks full=%v", len(tasks), full)
+	}
+}
+
+func TestQuestionsMoveTheRevision(t *testing.T) {
+	s := NewStore()
+	tk, _ := s.Create("ask")
+	_, _ = s.UpdateStatus(tk.ID, StatusRunning, "")
+	before, _, _, _, _, _ := s.SessionSince(tk.SessionID, 0)
+	q, err := s.AddQuestion(tk.ID, Question{Kind: "choice", Text: "deploy?"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = s.ResolveQuestion(tk.ID, q.ID, QuestionAnswered, "yes", nil)
+	_, tasks, _, questions, _, _ := s.SessionSince(tk.SessionID, before.Rev)
+	if len(tasks) != 1 || len(questions) != 1 || questions[0].Answer != "yes" || tasks[0].Rev != before.Rev+2 {
+		t.Fatalf("question: %+v %+v", tasks, questions)
+	}
+}
