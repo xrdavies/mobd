@@ -63,6 +63,10 @@ type Info struct {
 	Label   string   `json:"label"`
 	Models  []string `json:"models"`
 	Efforts []string `json:"efforts"`
+	// DefaultModel and DefaultEffort are what the agent uses when a turn names none, read from
+	// the agent's own settings; empty when they are not set there (the agent's built-in default).
+	DefaultModel  string `json:"defaultModel,omitempty"`
+	DefaultEffort string `json:"defaultEffort,omitempty"`
 	// Images reports whether prompts accept image attachments.
 	Images bool `json:"images"`
 	// Resume reports whether a later turn can continue the agent's conversation.

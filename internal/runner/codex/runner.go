@@ -46,7 +46,9 @@ func (r *Runner) Info() runner.Info {
 	if models == nil {
 		models = []string{}
 	}
-	return runner.Info{Name: Name, Label: "Codex", Models: models, Efforts: Efforts, Images: true, Resume: true, Steer: r.appServer()}
+	model, effort := defaults()
+	return runner.Info{Name: Name, Label: "Codex", Models: models, Efforts: Efforts, DefaultModel: model, DefaultEffort: effort,
+		Images: true, Resume: true, Steer: r.appServer()}
 }
 
 func (r *Runner) Check(ctx context.Context) runner.Status {
