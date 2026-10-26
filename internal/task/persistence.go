@@ -104,7 +104,8 @@ func OpenStore(path string) (*Store, error) {
 		t := s.data.Tasks[id]
 		if !t.Status.Terminal() {
 			msg := "interrupted by mobd restart"
-			t.Status, t.Error, t.UpdatedAt, t.EventID = StatusFailed, &msg, time.Now().UTC(), t.EventID+1
+			// Unsaved debug logs may have used IDs past the saved one; clients ignore IDs they saw.
+			t.Status, t.Error, t.UpdatedAt, t.EventID = StatusFailed, &msg, time.Now().UTC(), t.EventID+maxUnsavedLogs+1
 			t.Waiting = false
 			session := s.data.Sessions[t.SessionID]
 			session.Status, session.UpdatedAt = t.Status, t.UpdatedAt

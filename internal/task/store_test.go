@@ -543,3 +543,43 @@ func TestLateQuestionOfFinishedTurnKeepsNextTurnWaiting(t *testing.T) {
 		t.Fatal("finished turn still waiting")
 	}
 }
+
+// Debug logs advance a turn's event IDs without saving them. After a crash, the status that
+// ends the interrupted turn must still come after every ID a client may have seen.
+func TestRestartStatusFollowsUnsavedLogIDs(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+	s, _ := OpenStore(path)
+	tk, _ := s.Create("long job")
+	_, _ = s.UpdateStatus(tk.ID, StatusRunning, "")
+	var seen int64
+	for range 5 {
+		if err := s.AppendEvent(tk.ID, Event{Type: "log", Message: "stderr line"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	events, _ := s.Events(tk.ID)
+	seen = events[len(events)-1].ID
+
+	// Crash: the next mobd reads the last saved state.
+	restored, err := OpenStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	after, _, _, err := restored.Watch(tk.ID, seen)
+	if err != nil || len(after) == 0 || after[len(after)-1].Status != StatusFailed {
+		t.Fatalf("client at event %d got %+v after restart (%v)", seen, after, err)
+	}
+
+	// Many logs since the last save: they are saved before the gap could exceed the margin.
+	second, _ := restored.Create("another")
+	_, _ = restored.UpdateStatus(second.ID, StatusRunning, "")
+	for range maxUnsavedLogs * 2 {
+		_ = restored.AppendEvent(second.ID, Event{Type: "log", Message: "x"})
+	}
+	events, _ = restored.Events(second.ID)
+	seen = events[len(events)-1].ID
+	again, _ := OpenStore(path)
+	if after, _, _, _ := again.Watch(second.ID, seen); len(after) == 0 || after[len(after)-1].Status != StatusFailed {
+		t.Fatalf("client at event %d got %+v after restart", seen, after)
+	}
+}

@@ -62,16 +62,22 @@ type state struct {
 // logLimit bounds memory-only debug lines kept per task for SSE replay.
 const logLimit = 2000
 
+// maxUnsavedLogs bounds the event IDs debug logs may use without a save. After a crash a turn's
+// saved ID can trail what clients saw by at most this much, so recovery numbers past it.
+const maxUnsavedLogs = 1000
+
 // activityTextLimit caps persisted tool/command output per activity.
 const activityTextLimit = 16 * 1024
 
 // Store keeps conversations durable and task event delivery ordered.
 type Store struct {
-	mu      sync.RWMutex
-	data    state
-	path    string
-	events  map[string][]Event
-	logs    map[string]int
+	mu     sync.RWMutex
+	data   state
+	path   string
+	events map[string][]Event
+	logs   map[string]int
+	// unsaved counts debug logs since the last save (see maxUnsavedLogs).
+	unsaved int
 	changed map[string]chan struct{}
 	notify  func(Change)
 	// reasons are the scheduler's queue reasons by task ID (SetQueueReasons).
@@ -642,7 +648,17 @@ func (s *Store) AppendEvent(id string, ev Event) error {
 		s.notifyLocked(session, nil)
 	} else {
 		// shortcut: debug logs are memory-only; persist a log journal if restart-time diagnostics are needed.
-		s.data.Tasks[id] = t
+		// Their IDs are saved with the next change, or here once enough have gone unsaved.
+		if s.unsaved+1 >= maxUnsavedLogs {
+			next := s.next()
+			next.Tasks[id] = t
+			if err := s.swap(next); err != nil {
+				return err
+			}
+		} else {
+			s.data.Tasks[id] = t
+			s.unsaved++
+		}
 	}
 	s.publish(id, ev)
 	return nil
@@ -828,7 +844,7 @@ func (s *Store) swap(next state) error {
 	if err := s.save(next); err != nil {
 		return fmt.Errorf("save conversation: %w", err)
 	}
-	s.data = next
+	s.data, s.unsaved = next, 0
 	return nil
 }
 
