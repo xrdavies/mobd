@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -127,6 +129,14 @@ func TestPairPreviewRedemptionAndNoManagementOverTCP(t *testing.T) {
 	if err := json.Unmarshal(rr.Body.Bytes(), &credential); err != nil {
 		t.Fatal(err)
 	}
+	// The used invitation was the only one: pairing is off now.
+	if rr := redeem(); rr.Code != 404 || !strings.Contains(rr.Body.String(), `"code":"pairing_closed"`) {
+		t.Fatalf("reuse with no invitation open: %d %s", rr.Code, rr.Body.String())
+	}
+	// With another invitation open, the used one is refused as before.
+	if _, err := s.pairing.Invite("https://office.example"); err != nil {
+		t.Fatal(err)
+	}
 	if rr := redeem(); rr.Code != 401 {
 		t.Fatalf("reuse: %d", rr.Code)
 	}
@@ -197,5 +207,47 @@ func TestRevokeAndDeleteDisconnectSSE(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestPairingIsOffWithoutAnInvitationAndRefusalsAreLogged(t *testing.T) {
+	var logs strings.Builder
+	log.SetOutput(&logs)
+	t.Cleanup(func() { log.SetOutput(os.Stderr) })
+	refusedPairing = throttledLog{}
+	s := testServer(t, "")
+	for _, req := range []*http.Request{
+		httptest.NewRequest("GET", "/pair", nil),
+		httptest.NewRequest("POST", "/pair", strings.NewReader(`{"invite":"guess","name":"x"}`)),
+	} {
+		req.Header.Set("CF-Connecting-IP", "203.0.113.9")
+		rr := httptest.NewRecorder()
+		s.Handler().ServeHTTP(rr, req)
+		if rr.Code != 404 || !strings.Contains(rr.Body.String(), "pairing_closed") || rr.Header().Get("Cache-Control") != "no-store" {
+			t.Fatalf("%s /pair with no invitation: %d %s", req.Method, rr.Code, rr.Body.String())
+		}
+	}
+	if !strings.Contains(logs.String(), "refused GET /pair from 192.0.2.1:1234, forwarded for 203.0.113.9: no invitation open") {
+		t.Fatalf("log: %s", logs.String())
+	}
+
+	// A flood of wrong guesses while an invitation is open: refused, logged about once a second.
+	invite, _ := s.pairing.Invite("https://office.example")
+	u, _ := url.Parse(invite.URL)
+	secret, _ := url.ParseQuery(u.Fragment)
+	logs.Reset()
+	refusedPairing = throttledLog{}
+	for range 200 {
+		rr := httptest.NewRecorder()
+		s.Handler().ServeHTTP(rr, httptest.NewRequest("POST", "/pair", strings.NewReader(`{"invite":"guess","name":"x"}`)))
+		if rr.Code != 401 {
+			t.Fatalf("wrong invitation: %d", rr.Code)
+		}
+	}
+	if n := strings.Count(logs.String(), "pairing: refused"); n < 1 || n > 3 {
+		t.Fatalf("%d log lines for 200 refusals:\n%s", n, logs.String())
+	}
+	if strings.Contains(logs.String(), secret.Get("invite")) {
+		t.Fatal("invitation secret in the log")
 	}
 }

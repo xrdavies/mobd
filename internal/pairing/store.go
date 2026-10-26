@@ -226,6 +226,21 @@ func (s *Store) Invite(address string) (Invitation, error) {
 	return Invitation{URL: u.String(), ExpiresAt: expires, ServerID: s.state.ServerID}, nil
 }
 
+// InvitationsOpen reports whether an unexpired, unused invitation exists; without one, pairing
+// is switched off.
+func (s *Store) InvitationsOpen() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := s.now().UTC()
+	for key, expiry := range s.invites {
+		if now.Before(expiry) {
+			return true
+		}
+		delete(s.invites, key)
+	}
+	return false
+}
+
 func (s *Store) CloseInvitations() {
 	s.mu.Lock()
 	defer s.mu.Unlock()

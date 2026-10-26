@@ -174,11 +174,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /tasks/{id}/steer", s.handleSteer)
 	public := http.NewServeMux()
 	public.HandleFunc("POST /pair", s.handlePair)
-	public.HandleFunc("GET /pair", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Cache-Control", "no-store")
-		w.Header().Set("Referrer-Policy", "no-referrer")
-		writeJSON(w, http.StatusOK, map[string]string{"service": "mobd", "message": "Open or paste the complete invitation link in a pairing-capable mob client."})
-	})
+	public.HandleFunc("GET /pair", s.handlePairInfo)
 	public.HandleFunc("POST /internal/tasks/{id}/ask", s.handleAsk)
 	public.HandleFunc("POST /internal/tasks/{id}/desktop/{op}", s.handleInternalDesktop)
 	public.Handle("/", s.withAuth(mux))

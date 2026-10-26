@@ -52,7 +52,8 @@ Tailscale 的后台服务不会替你启动 mobd。
 2. 确认 mobd 监听 `0.0.0.0:8080`。已有配置若为 `127.0.0.1:8080`，修改 `listen` 后重启。
    如有启动参数覆盖，可明确运行 `mobd restart --listen 0.0.0.0:8080`；
    使用自定义配置时同时保留对应的 `--config PATH`。
-3. 在客户端所在网络打开 `http://192.168.1.20:8080/pair`，应看到固定配对提示页。
+3. 先运行 `mobd link`（配对仅在有未使用的邀请时开放），再在客户端所在网络打开
+   `http://192.168.1.20:8080/pair`，应看到固定配对提示页；没有邀请时返回 404 `pairing_closed`。
    或在客户端电脑执行：
 
    ```bash
@@ -196,8 +197,8 @@ https://office-mac.example-tailnet.ts.net
 |-- / proxy http://127.0.0.1:8080
 ```
 
-手机关闭 Wi-Fi、使用蜂窝网络且不连接 Tailscale，打开该域名的 `/pair` 页面检查可达性，
-或在家庭电脑用 curl 请求 `/health`，预期 **401**。首次公开 DNS 生效可能需要等待数分钟。
+手机关闭 Wi-Fi、使用蜂窝网络且不连接 Tailscale，在家庭电脑用 curl 请求 `/health` 检查可达性，
+预期 **401**（`/pair` 在没有未使用的邀请时返回 404）。首次公开 DNS 生效可能需要等待数分钟。
 客户端使用输出的 HTTPS 域名，不添加 `:8080` 或路径前缀。生成邀请，再完成[配对与验收](#配对与验收)：
 
 ```bash
@@ -283,8 +284,9 @@ mobd link --close   # 配对完成后关闭未使用的邀请
 - **Cloudflare 可读取流量。** TLS 在 Cloudflare 边缘终止，配对邀请、设备凭据、对话和实时画面
   都经其解密后转发。不能接受时改用 [Tailscale Serve](#tailscale-serve)。
 - **入口对整个互联网可见。** 除 `/pair` 和每轮任务的 `/internal/tasks/...` 外，所有接口都要求已配对设备的凭据；
+  `/pair` 只在有未使用的邀请时开放，其余时间返回 404；
   邀请为 256 位随机密钥、一次性、10 分钟有效，且只能在办公室本机用 `mobd link` 生成。
-  mobd 不记录失败的认证请求，可在 Cloudflare **Security → WAF → Rate limiting rules** 为 `/pair` 加限速规则。
+  被拒绝的配对请求写入 `mobd logs`（含 Cloudflare 转发的来源 IP）；如需限速，可在 Cloudflare **Security → WAF → Rate limiting rules** 为 `/pair` 加规则。
 - **使用最新 mobd。** 每轮任务的令牌通过本机私有文件传给 `mobd mcp`，不出现在命令行或日志中；
   旧版本中已配对的客户端能看到该令牌。
 - 设备丢失时 `mobd clients revoke CLIENT_ID`，立即断开。
@@ -445,7 +447,7 @@ HTTP URL 不代表该段链路明文；普通局域网 HTTP 仍可能暴露凭�
 再在客户端粘贴完整链接或扫描二维码，核对目标地址后确认添加。
 二维码/邀请为 **10 分钟、单次使用**；每台客户端分别生成邀请并配对。
 已签发凭据不会随邀请过期或日常重启失效，直到撤销、删除或 mobd 认证重置。
-仅打开 `/pair` 提示页不会兑换邀请。协议见[配对](pairing.md)。
+仅打开 `/pair` 提示页不会兑换邀请；没有未使用的邀请时 `/pair` 返回 404。协议见[配对](pairing.md)。
 
 不使用客户端时，也可以在 bash/zsh 终端验证网络和配对；需要 curl 7.76+ 和 jq。
 用所选入口替换 `MOBD_URL`，从配对链接的 `#invite=...&serverId=...&v=1` 中取出 invite 值，

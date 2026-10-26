@@ -65,7 +65,12 @@ http://192.168.1.20:8080/pair#invite=INVITATION&serverId=SERVER_ID&v=1
 二维码编码完整链接。客户端读取 fragment 并展示目标地址，用户确认后向同一 origin
 发起兑换请求；不要将 fragment 作为 HTTP 请求路径的一部分发送。
 `GET /pair` 仅返回固定提示，不读取或消费邀请，没有脚本、第三方资源或自动兑换，
-聊天软件预览不会消耗邀请。没有 deep link / universal link 注册；客户端支持粘贴链接，手机端另支持扫码。
+聊天软件预览不会消耗邀请。
+
+**没有未过期、未使用的邀请时，配对关闭**：`GET /pair` 和 `POST /pair` 均返回 **404**
+`{"error":"pairing is off: …","code":"pairing_closed"}`，不读取请求体。邀请被兑换、过期或
+`mobd link --close` 后即关闭，下一次 `mobd link` 重新打开。客户端应把 `pairing_closed` 显示为
+“邀请已失效，请在办公室重新运行 mobd link”，而不是“mobd 不支持配对”。没有 deep link / universal link 注册；客户端支持粘贴链接，手机端另支持扫码。
 
 ```http
 POST /pair
@@ -85,7 +90,7 @@ Content-Type: application/json
 ```
 
 名称为去除两端空白后 1–128 字节的非空字符串，不允许控制字符。
-无效、过期或已经兑换的邀请返回 **401**；无效请求返回 **400**；存储失败返回 **503**，不签发凭据。
+配对打开时，无效、过期或已经兑换的邀请返回 **401**；无效请求返回 **400**；存储失败返回 **503**，不签发凭据。
 并发兑换最多成功一次。成功响应丢失时，重新获取邀请，不能重复领取旧凭据。
 客户端应比对返回的 serverId 与链接，保存地址、serverId、clientId，凭据放系统安全存储，
 删除邀请 secret。serverId 只是标识，不是服务器身份的密码学证明。
@@ -140,7 +145,11 @@ Authorization: Bearer RANDOM_DEVICE_CREDENTIAL
 本地 agent/MCP 的 `/internal/tasks/{id}/ask` 单独校验按任务 token，客户端凭据不能代替它。
 管理路由只注册在 Unix socket，公开 HTTP 端口不提供客户端管理或邀请创建。
 
-仅 HTTP OPTIONS 预检、固定的 `GET /pair` 提示、受邀请保护的 `POST /pair` 和按任务认证的
+被拒绝的配对请求（配对关闭、邀请无效、请求无效）写入 mobd 日志，含来源地址；经隧道或代理时
+附加 `CF-Connecting-IP` / `X-Forwarded-For`，仅用于记录，不参与访问判断。日志每秒最多一行，
+其余计数后在下一行汇总，不记录邀请密钥。成功配对记录设备名和 clientId。
+
+仅 HTTP OPTIONS 预检、固定的 `GET /pair` 提示、受邀请保护的 `POST /pair`（无邀请时关闭）和按任务认证的
 MCP 请求在业务认证中间件之外。`GET /stream/ws?ticket=` 在认证中间件内兑换票据。
 CORS 和 WebSocket Origin 校验仍保留，不能代替认证。
 凭据代表对同一办公室的完整业务访问权，不提供不同设备的数据隔离或只读角色。
