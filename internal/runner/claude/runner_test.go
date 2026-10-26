@@ -102,8 +102,8 @@ func TestBuildArgs(t *testing.T) {
 			t.Fatalf("missing %q in %s", want, joined)
 		}
 	}
-	cfg.ClaudePermissions, cfg.ClaudeSettingSources = "approve", "all"
-	joined = strings.Join(New(cfg).buildArgs(&task.Task{}, runner.Options{}), " ")
+	cfg.ClaudeSettingSources = "all"
+	joined = strings.Join(New(cfg).buildArgs(&task.Task{}, runner.Options{Permissions: "approve"}), " ")
 	if !strings.Contains(joined, "--permission-mode manual --permission-prompt-tool "+ApproveTool) ||
 		!strings.Contains(joined, "--allowedTools mcp__mob-mcp,Read") || strings.Contains(joined, "--setting-sources") ||
 		strings.Contains(joined, "--resume") {

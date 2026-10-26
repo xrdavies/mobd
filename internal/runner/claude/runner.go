@@ -40,12 +40,8 @@ func New(cfg config.Config) *Runner { return &Runner{cfg: cfg} }
 var _ runner.Runner = (*Runner)(nil)
 
 func (r *Runner) Info() runner.Info {
-	models := r.cfg.ClaudeModels
-	if models == nil {
-		models = []string{}
-	}
 	model, effort := r.defaults()
-	return runner.Info{Name: Name, Label: "Claude Code", Models: models, Efforts: Efforts, DefaultModel: model, DefaultEffort: effort,
+	return runner.Info{Name: Name, Label: "Claude Code", Efforts: Efforts, DefaultModel: model, DefaultEffort: effort,
 		Images: true, Resume: true, Cost: true}
 }
 
@@ -93,7 +89,7 @@ func (r *Runner) buildArgs(t *task.Task, opts runner.Options) []string {
 	if src := r.cfg.ClaudeSettingSources; src != "" && src != "all" {
 		args = append(args, "--setting-sources", src)
 	}
-	if runner.Approve(opts, r.cfg.ClaudePermissions) {
+	if opts.Approve() {
 		args = append(args, "--permission-mode", "manual", "--permission-prompt-tool", ApproveTool,
 			"--allowedTools", strings.Join(safeTools, ","))
 	} else {

@@ -26,7 +26,7 @@ type Runner interface {
 - `Start` runs **one turn** and blocks until it ends. Cancelling `ctx` must stop the agent and its children and return `context.Canceled`.
 - The prompt is `t.Prompt`; `t.Model` / `t.Effort` are already validated against `Info()`; `opts.Images` are files to attach; `opts.SaveImage` stores screenshots from tool results.
 - `t.ResumeID` is empty for the first turn of a conversation. Otherwise the runner continues that agent conversation.
-- A **Registry** holds the enabled runners and the default (`MOBD_DEFAULT_RUNNER`, default `codex`).
+- A **Registry** holds the enabled runners and the default agent (`defaultAgent` in settings.json).
 
 ### Events a runner emits
 
@@ -72,9 +72,9 @@ Runners also receive `Options.Instructions` (when to ask, which actions need app
 | `claude` | `--append-system-prompt …` | `MCP_TOOL_TIMEOUT` (ms) | `--permission-mode bypassPermissions`, or `--allowedTools mcp__mob-mcp,…` in approve mode |
 | `pi` | `--append-system-prompt …` | MCP server `timeout` (seconds) | Bundled MOB extension allows desktop/ask tools; `approve` gates other mutations |
 
-For Codex, `MOBD_CODEX_PERMISSIONS=approve` needs app-server mode, where it is a hard gate (below); mobd refuses to start with `exec` and `approve`, because `codex exec` cannot ask before running a command. In `exec` mode the only gate is the instruction, sent to every runner, to call `request_approval` before risky actions.
+Each agent's permissions (`bypass` or `approve`) are in settings.json, set in the apps, and reach the runner per turn as `Options.Permissions`. For Codex, `approve` needs app-server mode, where it is a hard gate (below); mobd refuses to save `approve` in `exec` mode, because `codex exec` cannot ask before running a command. In `exec` mode the only gate is the instruction, sent to every runner, to call `request_approval` before risky actions.
 
-**Claude Code hard gate** (`MOBD_CLAUDE_PERMISSIONS=approve`): Claude runs in `manual` permission mode with `--permission-prompt-tool mcp__mob-mcp__approve_tool`. Any tool call Claude would normally ask about (shell commands, edits outside its working directory, …) becomes an approval card "Allow the agent to use Bash?" with the tool input; deny or no answer blocks it. Desktop tools, ask tools, reading and searching are pre-allowed. Claude's own rules still apply: simple writes inside its working directory are allowed without asking.
+**Claude Code hard gate** (`approve`): Claude runs in `manual` permission mode with `--permission-prompt-tool mcp__mob-mcp__approve_tool`. Any tool call Claude would normally ask about (shell commands, edits outside its working directory, …) becomes an approval card "Allow the agent to use Bash?" with the tool input; deny or no answer blocks it. Desktop tools, ask tools, reading and searching are pre-allowed. Claude's own rules still apply: simple writes inside its working directory are allowed without asking.
 
 ## Codex app-server mode (default)
 
@@ -82,7 +82,7 @@ For Codex, `MOBD_CODEX_PERMISSIONS=approve` needs app-server mode, where it is a
 
 App-server capabilities:
 
-- **Hard approvals.** `MOBD_CODEX_PERMISSIONS=approve` sets `approvalPolicy: "untrusted"`. Codex's `item/commandExecution/requestApproval` and `item/fileChange/requestApproval` requests become approval cards ("Allow the agent to run …?") through `Options.Ask`, answered `accept`/`decline`; no answer means decline. Default `bypass` uses `never`.
+- **Hard approvals.** `approve` sets `approvalPolicy: "untrusted"`. Codex's `item/commandExecution/requestApproval` and `item/fileChange/requestApproval` requests become approval cards ("Allow the agent to run …?") through `Options.Ask`, answered `accept`/`decline`; no answer means decline. Default `bypass` uses `never`.
 - **Interrupt.** Cancelling sends `turn/interrupt` and gives Codex 3 s to stop before the process group is killed.
 - **Steering.** `POST /tasks/{id}/steer {prompt}` sends `turn/steer` to the running turn (runners with `steer: true` in `/health`); the message is saved as a user message in the conversation.
 - **Streaming.** `item/agentMessage/delta` updates the reply in the timeline while Codex writes it (throttled to ~400 ms).
@@ -106,9 +106,8 @@ The protocol is marked experimental by Codex; `codex app-server generate-ts --ou
 
 Enabled runners come from `MOBD_RUNNERS` (default `codex,claude`); missing CLIs show as unavailable on `/health` and in the App.
 
-- **Defaults:** machine settings changed in the apps come first ([mobd-v3](mobd-v3.md#machine-and-conversation-settings)). Otherwise each runner in `/health` reports `defaultModel` and `defaultEffort`, what the agent uses when a turn names none, so apps can show "Default (xhigh)". Codex reads them from `$CODEX_HOME/config.toml` (`model`, `model_reasoning_effort`, and the selected `profile`'s). Claude reads `model` and `effortLevel` from the settings files that `claudeSettingSources` lets it load (with the default `project`, personal `~/.claude/settings.json` does not count), and `ANTHROPIC_MODEL`. They are omitted when not set, which means the agent's built-in default; Pi reports none yet. They are read on every `/health`, so editing the agent's config shows without a restart.
-- **Codex:** models offered to clients come from `MOBD_CODEX_MODELS` (`MOBD_MODELS` is also accepted, with lower priority).
-- **Claude Code:** `MOBD_CLAUDE_BIN`, `MOBD_CLAUDE_WORKDIR` (default: Codex's), `MOBD_CLAUDE_MODELS` (default `opus,sonnet,haiku`), `MOBD_CLAUDE_PERMISSIONS` (`bypass` default, or `approve`). Only mob's MCP server is loaded, and `MOBD_CLAUDE_SETTING_SOURCES=project` (default) keeps your personal `~/.claude` hooks and settings out of office runs; `all` loads them. Output mapping: `system/init` → resume, `text` → message, `thinking` → reasoning, `tool_use`/`tool_result` → steps (`Bash` → command, `TodoWrite` → plan, `Edit`/`Write` → file change, `mcp__mob-mcp__*` → desktop tools), `result` → usage with `costUsd`.
+- **Models and defaults:** the model list, default model and default effort are in settings.json ([mobd-v3](mobd-v3.md#settings)). When settings.json names no default, `/health` reports the agent's own (`defaultModel`, `defaultEffort`), what it uses when a turn names none, so apps can show "Default (xhigh)"; mobd does not send it. Codex reads them from `$CODEX_HOME/config.toml` (`model`, `model_reasoning_effort`, and the selected `profile`'s). Claude reads `model` and `effortLevel` from the settings files that `claudeSettingSources` lets it load (with the default `project`, personal `~/.claude/settings.json` does not count), and `ANTHROPIC_MODEL`. They are omitted when not set, which means the agent's built-in default; Pi reports none yet. They are read on every `/health`, so editing the agent's config shows without a restart.
+- **Claude Code:** `MOBD_CLAUDE_BIN`, `MOBD_CLAUDE_WORKDIR` (default: Codex's). Only mob's MCP server is loaded, and `MOBD_CLAUDE_SETTING_SOURCES=project` (default) keeps your personal `~/.claude` hooks and settings out of office runs; `all` loads them. Output mapping: `system/init` → resume, `text` → message, `thinking` → reasoning, `tool_use`/`tool_result` → steps (`Bash` → command, `TodoWrite` → plan, `Edit`/`Write` → file change, `mcp__mob-mcp__*` → desktop tools), `result` → usage with `costUsd`.
 
 ## Pi
 
@@ -126,16 +125,13 @@ pi  # use /login and /model to configure the provider
 ```json
 {
   "runners": ["codex", "claude", "pi"],
-  "defaultRunner": "codex",
-  "piBin": "pi",
-  "piPermissions": "approve",
-  "piModels": []
+  "piBin": "pi"
 }
 ```
 
-Merge these fields into `~/.mobd/config.json`, then restart mobd. `piModels`
-advertises model IDs to the clients; use exact `provider/model` IDs to avoid
-ambiguous provider matches. Empty uses Pi's configured model. Image input and
+Merge these fields into `~/.mobd/config.json`, then restart mobd. Pi's model list and
+permissions are set in the apps (Settings → Agents); use exact `provider/model` IDs to avoid
+ambiguous provider matches. An empty default model uses Pi's configured model. Image input and
 thinking levels depend on the selected model. No new API version is required.
 
 The runner uses `workdir` and one RPC process per turn. Sessions live under
@@ -156,7 +152,7 @@ model configuration and global settings remain available. Providers that require
 a custom extension are not supported by this initial integration. The MOB extension
 and its required desktop/ask tools must pass a readiness handshake before a prompt.
 
-`piPermissions: "approve"` gates `bash`, `edit`, `write` and unknown tools through
+Permissions `approve` gates `bash`, `edit`, `write` and unknown tools through
 Pi's `tool_call` hook and RPC confirmation requests. MOB shows them using the
 existing approval cards; rejection, expiry, cancellation or missing approval
 handler blocks the call. Read/search and MOB desktop/ask tools are pre-allowed,

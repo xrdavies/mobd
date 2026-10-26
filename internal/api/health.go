@@ -54,7 +54,7 @@ type runnerHealth struct {
 	Available bool   `json:"available"`
 	Detail    string `json:"detail,omitempty"`
 	Default   bool   `json:"default"`
-	// Permissions is "bypass" or "approve" (machine settings, else config).
+	// Permissions is "bypass" or "approve" (settings.json).
 	Permissions string `json:"permissions"`
 }
 
@@ -62,24 +62,25 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	checks := s.readiness(r.Context())
 	set := s.settings.Get()
 	var runners []runnerHealth
-	defModels, defEfforts := []string{}, []string{}
 	for _, rn := range s.runners.All() {
 		info := rn.Info()
 		c := checks[info.Name]
-		// The models and defaults the apps offer come from the machine settings.
-		eff := s.effective(info, set)
-		info.Models, info.DefaultModel, info.DefaultEffort = eff.Models, eff.DefaultModel, eff.DefaultEffort
-		runners = append(runners, runnerHealth{Info: info, Available: c.OK, Detail: c.Detail, Default: info.Name == s.runners.Default(), Permissions: eff.Permissions})
-		if info.Name == s.runners.Default() {
-			defModels, defEfforts = info.Models, info.Efforts
+		// Models and defaults come from settings.json; a default it leaves empty is the agent's own.
+		a := set.Agents[info.Name]
+		info.Models = a.Models
+		if a.DefaultModel != "" {
+			info.DefaultModel = a.DefaultModel
 		}
+		if a.DefaultEffort != "" {
+			info.DefaultEffort = a.DefaultEffort
+		}
+		runners = append(runners, runnerHealth{Info: info, Available: c.OK, Detail: c.Detail, Default: info.Name == s.runners.Default(), Permissions: a.Permissions})
 	}
 	body := map[string]any{
 		"ok": true, "service": "mobd", "apiVersion": APIVersion,
 		"runner": s.runners.Default(), "runners": runners, "mobMcp": s.cfg.MobMCPCommand,
 		"maxRunning": max(s.cfg.MaxRunning, 1), "features": s.features(),
-		// models/efforts describe the default runner (API v3 clients read these).
-		"models": defModels, "efforts": defEfforts, "checks": checks,
+		"checks":         checks,
 		"streamSessions": s.streams.Count(),
 	}
 	if s.desktops.PerSession() {

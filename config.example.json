@@ -4,16 +4,10 @@
   "maxRunning": 1,
   "questionTimeout": "30m",
   "runners": ["codex", "claude"],
-  "defaultRunner": "codex",
   "codexBin": "codex",
   "codexMode": "app-server",
-  "codexPermissions": "bypass",
   "claudeBin": "claude",
-  "claudeModels": ["opus", "sonnet", "haiku"],
-  "claudePermissions": "bypass",
   "claudeSettingSources": "project",
   "piBin": "pi",
-  "piModels": [],
-  "piPermissions": "bypass",
   "vncAddr": "127.0.0.1:5900"
 }

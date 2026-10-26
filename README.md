@@ -159,7 +159,7 @@ A managed relay is planned, not implemented.
 
 ### Configuration
 
-JSON `mcpArgs`, `corsOrigins`, `codexModels`, `claudeModels`, `piModels` and `runners` are arrays of strings. `questionTimeout` is a Go duration string such as `"30m"`.
+JSON `mcpArgs`, `corsOrigins` and `runners` are arrays of strings. `questionTimeout` is a Go duration string such as `"30m"`.
 
 Priority: **command-line flags > exported `MOBD_*` variables > JSON > defaults**.
 The default config is `~/.mobd/config.json`; a missing default file is allowed,
@@ -210,9 +210,16 @@ overwrites or merges your existing settings.
 Before starting, replace `/Users/you/Projects` with an existing absolute working
 directory. Set `codexBin` / `claudeBin` to executable names on your shell's PATH,
 or their absolute paths. Claude uses `workdir` unless you set `claudeWorkdir`.
-To enable only Codex, set `runners` to `["codex"]` and keep `defaultRunner` as
-`"codex"`. Permissions use `"bypass"` (the current default, skips approval prompts);
-choose `"approve"` to request approval for supported actions.
+To enable only Codex, set `runners` to `["codex"]`.
+
+`config.json` says how mobd itself runs. The default agent and, per agent, the model
+list, default model and effort and permissions are runtime settings: they live in
+`settings.json` in the data directory, created on the first start, and are changed in
+the apps (Settings → Agents) without a restart ([settings](docs/mobd-v3.md#settings)).
+mobd refuses to start while `config.json` or the environment still sets `defaultRunner`,
+`codexModels`, `claudeModels`, `piModels`, `codexPermissions`, `claudePermissions` or
+`piPermissions`, and names them: delete them, then `mobd start` (which also rewrites
+`service.json`).
 
 The example listens on `127.0.0.1:8080`; keep it for Tailscale Serve or SSH tunnels.
 For direct LAN/VPN clients, bind to the intended private interface (or
@@ -363,21 +370,14 @@ curl -H "Authorization: Bearer $MOBD_TOKEN" -s localhost:8080/artifacts/ARTIFACT
 | `statePath` | `MOBD_STATE_PATH` | macOS: `~/Library/Application Support/mob/state.json`; Linux: `~/.local/share/mob/state.json` (`$XDG_DATA_HOME`); Windows: `%APPDATA%\mob\state.json` | Private conversation snapshot |
 | `maxRunning` | `MOBD_MAX_RUNNING` | `1`; `4` on Linux with a desktop per conversation | Tasks running at once across all sessions; others wait in the FIFO desktop queue |
 | `dataDir` | `MOBD_DATA_DIR` | directory of `MOBD_STATE_PATH` | Root of `artifacts/` (tool screenshots, uploads) and private `auth.json` |
-| `codexModels` | `MOBD_CODEX_MODELS` | empty | Comma-separated model IDs advertised on `/health` for client pickers; `MOBD_MODELS` is also accepted, with lower priority |
 | `corsOrigins` | `MOBD_CORS_ORIGINS` | `http://localhost:1420,http://127.0.0.1:1420,tauri://localhost,http://tauri.localhost` | Comma-separated exact origins; a nonempty value replaces the defaults |
 | `questionTimeout` | `MOBD_QUESTION_TIMEOUT` | `30m` | How long a turn waits for your answer to the agent's question or approval request |
 | `runners` | `MOBD_RUNNERS` | `codex,claude` | Enabled runners |
 | `codexMode` | `MOBD_CODEX_MODE` | `app-server` | `app-server` (approvals, steering, streaming) or `exec` |
-| `codexPermissions` | `MOBD_CODEX_PERMISSIONS` | `bypass` | `approve` makes Codex ask you before commands and file edits |
-| `claudePermissions` | `MOBD_CLAUDE_PERMISSIONS` | `bypass` | `approve` makes Claude ask you before shell commands and other prompted actions |
 | `claudeSettingSources` | `MOBD_CLAUDE_SETTING_SOURCES` | `project` | Claude settings loaded; `all` includes your personal `~/.claude` |
-| `defaultRunner` | `MOBD_DEFAULT_RUNNER` | `codex` | Runner for new conversations ([runners](docs/runners.md)) |
 | `claudeBin` | `MOBD_CLAUDE_BIN` | `claude` | Claude Code executable |
 | `claudeWorkdir` | `MOBD_CLAUDE_WORKDIR` | Codex workdir | Claude working directory |
-| `claudeModels` | `MOBD_CLAUDE_MODELS` | `opus,sonnet,haiku` | Claude model picker |
 | `piBin` | `MOBD_PI_BIN` | `pi` | Pi CLI (tested with 1.4.0; requires 1.4.x or later 1.x); uses `workdir` |
-| `piModels` | `MOBD_PI_MODELS` | empty | Pi model picker; prefer exact `provider/model` IDs |
-| `piPermissions` | `MOBD_PI_PERMISSIONS` | `bypass` | `approve` asks before shell commands, edits, writes and other non-allowlisted tools |
 
 Conversation desktops (Linux; accepted and validated everywhere):
 

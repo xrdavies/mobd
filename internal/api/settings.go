@@ -15,103 +15,49 @@ import (
 	"github.com/xrdavies/mobd/internal/task"
 )
 
-// Where a setting's value comes from: set in an app, in mobd's config, in the agent's own
-// settings, or nothing set (the agent's built-in default).
-const (
-	fromApp     = "app"
-	fromConfig  = "config"
-	fromAgent   = "agent"
-	fromBuiltin = "builtin"
-)
-
 const maxModels = 50
 
-// effectiveAgent is what an agent uses on this machine now, and where each value comes from.
-type effectiveAgent struct {
-	Models            []string `json:"models"`
-	ModelsFrom        string   `json:"modelsFrom"`
-	DefaultModel      string   `json:"defaultModel,omitempty"`
-	DefaultModelFrom  string   `json:"defaultModelFrom"`
-	DefaultEffort     string   `json:"defaultEffort,omitempty"`
-	DefaultEffortFrom string   `json:"defaultEffortFrom"`
-	Permissions       string   `json:"permissions"`
-	PermissionsFrom   string   `json:"permissionsFrom"`
-	Efforts           []string `json:"efforts"`
-	// Fallback is what applies without the app settings (models, defaults, permissions), so an
-	// app can say what clearing a value returns to.
-	Fallback *effectiveAgent `json:"fallback,omitempty"`
+// seedAgent is a new agent's entry in settings.json: Claude's aliases, which always work, or the
+// default model of the agent's own config, so the model menu is not empty.
+func seedAgent(info runner.Info) settings.Agent {
+	a := settings.Agent{Models: []string{}, Permissions: "bypass"}
+	switch {
+	case info.Name == "claude":
+		a.Models = []string{"opus", "sonnet", "haiku"}
+	case info.DefaultModel != "":
+		a.Models = []string{info.DefaultModel}
+	}
+	return a
 }
 
-// configuredPermissions is an agent's permissions from config.json and the environment.
-func (s *Server) configuredPermissions(name string) string {
-	p := map[string]string{"codex": s.cfg.CodexPermissions, "claude": s.cfg.ClaudePermissions, "pi": s.cfg.PiPermissions}[name]
-	if p == "" {
-		return "bypass"
-	}
-	return p
-}
-
-// effective resolves an agent's settings: app settings, then config, then the agent's own.
-func (s *Server) effective(info runner.Info, set settings.Settings) effectiveAgent {
-	app := set.Agents[info.Name]
-	e := effectiveAgent{Models: info.Models, ModelsFrom: fromConfig, Efforts: info.Efforts,
-		Permissions: s.configuredPermissions(info.Name), PermissionsFrom: fromConfig}
-	if e.Models == nil {
-		e.Models = []string{}
-	}
-	if app.Models != nil {
-		e.Models, e.ModelsFrom = slices.Clone(app.Models), fromApp
-	}
-	pick := func(appValue, agentValue string) (string, string) {
-		switch {
-		case appValue != "":
-			return appValue, fromApp
-		case agentValue != "":
-			return agentValue, fromAgent
-		}
-		return "", fromBuiltin
-	}
-	e.DefaultModel, e.DefaultModelFrom = pick(app.DefaultModel, info.DefaultModel)
-	e.DefaultEffort, e.DefaultEffortFrom = pick(app.DefaultEffort, info.DefaultEffort)
-	if app.Permissions != "" {
-		e.Permissions, e.PermissionsFrom = app.Permissions, fromApp
-	}
-	return e
-}
-
-// agentSettings is effective for one enabled agent; ok is false if it is not enabled.
-func (s *Server) agentSettings(name string) (effectiveAgent, bool) {
-	rn, ok := s.runners.Get(name)
-	if !ok {
-		return effectiveAgent{}, false
-	}
-	return s.effective(rn.Info(), s.settings.Get()), true
+// agentInfo is what an app needs besides the settings: the efforts an agent takes and the
+// defaults of its own config (used when settings.json names none).
+type agentInfo struct {
+	Label              string   `json:"label"`
+	Efforts            []string `json:"efforts"`
+	AgentDefaultModel  string   `json:"agentDefaultModel,omitempty"`
+	AgentDefaultEffort string   `json:"agentDefaultEffort,omitempty"`
 }
 
 type settingsView struct {
-	// Settings are what the apps set (edit these and PUT them back with the same rev).
-	Settings         settings.Settings         `json:"settings"`
-	DefaultAgent     string                    `json:"defaultAgent"`
-	DefaultAgentFrom string                    `json:"defaultAgentFrom"`
-	// FallbackDefaultAgent is the default agent without the app setting (mobd's config).
-	FallbackDefaultAgent string `json:"fallbackDefaultAgent"`
-	Agents           map[string]effectiveAgent `json:"agents"`
+	// Settings is settings.json: edit it and PUT it back whole, with the same rev.
+	Settings settings.Settings    `json:"settings"`
+	Agents   map[string]agentInfo `json:"agents"`
 }
 
 func (s *Server) settingsView() settingsView {
-	set := s.settings.Get()
-	v := settingsView{Settings: set, DefaultAgent: s.runners.Default(), DefaultAgentFrom: fromConfig,
-		FallbackDefaultAgent: s.configuredDefault, Agents: map[string]effectiveAgent{}}
-	if set.DefaultAgent != "" {
-		v.DefaultAgentFrom = fromApp
-	}
+	v := settingsView{Settings: s.settings.Get(), Agents: map[string]agentInfo{}}
 	for _, rn := range s.runners.All() {
-		e := s.effective(rn.Info(), set)
-		fallback := s.effective(rn.Info(), settings.Settings{})
-		e.Fallback = &fallback
-		v.Agents[rn.Info().Name] = e
+		info := rn.Info()
+		v.Agents[info.Name] = agentInfo{Label: info.Label, Efforts: info.Efforts, AgentDefaultModel: info.DefaultModel, AgentDefaultEffort: info.DefaultEffort}
 	}
 	return v
+}
+
+// agent is an agent's settings; ok is false when it has none (not enabled).
+func (s *Server) agent(name string) (settings.Agent, bool) {
+	a, ok := s.settings.Get().Agents[name]
+	return a, ok
 }
 
 func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
@@ -155,16 +101,24 @@ func invalid(format string, args ...any) error {
 }
 
 // validateSettings accepts only values the agents can use; the store runs it before saving.
-func (s *Server) validateSettings(next settings.Settings) error {
-	if next.DefaultAgent != "" {
-		if _, ok := s.runners.Get(next.DefaultAgent); !ok {
-			return invalid("default agent %q is not enabled on this mobd", next.DefaultAgent)
+// Every enabled agent must have an entry; entries kept for agents not enabled are left alone.
+func (s *Server) validateSettings(next, current settings.Settings) error {
+	if _, ok := s.runners.Get(next.DefaultAgent); !ok {
+		return invalid("default agent %q is not enabled on this mobd", next.DefaultAgent)
+	}
+	stored := current.Agents
+	for _, rn := range s.runners.All() {
+		if _, ok := next.Agents[rn.Info().Name]; !ok {
+			return invalid("settings for %s are missing", rn.Info().Label)
 		}
 	}
 	for name, a := range next.Agents {
-		rn, ok := s.runners.Get(name)
-		if !ok {
-			return invalid("agent %q is not enabled on this mobd", name)
+		rn, enabled := s.runners.Get(name)
+		if !enabled {
+			if _, kept := stored[name]; !kept {
+				return invalid("agent %q is not enabled on this mobd", name)
+			}
+			continue
 		}
 		info := rn.Info()
 		if len(a.Models) > maxModels {
@@ -187,7 +141,7 @@ func (s *Server) validateSettings(next settings.Settings) error {
 			return invalid("%s: effort must be one of %s", info.Label, strings.Join(info.Efforts, ", "))
 		}
 		switch a.Permissions {
-		case "", "bypass":
+		case "bypass":
 		case "approve":
 			if name == "codex" && s.cfg.CodexMode == "exec" {
 				return invalid("Codex can only ask before commands in app-server mode (codexMode is exec)")
@@ -199,13 +153,9 @@ func (s *Server) validateSettings(next settings.Settings) error {
 	return nil
 }
 
-// applyDefaultAgent makes new conversations use the settings' default agent, or the configured one.
+// applyDefaultAgent makes new conversations use the settings' default agent.
 func (s *Server) applyDefaultAgent(set settings.Settings) {
-	name := set.DefaultAgent
-	if name == "" {
-		name = s.configuredDefault
-	}
-	if err := s.runners.SetDefault(name); err != nil {
+	if err := s.runners.SetDefault(set.DefaultAgent); err != nil {
 		log.Printf("settings: default agent: %v", err)
 	}
 }
@@ -223,13 +173,12 @@ func settingChanges(old, next settings.Settings) []string {
 	for n := range next.Agents {
 		names[n] = true
 	}
-	for _, n := range slices.Sorted(func(yield func(string) bool) {
-		for k := range names {
-			if !yield(k) {
-				return
-			}
-		}
-	}) {
+	sorted := make([]string, 0, len(names))
+	for n := range names {
+		sorted = append(sorted, n)
+	}
+	slices.Sort(sorted)
+	for _, n := range sorted {
 		a, b := old.Agents[n], next.Agents[n]
 		if !slices.Equal(a.Models, b.Models) {
 			out = append(out, fmt.Sprintf("%s models %q → %q", n, a.Models, b.Models))
@@ -273,3 +222,6 @@ func (s *Server) checkSessionSettings(id string, patch task.SessionPatch) (strin
 	}
 	return "", 0
 }
+
+// DefaultAgent is the agent new conversations use (settings.json).
+func (s *Server) DefaultAgent() string { return s.runners.Default() }

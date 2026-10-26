@@ -44,18 +44,13 @@ type Options struct {
 	OOMScoreAdj int
 	// Started is told the agent process's pid (its process group) once it runs; nil ignores it.
 	Started func(pid int)
-	// Permissions is "bypass" or "approve" for this turn (the machine settings); "" uses the
-	// runner's configured permissions.
+	// Permissions is "bypass" or "approve" for this turn (settings.json); "approve" gates the
+	// agent's own shell and file tools.
 	Permissions string
 }
 
-// Approve reports whether a turn gates the agent's own tools, from opts or else configured.
-func Approve(opts Options, configured string) bool {
-	if opts.Permissions != "" {
-		return opts.Permissions == "approve"
-	}
-	return configured == "approve"
-}
+// Approve reports whether the turn gates the agent's own tools.
+func (o Options) Approve() bool { return o.Permissions == "approve" }
 
 // AskFunc asks the user; kind is task.QuestionAsk or task.QuestionApproval.
 type AskFunc func(ctx context.Context, kind, text, details string) (task.Question, error)
@@ -71,8 +66,10 @@ var ErrNotSteerable = errors.New("this turn cannot take new messages")
 
 // Info describes what a runner supports. It is static: no processes are started.
 type Info struct {
-	Name    string   `json:"name"`
-	Label   string   `json:"label"`
+	Name  string `json:"name"`
+	Label string `json:"label"`
+	// Models are the models offered for this agent (settings.json); runners leave it empty and
+	// the API fills it in.
 	Models  []string `json:"models"`
 	Efforts []string `json:"efforts"`
 	// DefaultModel and DefaultEffort are what the agent uses when a turn names none, read from

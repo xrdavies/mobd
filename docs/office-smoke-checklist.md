@@ -29,13 +29,13 @@ Edit `~/.mobd/config.json` before starting:
 - Set `workdir` to an existing absolute directory.
 - Install and authenticate Codex or Claude Code as this user; set its executable
   path if it will not be found on the service's PATH. Enable the intended runners
-  and choose `defaultRunner` ([runner configuration](runners.md)).
+  ([runner configuration](runners.md)); the default agent is chosen in the apps.
 - `mobd init` sets `listen` to `0.0.0.0:8080` for direct LAN/VPN clients. Select a
   private interface to narrow the bind, or `127.0.0.1:8080` for access only through
   Tailscale Serve or SSH tunnels.
 - Keep `maxRunning: 1` on a shared desktop.
-- Set `codexPermissions` / `claudePermissions` to `approve` if provider approvals
-  are required; the default is `bypass`. Mandatory pairing behavior is in [security](security.md).
+- Set an agent's permissions to `approve` in the apps (Settings → Agents) if provider
+  approvals are required; the default is `bypass`. Mandatory pairing behavior is in [security](security.md).
 
 ## 2. Start and check readiness
 

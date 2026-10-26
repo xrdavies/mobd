@@ -1,7 +1,6 @@
-// Package settings keeps the machine settings changed from the apps (docs/mobd-v3.md,
-// "Machine settings"): the default agent, and per agent its model list, default model,
-// default effort and permissions. They are stored apart from config.json, which mobd never
-// rewrites; an unset field falls through to config.json, then to the agent's own settings.
+// Package settings keeps the runtime settings of agents and conversations (docs/mobd-v3.md,
+// "Settings"): the default agent, and per agent its model list, default model, default effort
+// and permissions. The apps change them; config.json only says how mobd itself runs.
 package settings
 
 import (
@@ -16,20 +15,21 @@ import (
 	"time"
 )
 
-// Agent is what the apps set for one agent; nil means not set here.
+// Agent holds one agent's settings. An empty DefaultModel or DefaultEffort sends none, so the
+// agent uses its own default.
 type Agent struct {
-	Models        []string `json:"models,omitempty"`
-	DefaultModel  string   `json:"defaultModel,omitempty"`
-	DefaultEffort string   `json:"defaultEffort,omitempty"`
-	Permissions   string   `json:"permissions,omitempty"`
+	Models        []string `json:"models"`
+	DefaultModel  string   `json:"defaultModel"`
+	DefaultEffort string   `json:"defaultEffort"`
+	Permissions   string   `json:"permissions"`
 }
 
-// Settings is the whole stored document. Rev goes up on every change; a write must name the
-// revision it was based on, so two devices cannot silently overwrite each other.
+// Settings is the whole file. Rev goes up on every change; a write must name the revision it
+// was based on, so two devices cannot silently overwrite each other.
 type Settings struct {
 	Rev          int64            `json:"rev"`
-	DefaultAgent string           `json:"defaultAgent,omitempty"`
-	Agents       map[string]Agent `json:"agents,omitempty"`
+	DefaultAgent string           `json:"defaultAgent"`
+	Agents       map[string]Agent `json:"agents"`
 }
 
 // ErrConflict means the write was based on an older revision.
@@ -42,24 +42,54 @@ type Store struct {
 	data Settings
 }
 
-// Open reads path; a missing file is empty settings. An unreadable file is moved aside (so a
-// later save does not lose it) and reported, and mobd starts without app settings.
+// Open reads path; a missing file is created by Ensure. An unreadable one is moved aside (so it
+// is not lost) and reported, and mobd starts from fresh settings.
 func Open(path string) *Store {
 	s := &Store{path: path}
 	data, err := os.ReadFile(path)
 	switch {
 	case errors.Is(err, os.ErrNotExist):
 	case err != nil:
-		log.Printf("settings: cannot read %s: %v; starting without app settings", path, err)
+		log.Printf("settings: cannot read %s: %v; starting from fresh settings", path, err)
 	default:
 		if err := json.Unmarshal(data, &s.data); err != nil {
 			aside := fmt.Sprintf("%s.bad-%d", path, time.Now().Unix())
 			_ = os.Rename(path, aside)
-			log.Printf("settings: %s is not valid JSON (%v); moved to %s, starting without app settings", path, err, aside)
+			log.Printf("settings: %s is not valid JSON (%v); moved to %s, starting from fresh settings", path, err, aside)
 			s.data = Settings{}
 		}
 	}
 	return s
+}
+
+// Ensure gives every enabled agent an entry (from seed) and picks the first enabled agent as
+// the default if there is none or it is not enabled, then saves if anything changed. Entries of
+// agents that are not enabled are kept.
+func (s *Store) Ensure(enabled []string, seed func(name string) Agent) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	next, changed := s.data.clone(), s.data.Rev == 0
+	if next.Agents == nil {
+		next.Agents = map[string]Agent{}
+	}
+	for _, name := range enabled {
+		if _, ok := next.Agents[name]; !ok {
+			next.Agents[name] = seed(name).normal()
+			changed = true
+		}
+	}
+	if len(enabled) > 0 && !slices.Contains(enabled, next.DefaultAgent) {
+		next.DefaultAgent, changed = enabled[0], true
+	}
+	if !changed {
+		return nil
+	}
+	next.Rev = s.data.Rev + 1
+	if err := save(s.path, next); err != nil {
+		return fmt.Errorf("save settings: %w", err)
+	}
+	s.data = next
+	return nil
 }
 
 // Get returns a copy of the settings.
@@ -69,9 +99,10 @@ func (s *Store) Get() Settings {
 	return s.data.clone()
 }
 
-// Replace stores next if it is based on the current revision and validate accepts it. It
+// Replace stores next if it is based on the current revision and validate accepts it; validate
+// gets the current settings too (it runs under the store's lock, so it must not call Get). It
 // returns the stored settings (with the new revision) and the previous ones.
-func (s *Store) Replace(next Settings, validate func(Settings) error) (stored, previous Settings, err error) {
+func (s *Store) Replace(next Settings, validate func(next, current Settings) error) (stored, previous Settings, err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if next.Rev != s.data.Rev {
@@ -79,15 +110,9 @@ func (s *Store) Replace(next Settings, validate func(Settings) error) (stored, p
 	}
 	next = next.clone()
 	for name, a := range next.Agents {
-		if len(a.Models) == 0 {
-			a.Models = nil // an empty list is "not set": the config's list applies
-			next.Agents[name] = a
-		}
-		if a.empty() {
-			delete(next.Agents, name)
-		}
+		next.Agents[name] = a.normal()
 	}
-	if err := validate(next); err != nil {
+	if err := validate(next, s.data); err != nil {
 		return Settings{}, Settings{}, err
 	}
 	next.Rev = s.data.Rev + 1
@@ -98,8 +123,15 @@ func (s *Store) Replace(next Settings, validate func(Settings) error) (stored, p
 	return next.clone(), previous.clone(), nil
 }
 
-func (a Agent) empty() bool {
-	return a.Models == nil && a.DefaultModel == "" && a.DefaultEffort == "" && a.Permissions == ""
+// normal writes an empty model list as [] and missing permissions as bypass.
+func (a Agent) normal() Agent {
+	if a.Models == nil {
+		a.Models = []string{}
+	}
+	if a.Permissions == "" {
+		a.Permissions = "bypass"
+	}
+	return a
 }
 
 func (s Settings) clone() Settings {

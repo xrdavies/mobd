@@ -35,19 +35,12 @@ type Config struct {
 	CORSOrigins          []string      `json:"corsOrigins"`
 	MaxRunning           int           `json:"maxRunning"`
 	DataDir              string        `json:"dataDir"`
-	CodexModels          []string      `json:"codexModels"`
 	CodexMode            string        `json:"codexMode"`
-	CodexPermissions     string        `json:"codexPermissions"`
 	Runners              []string      `json:"runners"`
-	DefaultRunner        string        `json:"defaultRunner"`
 	ClaudeBin            string        `json:"claudeBin"`
 	ClaudeWorkDir        string        `json:"claudeWorkdir"`
-	ClaudeModels         []string      `json:"claudeModels"`
-	ClaudePermissions    string        `json:"claudePermissions"`
 	ClaudeSettingSources string        `json:"claudeSettingSources"`
 	PiBin                string        `json:"piBin"`
-	PiModels             []string      `json:"piModels"`
-	PiPermissions        string        `json:"piPermissions"`
 	QuestionTimeout      time.Duration `json:"-"`
 	RemovedVNCAddr       string        `json:"vncAddr,omitempty"`
 
@@ -158,11 +151,10 @@ func Load(args []string) (Config, string, error) {
 		StatePath:   filepath.Join(stateDir, "state.json"),
 		CORSOrigins: []string{"http://localhost:1420", "http://127.0.0.1:1420", "tauri://localhost", "http://tauri.localhost"},
 		MaxRunning:  maxRunningUnset,
-		Runners:     []string{"codex", "claude"}, DefaultRunner: "codex",
-		CodexMode: "app-server", CodexPermissions: "bypass",
-		ClaudeBin: "claude", ClaudeModels: []string{"opus", "sonnet", "haiku"},
-		ClaudePermissions: "bypass", ClaudeSettingSources: "project",
-		PiBin: "pi", PiPermissions: "bypass",
+		Runners:     []string{"codex", "claude"},
+		CodexMode:   "app-server",
+		ClaudeBin:   "claude", ClaudeSettingSources: "project",
+		PiBin:           "pi",
 		QuestionTimeout: 30 * time.Minute,
 	}
 	defaultDesktop(&cfg)
@@ -172,6 +164,9 @@ func Load(args []string) (Config, string, error) {
 		dec.DisallowUnknownFields()
 		if bytes.Equal(bytes.TrimSpace(data), []byte("null")) {
 			return cfg, path, errors.New("config must be a JSON object")
+		}
+		if err := movedKeys(path, data); err != nil {
+			return cfg, path, err
 		}
 		if err = dec.Decode(&cfg); err != nil {
 			return cfg, path, fmt.Errorf("config %s: %w", path, err)
@@ -188,24 +183,26 @@ func Load(args []string) (Config, string, error) {
 		"MOBD_CODEX_WORKDIR": &cfg.CodexWorkDir, "MOBD_MOB_MCP_COMMAND": &cfg.MobMCPCommand,
 		"MOBD_SHARED_SECRET": &cfg.SharedSecret,
 		"MOBD_STATE_PATH":    &cfg.StatePath, "MOBD_DATA_DIR": &cfg.DataDir,
-		"MOBD_CODEX_MODE": &cfg.CodexMode, "MOBD_CODEX_PERMISSIONS": &cfg.CodexPermissions,
-		"MOBD_DEFAULT_RUNNER": &cfg.DefaultRunner, "MOBD_CLAUDE_BIN": &cfg.ClaudeBin,
-		"MOBD_CLAUDE_WORKDIR": &cfg.ClaudeWorkDir, "MOBD_CLAUDE_PERMISSIONS": &cfg.ClaudePermissions,
-		"MOBD_CLAUDE_SETTING_SOURCES": &cfg.ClaudeSettingSources,
-		"MOBD_PI_BIN":                 &cfg.PiBin, "MOBD_PI_PERMISSIONS": &cfg.PiPermissions,
+		"MOBD_CODEX_MODE": &cfg.CodexMode, "MOBD_CLAUDE_BIN": &cfg.ClaudeBin,
+		"MOBD_CLAUDE_WORKDIR": &cfg.ClaudeWorkDir, "MOBD_CLAUDE_SETTING_SOURCES": &cfg.ClaudeSettingSources,
+		"MOBD_PI_BIN": &cfg.PiBin,
 	} {
 		if value, ok := os.LookupEnv(key); ok {
 			*dest = value
 		}
 	}
-	// The legacy name remains an environment-only alias; the new name wins.
-	if value, ok := os.LookupEnv("MOBD_MODELS"); ok {
-		cfg.CodexModels = splitList(value)
+	var movedEnv []string
+	for _, key := range movedEnvVars {
+		if _, ok := os.LookupEnv(key); ok {
+			movedEnv = append(movedEnv, key)
+		}
+	}
+	if len(movedEnv) > 0 {
+		return cfg, path, fmt.Errorf("these environment variables moved to settings.json and are set in the apps (Settings → Agents); unset them: %s",
+			strings.Join(movedEnv, ", "))
 	}
 	for key, dest := range map[string]*[]string{
-		"MOBD_CORS_ORIGINS": &cfg.CORSOrigins, "MOBD_CODEX_MODELS": &cfg.CodexModels,
-		"MOBD_RUNNERS": &cfg.Runners, "MOBD_CLAUDE_MODELS": &cfg.ClaudeModels,
-		"MOBD_PI_MODELS": &cfg.PiModels,
+		"MOBD_CORS_ORIGINS": &cfg.CORSOrigins, "MOBD_RUNNERS": &cfg.Runners,
 	} {
 		if value, ok := os.LookupEnv(key); ok {
 			*dest = splitList(value)
@@ -284,14 +281,8 @@ func Load(args []string) (Config, string, error) {
 	if cfg.CodexMode != "app-server" && cfg.CodexMode != "exec" {
 		return cfg, path, errors.New("codexMode must be app-server or exec")
 	}
-	for name, value := range map[string]string{"codexPermissions": cfg.CodexPermissions, "claudePermissions": cfg.ClaudePermissions, "piPermissions": cfg.PiPermissions} {
-		if value != "bypass" && value != "approve" {
-			return cfg, path, fmt.Errorf("%s must be bypass or approve", name)
-		}
-	}
-	// codex exec never asks before a command or edit; only app-server can enforce approve.
-	if cfg.CodexMode == "exec" && cfg.CodexPermissions == "approve" {
-		return cfg, path, errors.New("codexPermissions approve needs codexMode app-server (codex exec cannot ask before running commands)")
+	if len(cfg.Runners) == 0 {
+		return cfg, path, errors.New("runners must name at least one agent (codex, claude, pi)")
 	}
 	enabled := make(map[string]bool)
 	for _, name := range cfg.Runners {
@@ -302,9 +293,6 @@ func Load(args []string) (Config, string, error) {
 			return cfg, path, fmt.Errorf("duplicate runner %q", name)
 		}
 		enabled[name] = true
-	}
-	if !enabled[cfg.DefaultRunner] {
-		return cfg, path, errors.New("defaultRunner must be an enabled runner")
 	}
 	if enabled["pi"] && cfg.PiBin == "" {
 		return cfg, path, errors.New("piBin must not be empty when pi is enabled")
@@ -342,6 +330,31 @@ func Load(args []string) (Config, string, error) {
 		cfg.MobMCPCommand, cfg.MobMCPArgs = BuiltinMCP()
 	}
 	return cfg, path, nil
+}
+
+// movedSettings are agent settings that moved from config.json to settings.json (the apps'
+// Settings → Agents); a config that still has them is refused, naming them, so it is cleaned once.
+var movedSettings = []string{"defaultRunner", "codexModels", "claudeModels", "piModels", "codexPermissions", "claudePermissions", "piPermissions"}
+
+var movedEnvVars = []string{"MOBD_DEFAULT_RUNNER", "MOBD_MODELS", "MOBD_CODEX_MODELS", "MOBD_CLAUDE_MODELS", "MOBD_PI_MODELS",
+	"MOBD_CODEX_PERMISSIONS", "MOBD_CLAUDE_PERMISSIONS", "MOBD_PI_PERMISSIONS"}
+
+func movedKeys(path string, data []byte) error {
+	var keys map[string]json.RawMessage
+	if json.Unmarshal(data, &keys) != nil {
+		return nil // the decoder reports the syntax error
+	}
+	var found []string
+	for _, k := range movedSettings {
+		if _, ok := keys[k]; ok {
+			found = append(found, k)
+		}
+	}
+	if len(found) == 0 {
+		return nil
+	}
+	return fmt.Errorf("%s: these settings moved to settings.json and are set in the apps (Settings → Agents); delete them from %s: %s"+
+		" (mobd start rewrites service.json from config.json)", path, filepath.Base(path), strings.Join(found, ", "))
 }
 
 // Init creates a private config without overwriting an existing file.

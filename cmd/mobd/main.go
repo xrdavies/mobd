@@ -269,9 +269,6 @@ func serve(cfg config.Config) error {
 		}
 		runners = append(runners, rn)
 	}
-	if _, err := runner.NewRegistry(cfg.DefaultRunner, runners...); err != nil {
-		return fmt.Errorf("defaultRunner: %w", err)
-	}
 	desktops := newProvider(cfg, store)
 	if desktops != nil {
 		// Desktops outlive mobd; the next one finds them.
@@ -294,7 +291,7 @@ func serve(cfg config.Config) error {
 	serveErr := make(chan error, 2)
 	go func() { serveErr <- adminSrv.Serve(management) }()
 	go func() {
-		log.Printf("mobd listening on %s, live desktop UDP %s; health=%s/health (runners=%s default=%s)", cfg.ListenAddr, streamPort(cfg), cfg.SelfURL(), strings.Join(cfg.Runners, ","), cfg.DefaultRunner)
+		log.Printf("mobd listening on %s, live desktop UDP %s; health=%s/health (runners=%s default=%s)", cfg.ListenAddr, streamPort(cfg), cfg.SelfURL(), strings.Join(cfg.Runners, ","), srv.DefaultAgent())
 		serveErr <- httpSrv.Serve(listener)
 	}()
 

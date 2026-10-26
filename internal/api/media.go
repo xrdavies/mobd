@@ -151,6 +151,10 @@ func (s *Server) turnOptions(req task.CreateRequest) (task.TurnOptions, string, 
 	opts := task.TurnOptions{Runner: req.Runner, Model: req.Model, Effort: req.Effort, Attachments: req.Attachments}
 	var sessionModel, sessionEffort string
 	if req.SessionID != "" {
+		// A conversation's model and effort change only with PATCH /sessions/{id}.
+		if req.Model != "" || req.Effort != "" {
+			return opts, "set a conversation's model and effort with PATCH /sessions/{id}", http.StatusBadRequest
+		}
 		pinned, model, effort, err := s.store.SessionSettings(req.SessionID)
 		if err != nil {
 			return opts, "session not found", http.StatusNotFound
@@ -169,32 +173,22 @@ func (s *Server) turnOptions(req task.CreateRequest) (task.TurnOptions, string, 
 		return opts, "runner " + strconv.Quote(opts.Runner) + " is not enabled on this mobd", http.StatusBadRequest
 	}
 	info := rn.Info()
-	// A new conversation starts with the machine defaults and keeps them; a later turn uses the
-	// conversation's settings. A turn that names a model or effort also sets it for the
-	// conversation, so the next turns keep it (older apps send them on every turn).
-	// Only defaults set in Mob are sent: one from the agent's own config is what the agent
-	// uses anyway when none is named, and may not be a value mobd offers.
-	eff := s.effective(info, s.settings.Get())
-	machineModel, machineEffort := eff.DefaultModel, eff.DefaultEffort
-	if eff.DefaultModelFrom != fromApp {
-		machineModel = ""
-	}
-	if eff.DefaultEffortFrom != fromApp {
-		machineEffort = ""
-	}
-	resolve := func(named, conversation, machine string) (value string, save bool) {
-		switch {
-		case named != "":
-			return named, true
-		case req.SessionID == "":
-			return machine, true
-		case conversation != "":
-			return conversation, false
+	// A new conversation starts with the defaults of settings.json (or the request's) and keeps
+	// them; a later turn uses the conversation's, and its "" follows the defaults. An empty
+	// default sends nothing, so the agent uses its own.
+	agent, _ := s.agent(opts.Runner)
+	pick := func(value, def string) string {
+		if value != "" {
+			return value
 		}
-		return machine, false
+		return def
 	}
-	opts.Model, opts.SaveModel = resolve(opts.Model, sessionModel, machineModel)
-	opts.Effort, opts.SaveEffort = resolve(opts.Effort, sessionEffort, machineEffort)
+	if req.SessionID == "" {
+		opts.Model, opts.Effort = pick(opts.Model, agent.DefaultModel), pick(opts.Effort, agent.DefaultEffort)
+		opts.SaveModel, opts.SaveEffort = true, true
+	} else {
+		opts.Model, opts.Effort = pick(sessionModel, agent.DefaultModel), pick(sessionEffort, agent.DefaultEffort)
+	}
 	if opts.Model != "" && !validModel.MatchString(opts.Model) {
 		return opts, "invalid model", http.StatusBadRequest
 	}
@@ -229,7 +223,7 @@ func (s *Server) runOptions(t *task.Task, env desktop.TurnEnv) (opts runner.Opti
 	if err != nil {
 		return runner.Options{}, nil, fmt.Errorf("write the turn's token: %w", err)
 	}
-	agent, _ := s.agentSettings(t.Runner)
+	agent, _ := s.agent(t.Runner)
 	opts = runner.Options{
 		Permissions:  agent.Permissions,
 		SaveImage:    s.artifacts.Save,

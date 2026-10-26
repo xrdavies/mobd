@@ -876,8 +876,11 @@ func TestHealthReadiness(t *testing.T) {
 	t.Cleanup(func() { currentPermissions = desktop.CurrentPermissions })
 	displayState = func() (desktop.DisplayState, error) { return desktop.DisplayState{Locked: true}, nil }
 	t.Cleanup(func() { displayState = desktop.State })
-	cfg := config.Config{CodexBin: bin, MobMCPCommand: "mob-mcp-missing",
-		CodexModels: []string{"gpt-5.5"}, DataDir: dir}
+	// A new settings.json offers the model of Codex's own config.
+	codexHome := t.TempDir()
+	os.WriteFile(filepath.Join(codexHome, "config.toml"), []byte(`model = "gpt-5.5"`+"\n"), 0600)
+	t.Setenv("CODEX_HOME", codexHome)
+	cfg := config.Config{CodexBin: bin, MobMCPCommand: "mob-mcp-missing", DataDir: dir}
 	s := newTestServer(t, cfg, task.NewStore(), codex.New(cfg))
 	t.Cleanup(s.Close)
 	var body struct {
@@ -894,7 +897,7 @@ func TestHealthReadiness(t *testing.T) {
 		t.Fatal(err)
 	}
 	c := body.Checks
-	if body.APIVersion != 3 || body.MaxRunning != 1 || len(body.Models) != 1 || len(body.Efforts) != 5 || len(body.Features) == 0 {
+	if body.APIVersion != 3 || body.MaxRunning != 1 || body.Models != nil || body.Efforts != nil || len(body.Features) == 0 {
 		t.Fatalf("health %+v", body)
 	}
 	if !c["codex"].OK || !strings.Contains(c["codex"].Detail, "codex-cli 9.9.9") || c["actuation"].OK ||

@@ -44,8 +44,7 @@ var _ runner.Runner = (*Runner)(nil)
 var _ runner.Steerer = (*Runner)(nil)
 
 func (r *Runner) Info() runner.Info {
-	models := append([]string{}, r.cfg.PiModels...)
-	return runner.Info{Name: Name, Label: "Pi", Models: models, Efforts: efforts, Images: true, Resume: true, Cost: true, Steer: true}
+	return runner.Info{Name: Name, Label: "Pi", Efforts: efforts, Images: true, Resume: true, Cost: true, Steer: true}
 }
 
 func (r *Runner) Check(ctx context.Context) runner.Status {
@@ -169,7 +168,7 @@ func (r *Runner) Start(ctx context.Context, t *task.Task, opts runner.Options, e
 		return err
 	}
 	env := append(os.Environ(), opts.Env...)
-	env = append(env, "MOB_PI_MCP_CONFIG="+string(mcp), "MOB_PI_PERMISSIONS="+permissions(opts, r.cfg.PiPermissions))
+	env = append(env, "MOB_PI_MCP_CONFIG="+string(mcp), "MOB_PI_PERMISSIONS="+opts.Permissions)
 
 	// Pass a real fd: os/exec must not wait on an stdin-copy goroutine after
 	// an RPC child exits unexpectedly while its input is still open.
@@ -233,11 +232,4 @@ func (r *Runner) Steer(taskID, text string) error {
 	}
 	_, err := pt.call("steer", map[string]any{"message": text})
 	return err
-}
-
-func permissions(opts runner.Options, configured string) string {
-	if runner.Approve(opts, configured) {
-		return "approve"
-	}
-	return "bypass"
 }

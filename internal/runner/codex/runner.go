@@ -42,12 +42,8 @@ func (r *Runner) appServer() bool { return r.cfg.CodexMode == "app-server" }
 var _ runner.Runner = (*Runner)(nil)
 
 func (r *Runner) Info() runner.Info {
-	models := r.cfg.CodexModels
-	if models == nil {
-		models = []string{}
-	}
 	model, effort := defaults()
-	return runner.Info{Name: Name, Label: "Codex", Models: models, Efforts: Efforts, DefaultModel: model, DefaultEffort: effort,
+	return runner.Info{Name: Name, Label: "Codex", Efforts: Efforts, DefaultModel: model, DefaultEffort: effort,
 		Images: true, Resume: true, Steer: r.appServer()}
 }
 

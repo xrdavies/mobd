@@ -161,14 +161,14 @@ Invitation redemption and preview are documented in [pairing](pairing.md).
 
 | Method | Path | Notes |
 | --- | --- | --- |
-| GET | `/health`, `/healthz` | `apiVersion: 3`, `features`, `checks`, `runners`, default runner's `models`/`efforts`, `maxRunning` |
+| GET | `/health`, `/healthz` | `apiVersion: 3`, `features`, `checks`, `runners` (each with `models`, `efforts`, `defaultModel`, `defaultEffort`, `permissions`), `maxRunning` |
 | GET | `/sessions` | `?archived=false` (default) \| `true` \| `all`. Sorted pinned first, then `updatedAt` descending |
 | GET | `/sessions/{id}` | `{session, tasks, activities, questions}` |
-| PATCH | `/sessions/{id}` | Body `{title?, pinned?, archived?, model?, effort?}` → updated session. `model`/`effort` set the conversation's settings (`""` = machine default); effort must be one of its runner's |
+| PATCH | `/sessions/{id}` | Body `{title?, pinned?, archived?, model?, effort?}` → updated session. `model`/`effort` set the conversation's settings (`""` = the agent's default from settings.json); effort must be one of its runner's |
 | DELETE | `/sessions/{id}` | **409** while a turn is active; removes its tasks, activities and artifacts → **204** |
-| POST | `/tasks` | `{prompt, sessionId?, runner?, model?, effort?, attachments?}`; attachments are upload IDs; runner is pinned per session. Model and effort default to the conversation's settings, a new conversation's to the machine settings ([below](#machine-and-conversation-settings)); a turn that names one also sets it for the conversation |
-| GET | `/settings` | Machine settings and what each agent uses now ([below](#machine-and-conversation-settings)) |
-| PUT | `/settings` | Replace the machine settings: `{rev, defaultAgent?, agents?}` → same as GET; **409** `settings_changed` when `rev` is stale, **400** for invalid values |
+| POST | `/tasks` | `{prompt, sessionId?, runner?, model?, effort?, attachments?}`; attachments are upload IDs; runner is pinned per session. `model`/`effort` only for a new conversation (they become its settings; omitted = the defaults in settings.json); a turn in an existing one uses the conversation's and **400** if it names any ([below](#settings)) |
+| GET | `/settings` | settings.json and each agent's efforts and own defaults ([below](#settings)) |
+| PUT | `/settings` | Replace settings.json: `{rev, defaultAgent, agents}` → same as GET; **409** `settings_changed` when `rev` is stale, **400** for invalid values |
 | GET | `/tasks` | `?sessionId=`, `?status=`, `?limit=` (default 100, max 500) |
 | GET | `/tasks/{id}` | Task snapshot |
 | GET | `/tasks/{id}/events` | Per-task SSE: status, logs, messages, activities, usage and questions |
@@ -200,8 +200,6 @@ Example response (abridged):
   "runner": "codex", "maxRunning": 1,
   "mobMcp": "/path/to/mobd",
   "features": ["queue", "activities", "sessionAdmin", "events", "screen", "uploads", "taskOptions", "runners", "questions", "steer", "pairing", "stream", "streamResize", "settings"],
-  "models": [],
-  "efforts": ["minimal", "low", "medium", "high", "xhigh"],
   "checks": {
     "codex":     { "ok": true,  "detail": "/Users/me/.local/bin/codex" },
     "actuation": { "ok": true,  "detail": "built-in (mobd mcp)" },
@@ -212,50 +210,47 @@ Example response (abridged):
 }
 ```
 
-`ok` is true when mobd is serving. `checks` explain readiness without blocking anything and are cached for 10 s. Each check is `{ok, unknown?, detail?}`; permission checks come from `CGPreflightPostEventAccess` / `CGPreflightScreenCaptureAccess` in mobd and are `unknown` off macOS. `runners` lists each enabled runner's capabilities and readiness ([runners.md](runners.md)); top-level `models`/`efforts` describe the default runner. Codex models come from `MOBD_CODEX_MODELS`; an empty list means "the agent's default only". `display` reports a locked console or sleeping display (snapshots need it awake; the live view wakes it); `streamSessions` counts open live desktop sessions.
+`ok` is true when mobd is serving. `checks` explain readiness without blocking anything and are cached for 10 s. Each check is `{ok, unknown?, detail?}`; permission checks come from `CGPreflightPostEventAccess` / `CGPreflightScreenCaptureAccess` in mobd and are `unknown` off macOS. `runners` lists each enabled runner's capabilities and readiness ([runners.md](runners.md)), with its models, defaults and permissions from settings.json; a default that settings.json leaves empty is the agent's own. `display` reports a locked console or sleeping display (snapshots need it awake; the live view wakes it); `streamSessions` counts open live desktop sessions.
 
-### Machine and conversation settings
+### Settings
 
-**Machine settings** (feature `settings`) are changed from the apps and shared by every paired
-device: the default agent for new conversations, and per agent its model list, default model,
-default effort and permissions (`bypass`/`approve`). mobd keeps them in `settings.json` in its
-data directory, apart from `config.json`, which it never rewrites. Every field is optional; an
-unset one falls through to `config.json` (model list, permissions, default agent), then to the
-agent's own settings (default model and effort, see [runners](runners.md)), then to the agent's
-built-in default. Changes apply to the next turn without a restart; each is logged with the
-device's name and sent to the other devices as a `settings` event.
-
-`GET /settings`:
+`config.json` says how mobd itself runs (listen address, agents enabled and their programs, work
+directories…). **settings.json**, in the data directory, holds the runtime settings of agents and
+conversations, shared by every paired device and changed in the apps (feature `settings`): the
+default agent for new conversations, and per agent its model list, default model, default effort
+and permissions. mobd creates it on the first start, complete and explicit, and adds an entry when
+an agent is enabled later:
 
 ```json
 {
-  "settings": { "rev": 3, "defaultAgent": "codex",
-                "agents": { "codex": { "models": ["gpt-6-astra", "gpt-5.4"], "defaultEffort": "high" } } },
-  "defaultAgent": "codex", "defaultAgentFrom": "app",
+  "rev": 1,
+  "defaultAgent": "codex",
   "agents": {
-    "codex": { "models": ["gpt-6-astra", "gpt-5.4"], "modelsFrom": "app",
-               "defaultModel": "gpt-6-astra", "defaultModelFrom": "agent",
-               "defaultEffort": "high", "defaultEffortFrom": "app",
-               "permissions": "bypass", "permissionsFrom": "config",
-               "efforts": ["minimal", "low", "medium", "high", "xhigh"] }
+    "codex":  { "models": ["gpt-6-astra"], "defaultModel": "", "defaultEffort": "", "permissions": "bypass" },
+    "claude": { "models": ["opus", "sonnet", "haiku"], "defaultModel": "", "defaultEffort": "", "permissions": "bypass" }
   }
 }
 ```
 
-`settings` is what the apps set: edit it and `PUT` it back whole, with the same `rev`. `agents`
-is what each agent uses now; `…From` is `app`, `config`, `agent` (its own config) or `builtin`
-(nothing set). Each agent's `fallback` (and `fallbackDefaultAgent`) is what applies without
-the app settings, so an app can say what clearing a value returns to. An empty model list means "not set". Not editable here: listen address, ports,
-agent paths and work directories, the MCP command, pairing and CORS. Codex `approve` needs
-`codexMode` `app-server`.
+The default agent is the first enabled one. Claude starts with its aliases; Codex and Pi with the
+default model of their own config, if any. An empty `defaultModel`/`defaultEffort` sends none, so
+the agent uses its own default. An unreadable file is moved aside (`settings.json.bad-…`) and a
+fresh one written.
 
-**Conversation settings:** a conversation has `model` and `effort`. A new one starts with the
-machine defaults **set in Mob** and keeps them when those change later; a default from the
-agent's own config is not copied, since the agent applies it anyway. `PATCH /sessions/{id}`
-changes them, `""` returns to the machine default, and a turn that names a model or effort also
-sets it. Each turn uses them; the turn records what it actually ran with (`model` may be
-replaced by the model the agent reports). Conversations from before this feature follow the
-machine defaults until one is set. The runner is fixed when a conversation starts.
+`GET /settings` answers `{settings, agents}`: `settings` is the file, `agents` gives each enabled
+agent's `label`, `efforts`, and its own defaults (`agentDefaultModel`, `agentDefaultEffort`) for
+labelling an empty default. Edit `settings` and `PUT` it back whole with the same `rev`. A stale
+`rev` (another device saved first) gets **409** `settings_changed`: reload and edit again. Every
+enabled agent needs an entry; values are validated (models as model names, at most 50 per agent,
+efforts from the agent's list, permissions `bypass`/`approve`; Codex `approve` needs `codexMode`
+`app-server`). Changes apply to the next turn without a restart; each is logged with the device's
+name and sent to the other devices as a `settings` event.
+
+**Conversation settings:** a conversation has `model` and `effort`. A new one takes the request's
+or else the defaults of settings.json, and keeps them when those change later. `PATCH
+/sessions/{id}` changes them; `""` follows the default. Each turn uses them and records what it
+actually ran with (`model` may be replaced by the model the agent reports). The runner is fixed
+when a conversation starts.
 
 ### Global events (`GET /events`)
 
@@ -307,7 +302,6 @@ JSON keys, environment variables and defaults.
 | --- | --- | --- |
 | `MOBD_MAX_RUNNING` | `1` | Tasks allowed to run at once (one desktop → 1) |
 | `MOBD_DATA_DIR` | directory of `MOBD_STATE_PATH` | Root for `artifacts/` (screenshots, uploads) |
-| `MOBD_CODEX_MODELS` | empty | Codex model IDs offered to clients (`MOBD_MODELS` is also accepted, with lower priority) |
 | `MOBD_QUESTION_TIMEOUT` | `30m` | How long a turn waits for an answer to `ask_user` / `request_approval` |
 
 ## Internal structure

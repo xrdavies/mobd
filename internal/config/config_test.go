@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 )
@@ -24,15 +25,14 @@ func loadTest(t *testing.T, data string, args ...string) Config {
 }
 
 func TestPrecedence(t *testing.T) {
-	data := `{"listen":"127.0.0.1:8001","codexModels":["file-model"]}`
+	data := `{"listen":"127.0.0.1:8001"}`
 	if got := loadTest(t, data).ListenAddr; got != "127.0.0.1:8001" {
 		t.Fatal(got)
 	}
 	t.Setenv("MOBD_LISTEN", "127.0.0.1:8002")
-	t.Setenv("MOBD_MODELS", " env-model, second ")
 	t.Setenv("MOBD_SHARED_SECRET", "")
 	cfg := loadTest(t, data)
-	if cfg.ListenAddr != "127.0.0.1:8002" || cfg.SharedSecret != "" || !reflect.DeepEqual(cfg.CodexModels, []string{"env-model", "second"}) {
+	if cfg.ListenAddr != "127.0.0.1:8002" || cfg.SharedSecret != "" {
 		t.Fatalf("precedence: %+v", cfg)
 	}
 	if got := loadTest(t, data, "--listen", "127.0.0.1:8003").ListenAddr; got != "127.0.0.1:8003" {
@@ -48,7 +48,7 @@ func TestPrecedence(t *testing.T) {
 }
 
 func TestInvalidConfig(t *testing.T) {
-	for _, data := range []string{`{`, `null`, `{} {}`, `{"typo":true}`, `{"sharedSecret":"legacy"}`, `{"maxRunning":0}`, `{"listen":":0"}`, `{"listen":"bad"}`, `{"streamPort":-1}`, `{"streamPort":65536}`, `{"mcpArgs":"bad"}`, `{"workdir":""}`, `{"questionTimeout":"0s"}`, `{"questionTimeout":123}`, `{"codexMode":"invalid"}`, `{"codexPermissions":"typo"}`, `{"codexMode":"exec","codexPermissions":"approve"}`, `{"claudePermissions":"typo"}`, `{"runners":[]}`, `{"runners":["unknown"]}`, `{"runners":["codex","codex"]}`, `{"runners":["claude"],"defaultRunner":"codex"}`} {
+	for _, data := range []string{`{`, `null`, `{} {}`, `{"typo":true}`, `{"sharedSecret":"legacy"}`, `{"maxRunning":0}`, `{"listen":":0"}`, `{"listen":"bad"}`, `{"streamPort":-1}`, `{"streamPort":65536}`, `{"mcpArgs":"bad"}`, `{"workdir":""}`, `{"questionTimeout":"0s"}`, `{"questionTimeout":123}`, `{"codexMode":"invalid"}`, `{"runners":[]}`, `{"runners":["unknown"]}`, `{"runners":["codex","codex"]}`} {
 		t.Run(data, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "config.json")
 			if err := os.WriteFile(path, []byte(data), 0600); err != nil {
@@ -75,17 +75,17 @@ func TestInvalidConfig(t *testing.T) {
 }
 
 func TestRunnerConfigurationAndServiceSnapshot(t *testing.T) {
+	if _, _, err := Load([]string{"--config", writeConfig(t, `{"runners":["pi"],"piBin":""}`)}); err == nil {
+		t.Fatal("empty piBin accepted")
+	}
 	cfg := loadTest(t, `{
-		"runners":["claude"], "defaultRunner":"claude",
-		"codexMode":"exec", "codexPermissions":"bypass", "codexModels":["file-model"],
-		"claudeBin":"/opt/claude", "claudeWorkdir":"/tmp/claude", "claudeModels":["sonnet"],
-		"claudePermissions":"approve", "claudeSettingSources":"all", "questionTimeout":"15m"
+		"runners":["claude","pi"], "codexMode":"exec",
+		"claudeBin":"/opt/claude", "claudeWorkdir":"/tmp/claude", "claudeSettingSources":"all",
+		"piBin":"/opt/pi", "questionTimeout":"15m"
 	}`)
-	if cfg.DefaultRunner != "claude" || !reflect.DeepEqual(cfg.Runners, []string{"claude"}) ||
-		cfg.CodexMode != "exec" || cfg.CodexPermissions != "bypass" ||
-		cfg.ClaudeBin != "/opt/claude" || cfg.ClaudeWorkDir != "/tmp/claude" ||
-		cfg.ClaudePermissions != "approve" || cfg.ClaudeSettingSources != "all" ||
-		!reflect.DeepEqual(cfg.ClaudeModels, []string{"sonnet"}) || cfg.QuestionTimeout != 15*time.Minute {
+	if !reflect.DeepEqual(cfg.Runners, []string{"claude", "pi"}) || cfg.CodexMode != "exec" ||
+		cfg.ClaudeBin != "/opt/claude" || cfg.ClaudeWorkDir != "/tmp/claude" || cfg.ClaudeSettingSources != "all" ||
+		cfg.PiBin != "/opt/pi" || cfg.QuestionTimeout != 15*time.Minute {
 		t.Fatalf("runner JSON: %+v", cfg)
 	}
 	data, err := json.Marshal(cfg)
@@ -96,54 +96,41 @@ func TestRunnerConfigurationAndServiceSnapshot(t *testing.T) {
 		t.Fatalf("service snapshot changed configuration: %+v", got)
 	}
 	for key, value := range map[string]string{
-		"MOBD_RUNNERS": "codex,claude", "MOBD_DEFAULT_RUNNER": "codex",
-		"MOBD_CODEX_MODE": "app-server", "MOBD_CODEX_PERMISSIONS": "approve",
-		"MOBD_MODELS": "legacy-model", "MOBD_CODEX_MODELS": "new-model",
+		"MOBD_RUNNERS": "codex,claude", "MOBD_CODEX_MODE": "app-server",
 		"MOBD_CLAUDE_BIN": "/other/claude", "MOBD_CLAUDE_WORKDIR": "/tmp/other",
-		"MOBD_CLAUDE_MODELS": "opus,haiku", "MOBD_CLAUDE_PERMISSIONS": "bypass",
-		"MOBD_CLAUDE_SETTING_SOURCES": "project", "MOBD_QUESTION_TIMEOUT": "2m",
+		"MOBD_CLAUDE_SETTING_SOURCES": "project", "MOBD_PI_BIN": "/other/pi", "MOBD_QUESTION_TIMEOUT": "2m",
 	} {
 		t.Setenv(key, value)
 	}
 	got := loadTest(t, string(data))
-	if got.DefaultRunner != "codex" || len(got.Runners) != 2 || got.CodexMode != "app-server" ||
-		got.CodexPermissions != "approve" || !reflect.DeepEqual(got.CodexModels, []string{"new-model"}) ||
-		got.ClaudeBin != "/other/claude" || got.ClaudeWorkDir != "/tmp/other" ||
-		!reflect.DeepEqual(got.ClaudeModels, []string{"opus", "haiku"}) ||
-		got.ClaudePermissions != "bypass" || got.ClaudeSettingSources != "project" || got.QuestionTimeout != 2*time.Minute {
+	if len(got.Runners) != 2 || got.CodexMode != "app-server" || got.ClaudeBin != "/other/claude" || got.ClaudeWorkDir != "/tmp/other" ||
+		got.ClaudeSettingSources != "project" || got.PiBin != "/other/pi" || got.QuestionTimeout != 2*time.Minute {
 		t.Fatalf("runner environment: %+v", got)
 	}
 }
 
-func TestPiConfiguration(t *testing.T) {
-	cfg := loadTest(t, `{"runners":["pi"],"defaultRunner":"pi","piBin":"/opt/pi","piModels":["provider/model"],"piPermissions":"approve"}`)
-	if cfg.DefaultRunner != "pi" || cfg.PiBin != "/opt/pi" || cfg.PiPermissions != "approve" || !reflect.DeepEqual(cfg.PiModels, []string{"provider/model"}) {
-		t.Fatalf("Pi config: %+v", cfg)
+// Agent settings live in settings.json now: a config or environment that still sets them is
+// refused, naming what to delete.
+func TestMovedSettingsAreRefusedByName(t *testing.T) {
+	_, _, err := Load([]string{"--config", writeConfig(t, `{"listen":":9000","codexModels":["x"],"claudePermissions":"bypass","defaultRunner":"codex"}`)})
+	if err == nil || !strings.Contains(err.Error(), "delete them from config.json: defaultRunner, codexModels, claudePermissions") ||
+		!strings.Contains(err.Error(), "Settings → Agents") {
+		t.Fatalf("moved keys: %v", err)
 	}
-	data, err := json.Marshal(cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := loadTest(t, string(data)); !reflect.DeepEqual(got, cfg) {
-		t.Fatal("Pi service snapshot changed")
-	}
-	t.Setenv("MOBD_PI_BIN", "/other/pi")
-	t.Setenv("MOBD_PI_MODELS", "local/one, local/two")
-	t.Setenv("MOBD_PI_PERMISSIONS", "bypass")
-	got := loadTest(t, string(data))
-	if got.PiBin != "/other/pi" || got.PiPermissions != "bypass" || !reflect.DeepEqual(got.PiModels, []string{"local/one", "local/two"}) {
-		t.Fatalf("Pi env: %+v", got)
+	t.Setenv("MOBD_CODEX_MODELS", "x")
+	t.Setenv("MOBD_PI_PERMISSIONS", "approve")
+	if _, _, err := Load([]string{"--config", writeConfig(t, `{}`)}); err == nil || !strings.Contains(err.Error(), "unset them: MOBD_CODEX_MODELS, MOBD_PI_PERMISSIONS") {
+		t.Fatalf("moved env: %v", err)
 	}
 }
 
-func TestInvalidPiConfiguration(t *testing.T) {
-	for _, data := range []string{`{"piPermissions":"manual"}`, `{"runners":["pi"],"defaultRunner":"pi","piBin":""}`} {
-		path := filepath.Join(t.TempDir(), "config.json")
-		os.WriteFile(path, []byte(data), 0600)
-		if _, _, err := Load([]string{"--config", path}); err == nil {
-			t.Fatalf("accepted %s", data)
-		}
+func writeConfig(t *testing.T, data string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(path, []byte(data), 0600); err != nil {
+		t.Fatal(err)
 	}
+	return path
 }
 
 func TestDefaultsAndNoDotEnv(t *testing.T) {
@@ -158,7 +145,7 @@ func TestDefaultsAndNoDotEnv(t *testing.T) {
 		t.Fatal(err)
 	}
 	if path != filepath.Join(dir, ".mobd", "config.json") || cfg.ListenAddr != ":8080" || cfg.StreamPort != 9527 ||
-		cfg.CodexMode != "app-server" || cfg.DefaultRunner != "codex" || len(cfg.Runners) != 2 ||
+		cfg.CodexMode != "app-server" || len(cfg.Runners) != 2 ||
 		cfg.ClaudeWorkDir != cfg.CodexWorkDir || cfg.QuestionTimeout != 30*time.Minute || len(cfg.CORSOrigins) != 4 {
 		t.Fatalf("defaults: %+v; path=%s", cfg, path)
 	}

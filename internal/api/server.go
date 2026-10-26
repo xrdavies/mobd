@@ -28,10 +28,8 @@ type Server struct {
 	cfg     config.Config
 	store   *task.Store
 	runners *runner.Registry
-	// settings are the machine settings changed from the apps; configuredDefault is the
-	// default runner before them.
-	settings          *settings.Store
-	configuredDefault string
+	// settings is settings.json: the agents' and conversations' runtime settings.
+	settings *settings.Store
 
 	hub       *hub
 	artifacts *artifact.Store
@@ -68,12 +66,8 @@ func New(cfg config.Config, store *task.Store, auth *pairing.Store, desktops des
 	if auth == nil {
 		panic("pairing store is required")
 	}
-	def := cfg.DefaultRunner
-	known := false
-	for _, r := range runners {
-		known = known || r.Info().Name == def
-	}
-	if !known && len(runners) > 0 {
+	def := ""
+	if len(runners) > 0 {
 		def = runners[0].Info().Name
 	}
 	reg, err := runner.NewRegistry(def, runners...)
@@ -82,11 +76,22 @@ func New(cfg config.Config, store *task.Store, auth *pairing.Store, desktops des
 	}
 	s := &Server{
 		cfg: cfg, store: store, pairing: auth, runners: reg, hub: newHub(),
-		settings: settings.Open(filepath.Join(dataDir(cfg), "settings.json")), configuredDefault: def,
+		settings:  settings.Open(filepath.Join(dataDir(cfg), "settings.json")),
 		artifacts: artifact.New(filepath.Join(dataDir(cfg), "artifacts")),
 		cancels:   make(map[string]context.CancelFunc), done: make(chan struct{}),
 		tokens: make(map[string]string), waiters: make(map[string]chan struct{}),
 		reservations: make(map[string]desktop.Reservation), starting: make(map[string]bool),
+	}
+	// settings.json is created on the first start and gets an entry for each newly enabled agent.
+	var enabled []string
+	for _, r := range runners {
+		enabled = append(enabled, r.Info().Name)
+	}
+	if err := s.settings.Ensure(enabled, func(name string) settings.Agent {
+		rn, _ := reg.Get(name)
+		return seedAgent(rn.Info())
+	}); err != nil {
+		log.Printf("settings: %v", err)
 	}
 	s.applyDefaultAgent(s.settings.Get())
 	if desktops == nil {

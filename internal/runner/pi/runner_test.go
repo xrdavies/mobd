@@ -53,13 +53,21 @@ const reply = `printf '%s\n' \
   '{"type":"agent_end","willRetry":false}' \
   '{"type":"agent_settled","aborted":false}'`
 
-func testRunner(t *testing.T, bin, dir string) *Runner {
+// permsRunner runs every turn with approve permissions, as mobd does from settings.json.
+type permsRunner struct{ *Runner }
+
+func (r permsRunner) Start(ctx context.Context, t *task.Task, opts runner.Options, emit runner.EmitFunc) error {
+	opts.Permissions = "approve"
+	return r.Runner.Start(ctx, t, opts, emit)
+}
+
+func testRunner(t *testing.T, bin, dir string) permsRunner {
 	t.Helper()
 	// A real session file is required to resume; the fake protocol uses this handle.
 	if err := os.WriteFile(filepath.Join(dir, "rid-1"), []byte("session"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	return New(config.Config{PiBin: bin, CodexWorkDir: dir, DataDir: filepath.Join(dir, "data"), MobMCPCommand: "/opt/mobd", MobMCPArgs: []string{"mcp"}, PiPermissions: "approve"})
+	return permsRunner{New(config.Config{PiBin: bin, CodexWorkDir: dir, DataDir: filepath.Join(dir, "data"), MobMCPCommand: "/opt/mobd", MobMCPArgs: []string{"mcp"}})}
 }
 
 func install(t *testing.T, script string) (string, string) {

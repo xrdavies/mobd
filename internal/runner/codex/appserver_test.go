@@ -46,8 +46,19 @@ const asReply = `      printf '%s\n' '{"method":"item/started","params":{"item":
         '{"method":"thread/tokenUsage/updated","params":{"tokenUsage":{"total":{"inputTokens":130,"cachedInputTokens":60,"outputTokens":15,"reasoningOutputTokens":3},"last":{"inputTokens":20,"cachedInputTokens":10,"outputTokens":3,"reasoningOutputTokens":1}}}}' \
         '{"method":"turn/completed","params":{"threadId":"rid-1","turn":{"id":"turn-1","status":"completed","error":null}}}'`
 
-func appRunner(bin, dir string, perms string) *Runner {
-	return New(config.Config{CodexBin: bin, CodexWorkDir: dir, MobMCPCommand: "mob-mcp", CodexMode: "app-server", CodexPermissions: perms})
+// permsRunner runs every turn with the given permissions, as mobd does from settings.json.
+type permsRunner struct {
+	*Runner
+	perms string
+}
+
+func (r permsRunner) Start(ctx context.Context, t *task.Task, opts runner.Options, emit runner.EmitFunc) error {
+	opts.Permissions = r.perms
+	return r.Runner.Start(ctx, t, opts, emit)
+}
+
+func appRunner(bin, dir string, perms string) permsRunner {
+	return permsRunner{New(config.Config{CodexBin: bin, CodexWorkDir: dir, MobMCPCommand: "mob-mcp", CodexMode: "app-server"}), perms}
 }
 
 func TestAppServerContract(t *testing.T) {

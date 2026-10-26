@@ -128,12 +128,12 @@ func TestRealPi(t *testing.T) {
 			if mode == "bypass" {
 				permissions = "bypass"
 			}
-			rn := New(config.Config{PiBin: bin, PiPermissions: permissions, CodexWorkDir: dir, DataDir: filepath.Join(dir, "data"),
+			rn := New(config.Config{PiBin: bin, CodexWorkDir: dir, DataDir: filepath.Join(dir, "data"),
 				MobMCPCommand: exe, MobMCPArgs: []string{"-test.run=^TestMCPProcess$"}})
 			ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 			defer cancel()
 			var cancelledAt time.Time
-			opts := runner.Options{Images: []string{imagePath}, Instructions: "Use the provided desktop tools.",
+			opts := runner.Options{Images: []string{imagePath}, Instructions: "Use the provided desktop tools.", Permissions: permissions,
 				Env:    []string{"PI_CODING_AGENT_DIR=" + agentDir, "PI_OFFLINE=1", "PI_SKIP_VERSION_CHECK=1"},
 				MCPEnv: map[string]string{"MOB_API": api.URL, "MOB_TASK_ID": "t", "MOB_TASK_TOKEN": "test-secret", "MOB_DESKTOP_PROXY": "1", "MOBD_PI_TEST_MCP": "1"},
 				SaveImage: func(mime string, data []byte) (string, error) {
