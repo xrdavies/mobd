@@ -72,7 +72,7 @@ Runners also receive `Options.Instructions` (when to ask, which actions need app
 | `claude` | `--append-system-prompt …` | `MCP_TOOL_TIMEOUT` (ms) | `--permission-mode bypassPermissions`, or `--allowedTools mcp__mob-mcp,…` in approve mode |
 | `pi` | `--append-system-prompt …` | MCP server `timeout` (seconds) | Bundled MOB extension allows desktop/ask tools; `approve` gates other mutations |
 
-For Codex in `exec` mode, approval is a soft gate: the instructions tell it to call `request_approval`, but `codex exec` cannot force it. In app-server mode with `MOBD_CODEX_PERMISSIONS=approve` it is a hard gate (below).
+For Codex, `MOBD_CODEX_PERMISSIONS=approve` needs app-server mode, where it is a hard gate (below); mobd refuses to start with `exec` and `approve`, because `codex exec` cannot ask before running a command. In `exec` mode the only gate is the instruction, sent to every runner, to call `request_approval` before risky actions.
 
 **Claude Code hard gate** (`MOBD_CLAUDE_PERMISSIONS=approve`): Claude runs in `manual` permission mode with `--permission-prompt-tool mcp__mob-mcp__approve_tool`. Any tool call Claude would normally ask about (shell commands, edits outside its working directory, …) becomes an approval card "Allow the agent to use Bash?" with the tool input; deny or no answer blocks it. Desktop tools, ask tools, reading and searching are pre-allowed. Claude's own rules still apply: simple writes inside its working directory are allowed without asking.
 

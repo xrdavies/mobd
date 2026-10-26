@@ -31,7 +31,7 @@ Keeping these channels apart limits accidental remote control and makes auditing
 
 - Do not ship credentials in the client. Office-side runner and MCP hold tool credentials as needed.
 - `ask_user` and `request_approval` are available through `mobd mcp`. The question/answer API uses a per-task token for internal calls; pending approvals are denied when unanswered, expired or cancelled.
-- Codex and Claude permissions default to `bypass`. Set `codexPermissions` / `claudePermissions` to `approve` for the provider gates described in [runners](runners.md). Codex exec has only the instruction-based MCP gate; app-server supports provider approval requests. These controls do not make arbitrary desktop actions a sandbox.
+- Codex and Claude permissions default to `bypass`. Set `codexPermissions` / `claudePermissions` to `approve` for the provider gates described in [runners](runners.md). `approve` for Codex needs app-server mode (the default); mobd refuses `exec` with `approve`, since `codex exec` cannot ask before a command runs. These controls do not make arbitrary desktop actions a sandbox.
 
 ## Mandatory device authentication
 

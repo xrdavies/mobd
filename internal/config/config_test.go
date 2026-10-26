@@ -48,7 +48,7 @@ func TestPrecedence(t *testing.T) {
 }
 
 func TestInvalidConfig(t *testing.T) {
-	for _, data := range []string{`{`, `null`, `{} {}`, `{"typo":true}`, `{"sharedSecret":"legacy"}`, `{"maxRunning":0}`, `{"listen":":0"}`, `{"listen":"bad"}`, `{"streamPort":-1}`, `{"streamPort":65536}`, `{"mcpArgs":"bad"}`, `{"workdir":""}`, `{"questionTimeout":"0s"}`, `{"questionTimeout":123}`, `{"codexMode":"invalid"}`, `{"codexPermissions":"typo"}`, `{"claudePermissions":"typo"}`, `{"runners":[]}`, `{"runners":["unknown"]}`, `{"runners":["codex","codex"]}`, `{"runners":["claude"],"defaultRunner":"codex"}`} {
+	for _, data := range []string{`{`, `null`, `{} {}`, `{"typo":true}`, `{"sharedSecret":"legacy"}`, `{"maxRunning":0}`, `{"listen":":0"}`, `{"listen":"bad"}`, `{"streamPort":-1}`, `{"streamPort":65536}`, `{"mcpArgs":"bad"}`, `{"workdir":""}`, `{"questionTimeout":"0s"}`, `{"questionTimeout":123}`, `{"codexMode":"invalid"}`, `{"codexPermissions":"typo"}`, `{"codexMode":"exec","codexPermissions":"approve"}`, `{"claudePermissions":"typo"}`, `{"runners":[]}`, `{"runners":["unknown"]}`, `{"runners":["codex","codex"]}`, `{"runners":["claude"],"defaultRunner":"codex"}`} {
 		t.Run(data, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "config.json")
 			if err := os.WriteFile(path, []byte(data), 0600); err != nil {
@@ -77,12 +77,12 @@ func TestInvalidConfig(t *testing.T) {
 func TestRunnerConfigurationAndServiceSnapshot(t *testing.T) {
 	cfg := loadTest(t, `{
 		"runners":["claude"], "defaultRunner":"claude",
-		"codexMode":"exec", "codexPermissions":"approve", "codexModels":["file-model"],
+		"codexMode":"exec", "codexPermissions":"bypass", "codexModels":["file-model"],
 		"claudeBin":"/opt/claude", "claudeWorkdir":"/tmp/claude", "claudeModels":["sonnet"],
 		"claudePermissions":"approve", "claudeSettingSources":"all", "questionTimeout":"15m"
 	}`)
 	if cfg.DefaultRunner != "claude" || !reflect.DeepEqual(cfg.Runners, []string{"claude"}) ||
-		cfg.CodexMode != "exec" || cfg.CodexPermissions != "approve" ||
+		cfg.CodexMode != "exec" || cfg.CodexPermissions != "bypass" ||
 		cfg.ClaudeBin != "/opt/claude" || cfg.ClaudeWorkDir != "/tmp/claude" ||
 		cfg.ClaudePermissions != "approve" || cfg.ClaudeSettingSources != "all" ||
 		!reflect.DeepEqual(cfg.ClaudeModels, []string{"sonnet"}) || cfg.QuestionTimeout != 15*time.Minute {
@@ -97,7 +97,7 @@ func TestRunnerConfigurationAndServiceSnapshot(t *testing.T) {
 	}
 	for key, value := range map[string]string{
 		"MOBD_RUNNERS": "codex,claude", "MOBD_DEFAULT_RUNNER": "codex",
-		"MOBD_CODEX_MODE": "app-server", "MOBD_CODEX_PERMISSIONS": "bypass",
+		"MOBD_CODEX_MODE": "app-server", "MOBD_CODEX_PERMISSIONS": "approve",
 		"MOBD_MODELS": "legacy-model", "MOBD_CODEX_MODELS": "new-model",
 		"MOBD_CLAUDE_BIN": "/other/claude", "MOBD_CLAUDE_WORKDIR": "/tmp/other",
 		"MOBD_CLAUDE_MODELS": "opus,haiku", "MOBD_CLAUDE_PERMISSIONS": "bypass",
@@ -107,7 +107,7 @@ func TestRunnerConfigurationAndServiceSnapshot(t *testing.T) {
 	}
 	got := loadTest(t, string(data))
 	if got.DefaultRunner != "codex" || len(got.Runners) != 2 || got.CodexMode != "app-server" ||
-		got.CodexPermissions != "bypass" || !reflect.DeepEqual(got.CodexModels, []string{"new-model"}) ||
+		got.CodexPermissions != "approve" || !reflect.DeepEqual(got.CodexModels, []string{"new-model"}) ||
 		got.ClaudeBin != "/other/claude" || got.ClaudeWorkDir != "/tmp/other" ||
 		!reflect.DeepEqual(got.ClaudeModels, []string{"opus", "haiku"}) ||
 		got.ClaudePermissions != "bypass" || got.ClaudeSettingSources != "project" || got.QuestionTimeout != 2*time.Minute {

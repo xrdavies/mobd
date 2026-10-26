@@ -289,6 +289,10 @@ func Load(args []string) (Config, string, error) {
 			return cfg, path, fmt.Errorf("%s must be bypass or approve", name)
 		}
 	}
+	// codex exec never asks before a command or edit; only app-server can enforce approve.
+	if cfg.CodexMode == "exec" && cfg.CodexPermissions == "approve" {
+		return cfg, path, errors.New("codexPermissions approve needs codexMode app-server (codex exec cannot ask before running commands)")
+	}
 	enabled := make(map[string]bool)
 	for _, name := range cfg.Runners {
 		if name != "codex" && name != "claude" && name != "pi" {
