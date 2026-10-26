@@ -43,7 +43,7 @@ var _ runner.Runner = (*Runner)(nil)
 
 func (r *Runner) Info() runner.Info {
 	model, effort := defaults()
-	return runner.Info{Name: Name, Label: "Codex", Efforts: Efforts, DefaultModel: model, DefaultEffort: effort,
+	return runner.Info{Name: Name, Label: "Codex", Efforts: Efforts, Install: "npm install -g @openai/codex", DefaultModel: model, DefaultEffort: effort,
 		Images: true, Resume: true, Steer: r.appServer()}
 }
 

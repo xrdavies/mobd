@@ -210,7 +210,7 @@ Example response (abridged):
 }
 ```
 
-`ok` is true when mobd is serving. `checks` explain readiness without blocking anything and are cached for 10 s. Each check is `{ok, unknown?, detail?}`; permission checks come from `CGPreflightPostEventAccess` / `CGPreflightScreenCaptureAccess` in mobd and are `unknown` off macOS. `runners` lists each enabled runner's capabilities and readiness ([runners.md](runners.md)), with its models, defaults and permissions from settings.json; a default that settings.json leaves empty is the agent's own. `display` reports a locked console or sleeping display (snapshots need it awake; the live view wakes it); `streamSessions` counts open live desktop sessions.
+`ok` is true when mobd is serving. `checks` explain readiness without blocking anything and are cached for 10 s. Each check is `{ok, unknown?, detail?}`; permission checks come from `CGPreflightPostEventAccess` / `CGPreflightScreenCaptureAccess` in mobd and are `unknown` off macOS. `agents` reports every agent mobd supports, enabled or not: `{name, label, state, enabled, detail, install?}` with `state` `ready` (enabled and working), `disabled` (installed, not in `config.json`'s `runners`), `missing` (not installed; `install` is the command) or `error` (installed but failing, e.g. an unsupported version). mobd only checks that each agent is installed in a supported version; the agent's own login and models are not checked, and a mistake there shows as the agent's error on the first turn. Agents are checked in parallel, each for up to 12 s, and not with the request's deadline. `runners` lists each enabled runner's capabilities and readiness ([runners.md](runners.md)), with its models, defaults and permissions from settings.json; a default that settings.json leaves empty is the agent's own. `display` reports a locked console or sleeping display (snapshots need it awake; the live view wakes it); `streamSessions` counts open live desktop sessions.
 
 ### Settings
 
@@ -237,7 +237,7 @@ default model of their own config, if any. An empty `defaultModel`/`defaultEffor
 the agent uses its own default. An unreadable file is moved aside (`settings.json.bad-…`) and a
 fresh one written.
 
-`GET /settings` answers `{settings, agents}`: `settings` is the file, `agents` gives each enabled
+`GET /settings` answers `{settings, agents, installed}` (`installed` is the same list as `/health`'s `agents`): `settings` is the file, `agents` gives each enabled
 agent's `label`, `efforts`, and its own defaults (`agentDefaultModel`, `agentDefaultEffort`) for
 labelling an empty default. Edit `settings` and `PUT` it back whole with the same `rev`. A stale
 `rev` (another device saved first) gets **409** `settings_changed`: reload and edit again. Every

@@ -167,9 +167,10 @@ func Missing(name, bin, env string, err error, emit runner.EmitFunc) error {
 func Version(ctx context.Context, name, bin, env string) runner.Status {
 	path, err := exec.LookPath(bin)
 	if err != nil {
-		return runner.Status{Detail: fmt.Sprintf("%q not found; install %s or set %s", bin, name, env)}
+		return runner.Status{Missing: true, Detail: fmt.Sprintf("%q not found; install %s or set %s", bin, name, env)}
 	}
-	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	// The first run of a new binary can be slow (macOS scans it); agents are checked in parallel.
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	out, err := exec.CommandContext(ctx, path, "--version").Output()
 	if err != nil {

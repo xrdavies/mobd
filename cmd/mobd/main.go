@@ -275,6 +275,7 @@ func serve(cfg config.Config) error {
 		defer desktops.Shutdown()
 	}
 	srv := api.New(cfg, store, auth, desktops, runners...)
+	srv.SetSupported(available[codex.Name], available[claude.Name], available[pi.Name])
 
 	httpSrv := &http.Server{
 		Addr:              cfg.ListenAddr,

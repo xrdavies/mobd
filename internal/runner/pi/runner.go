@@ -44,13 +44,16 @@ var _ runner.Runner = (*Runner)(nil)
 var _ runner.Steerer = (*Runner)(nil)
 
 func (r *Runner) Info() runner.Info {
-	return runner.Info{Name: Name, Label: "Pi", Efforts: efforts, Images: true, Resume: true, Cost: true, Steer: true}
+	return runner.Info{Name: Name, Label: "Pi", Efforts: efforts, Install: "npm install -g --ignore-scripts @earendil-works/pi-coding-agent@1.4.0", Images: true, Resume: true, Cost: true, Steer: true}
 }
 
 func (r *Runner) Check(ctx context.Context) runner.Status {
 	// The first run of a new binary can be slow (macOS scans it), so allow more than a normal start.
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
+	if _, err := exec.LookPath(r.cfg.PiBin); err != nil {
+		return runner.Status{Missing: true, Detail: fmt.Sprintf("%q not found; install Pi or set MOBD_PI_BIN", r.cfg.PiBin)}
+	}
 	out, err := exec.CommandContext(ctx, r.cfg.PiBin, "--version").Output()
 	if err != nil {
 		return runner.Status{Detail: fmt.Sprintf("Pi --version failed: %v; install Pi or set MOBD_PI_BIN", err)}

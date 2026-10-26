@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -43,10 +44,12 @@ type settingsView struct {
 	// Settings is settings.json: edit it and PUT it back whole, with the same rev.
 	Settings settings.Settings    `json:"settings"`
 	Agents   map[string]agentInfo `json:"agents"`
+	// Installed is every supported agent's installation state, enabled or not.
+	Installed []agentStatus `json:"installed"`
 }
 
 func (s *Server) settingsView() settingsView {
-	v := settingsView{Settings: s.settings.Get(), Agents: map[string]agentInfo{}}
+	v := settingsView{Settings: s.settings.Get(), Agents: map[string]agentInfo{}, Installed: s.agentStatuses(context.Background())}
 	for _, rn := range s.runners.All() {
 		info := rn.Info()
 		v.Agents[info.Name] = agentInfo{Label: info.Label, Efforts: info.Efforts, AgentDefaultModel: info.DefaultModel, AgentDefaultEffort: info.DefaultEffort}
@@ -225,3 +228,6 @@ func (s *Server) checkSessionSettings(id string, patch task.SessionPatch) (strin
 
 // DefaultAgent is the agent new conversations use (settings.json).
 func (s *Server) DefaultAgent() string { return s.runners.Default() }
+
+// SetSupported names every agent mobd supports (enabled or not), for the installation check.
+func (s *Server) SetSupported(all ...runner.Runner) { s.supported = all }

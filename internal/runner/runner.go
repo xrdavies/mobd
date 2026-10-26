@@ -72,6 +72,8 @@ type Info struct {
 	// the API fills it in.
 	Models  []string `json:"models"`
 	Efforts []string `json:"efforts"`
+	// Install is the command that installs the agent, shown when it is missing.
+	Install string `json:"install,omitempty"`
 	// DefaultModel and DefaultEffort are what the agent uses when a turn names none, read from
 	// the agent's own settings; empty when they are not set there (the agent's built-in default).
 	DefaultModel  string `json:"defaultModel,omitempty"`
@@ -90,6 +92,8 @@ type Info struct {
 type Status struct {
 	OK     bool   `json:"ok"`
 	Detail string `json:"detail,omitempty"`
+	// Missing means the agent's program is not installed (not found on PATH).
+	Missing bool `json:"-"`
 }
 
 // Runner executes one turn and blocks until it finishes or ctx is cancelled.

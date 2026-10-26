@@ -30,6 +30,8 @@ type Server struct {
 	runners *runner.Registry
 	// settings is settings.json: the agents' and conversations' runtime settings.
 	settings *settings.Store
+	// supported are all the agents mobd knows, enabled or not, for the installation check.
+	supported []runner.Runner
 
 	hub       *hub
 	artifacts *artifact.Store

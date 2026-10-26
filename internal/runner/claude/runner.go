@@ -41,7 +41,7 @@ var _ runner.Runner = (*Runner)(nil)
 
 func (r *Runner) Info() runner.Info {
 	model, effort := r.defaults()
-	return runner.Info{Name: Name, Label: "Claude Code", Efforts: Efforts, DefaultModel: model, DefaultEffort: effort,
+	return runner.Info{Name: Name, Label: "Claude Code", Efforts: Efforts, Install: "curl -fsSL https://claude.ai/install.sh | bash", DefaultModel: model, DefaultEffort: effort,
 		Images: true, Resume: true, Cost: true}
 }
 

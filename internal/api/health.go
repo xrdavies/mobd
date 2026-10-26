@@ -44,7 +44,25 @@ type healthCache struct {
 	mu     sync.Mutex
 	at     time.Time
 	checks map[string]check
+	agents []agentStatus
 }
+
+// agentStatus is whether one supported agent is set up on this machine, enabled or not.
+type agentStatus struct {
+	Name  string `json:"name"`
+	Label string `json:"label"`
+	// State is ready (enabled and working), disabled (installed, not in config.json's runners),
+	// missing (not installed) or error (installed but failing, e.g. an unsupported version).
+	State   string `json:"state"`
+	Enabled bool   `json:"enabled"`
+	Detail  string `json:"detail,omitempty"`
+	// Install installs a missing agent.
+	Install string `json:"install,omitempty"`
+}
+
+// agentCheckTimeout bounds one agent's check; they run in parallel, so one slow agent (Pi's
+// first run can take seconds) neither delays nor fails the others.
+const agentCheckTimeout = 12 * time.Second
 
 const healthTTL = 10 * time.Second
 
@@ -81,6 +99,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		"runner": s.runners.Default(), "runners": runners, "mobMcp": s.cfg.MobMCPCommand,
 		"maxRunning": max(s.cfg.MaxRunning, 1), "features": s.features(),
 		"checks":         checks,
+		"agents":         s.agentStatuses(r.Context()),
 		"streamSessions": s.streams.Count(),
 	}
 	if s.desktops.PerSession() {
@@ -101,12 +120,16 @@ func (s *Server) readiness(ctx context.Context) map[string]check {
 	if s.health.checks != nil && time.Since(s.health.at) < healthTTL {
 		return s.health.checks
 	}
-	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	// Not the request's context: a client that disconnects must not cache a failed check.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
 	defer cancel()
 	checks := map[string]check{"actuation": binaryCheck(s.cfg.MobMCPCommand)}
-	for _, rn := range s.runners.All() {
-		st := rn.Check(ctx)
-		checks[rn.Info().Name] = check{OK: st.OK, Detail: st.Detail}
+	agents := s.checkAgents(context.WithoutCancel(ctx))
+	for _, a := range agents {
+		// Only enabled agents are readiness checks; the apps warn about those.
+		if a.Enabled {
+			checks[a.Name] = check{OK: a.State == "ready", Detail: a.Detail}
+		}
 	}
 	if s.cfg.UsesBuiltinMCP() {
 		checks["actuation"] = check{OK: true, Detail: "built-in (mobd mcp)"}
@@ -125,8 +148,50 @@ func (s *Server) readiness(ctx context.Context) map[string]check {
 			checks[name] = check{OK: v.OK, Unknown: v.Unknown, Detail: v.Detail}
 		}
 	}
-	s.health.at, s.health.checks = time.Now(), checks
+	s.health.at, s.health.checks, s.health.agents = time.Now(), checks, agents
 	return checks
+}
+
+// agentStatuses is every supported agent's installation state (cached like the checks).
+func (s *Server) agentStatuses(ctx context.Context) []agentStatus {
+	s.readiness(ctx)
+	s.health.mu.Lock()
+	defer s.health.mu.Unlock()
+	return s.health.agents
+}
+
+// checkAgents checks every supported agent at once, each with its own time limit.
+func (s *Server) checkAgents(ctx context.Context) []agentStatus {
+	supported := s.supported
+	if supported == nil {
+		supported = s.runners.All()
+	}
+	out := make([]agentStatus, len(supported))
+	var wg sync.WaitGroup
+	for i, rn := range supported {
+		wg.Go(func() {
+			ctx, cancel := context.WithTimeout(ctx, agentCheckTimeout)
+			defer cancel()
+			info := rn.Info()
+			_, enabled := s.runners.Get(info.Name)
+			st := rn.Check(ctx)
+			a := agentStatus{Name: info.Name, Label: info.Label, Enabled: enabled, Detail: st.Detail}
+			switch {
+			case st.Missing:
+				a.State, a.Install = "missing", info.Install
+			case !st.OK:
+				a.State = "error"
+			case !enabled:
+				a.State = "disabled"
+				a.Detail = st.Detail + fmt.Sprintf(`; add %q to "runners" in config.json and restart mobd`, info.Name)
+			default:
+				a.State = "ready"
+			}
+			out[i] = a
+		})
+	}
+	wg.Wait()
+	return out
 }
 
 // permissionChecks reports macOS TCC grants as seen by mobd; `mobd mcp`
