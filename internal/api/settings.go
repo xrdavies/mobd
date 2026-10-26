@@ -37,6 +37,9 @@ type effectiveAgent struct {
 	Permissions       string   `json:"permissions"`
 	PermissionsFrom   string   `json:"permissionsFrom"`
 	Efforts           []string `json:"efforts"`
+	// Fallback is what applies without the app settings (models, defaults, permissions), so an
+	// app can say what clearing a value returns to.
+	Fallback *effectiveAgent `json:"fallback,omitempty"`
 }
 
 // configuredPermissions is an agent's permissions from config.json and the environment.
@@ -90,17 +93,23 @@ type settingsView struct {
 	Settings         settings.Settings         `json:"settings"`
 	DefaultAgent     string                    `json:"defaultAgent"`
 	DefaultAgentFrom string                    `json:"defaultAgentFrom"`
+	// FallbackDefaultAgent is the default agent without the app setting (mobd's config).
+	FallbackDefaultAgent string `json:"fallbackDefaultAgent"`
 	Agents           map[string]effectiveAgent `json:"agents"`
 }
 
 func (s *Server) settingsView() settingsView {
 	set := s.settings.Get()
-	v := settingsView{Settings: set, DefaultAgent: s.runners.Default(), DefaultAgentFrom: fromConfig, Agents: map[string]effectiveAgent{}}
+	v := settingsView{Settings: set, DefaultAgent: s.runners.Default(), DefaultAgentFrom: fromConfig,
+		FallbackDefaultAgent: s.configuredDefault, Agents: map[string]effectiveAgent{}}
 	if set.DefaultAgent != "" {
 		v.DefaultAgentFrom = fromApp
 	}
 	for _, rn := range s.runners.All() {
-		v.Agents[rn.Info().Name] = s.effective(rn.Info(), set)
+		e := s.effective(rn.Info(), set)
+		fallback := s.effective(rn.Info(), settings.Settings{})
+		e.Fallback = &fallback
+		v.Agents[rn.Info().Name] = e
 	}
 	return v
 }

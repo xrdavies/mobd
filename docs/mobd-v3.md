@@ -244,7 +244,8 @@ device's name and sent to the other devices as a `settings` event.
 
 `settings` is what the apps set: edit it and `PUT` it back whole, with the same `rev`. `agents`
 is what each agent uses now; `…From` is `app`, `config`, `agent` (its own config) or `builtin`
-(nothing set). An empty model list means "not set". Not editable here: listen address, ports,
+(nothing set). Each agent's `fallback` (and `fallbackDefaultAgent`) is what applies without
+the app settings, so an app can say what clearing a value returns to. An empty model list means "not set". Not editable here: listen address, ports,
 agent paths and work directories, the MCP command, pairing and CORS. Codex `approve` needs
 `codexMode` `app-server`.
 

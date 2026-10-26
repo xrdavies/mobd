@@ -84,7 +84,8 @@ func TestSettingsAreValidatedSavedLoggedAndShownOnHealth(t *testing.T) {
 	v = getSettings(t, s)
 	if v.Settings.Rev != 1 || v.DefaultAgent != "claude" || v.DefaultAgentFrom != fromApp || s.runners.Default() != "claude" ||
 		v.Agents["codex"].DefaultModel != "gpt-6-astra" || v.Agents["codex"].ModelsFrom != fromApp ||
-		v.Agents["claude"].Permissions != "approve" || v.Agents["claude"].Models[0] != "opus" {
+		v.Agents["claude"].Permissions != "approve" || v.Agents["claude"].Models[0] != "opus" ||
+		v.Agents["claude"].Fallback.Permissions != "bypass" || v.FallbackDefaultAgent != "codex" || len(v.Agents["codex"].Fallback.Models) != 0 {
 		t.Fatalf("after PUT: %+v", v)
 	}
 	if !strings.Contains(logs.String(), `settings: "test device" set claude permissions "" → "approve"`) ||
