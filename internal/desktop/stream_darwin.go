@@ -22,7 +22,7 @@ type macStream struct {
 	native unsafe.Pointer
 	queue  *UnitQueue
 
-	mu     sync.Mutex // guards closed and err against the native callbacks
+	mu     sync.Mutex // guards native, closed and err against the native callbacks and Close
 	closed bool
 	err    error
 }
@@ -42,8 +42,13 @@ func (macOS) StartStream(ctx context.Context, opts StreamOptions) (Stream, error
 		return nil, context.DeadlineExceeded
 	}
 	s := &macStream{id: nextStream.Add(1)}
-	// The keyframe request is asynchronous; safe from the encoder's callback.
-	s.queue = NewUnitQueue(func() { C.mob_stream_keyframe(s.native) })
+	// The keyframe request is asynchronous; safe from the encoder's callback. The queue asks
+	// from deliver, which holds mu and has checked closed, so the stream is not freed meanwhile.
+	s.queue = NewUnitQueue(func() {
+		if s.native != nil {
+			C.mob_stream_keyframe(s.native)
+		}
+	})
 	streams.Store(s.id, s)
 	cursor := 0
 	if opts.ShowCursor {
@@ -57,7 +62,9 @@ func (macOS) StartStream(ctx context.Context, opts StreamOptions) (Stream, error
 		streams.Delete(s.id)
 		return nil, streamError(rc, C.GoString((*C.char)(unsafe.Pointer(&msg[0]))))
 	}
+	s.mu.Lock()
 	s.native = native
+	s.mu.Unlock()
 	return s, nil
 }
 
@@ -76,26 +83,31 @@ func streamError(rc C.int, detail string) error {
 func (s *macStream) Units() <-chan AccessUnit { return s.queue.Units() }
 
 func (s *macStream) SetBitrate(kbps int) {
-	if s.live() {
-		C.mob_stream_bitrate(s.native, C.int(max(kbps, 50)))
-	}
+	s.withNative(func(n unsafe.Pointer) { C.mob_stream_bitrate(n, C.int(max(kbps, 50))) })
 }
 
 func (s *macStream) SetSize(width, height int) {
-	if s.live() && width >= 16 && height >= 16 {
-		C.mob_stream_size(s.native, C.int(width&^1), C.int(height&^1))
+	if width >= 16 && height >= 16 {
+		s.withNative(func(n unsafe.Pointer) { C.mob_stream_size(n, C.int(width&^1), C.int(height&^1)) })
 	}
 }
 
 func (s *macStream) SetFrameRate(fps int) {
-	if s.live() {
-		C.mob_stream_fps(s.native, C.int(min(max(fps, 1), 60)))
-	}
+	s.withNative(func(n unsafe.Pointer) { C.mob_stream_fps(n, C.int(min(max(fps, 1), 60))) })
 }
 
 func (s *macStream) Keyframe() {
-	if s.live() {
-		C.mob_stream_keyframe(s.native)
+	s.withNative(func(n unsafe.Pointer) { C.mob_stream_keyframe(n) })
+}
+
+// withNative calls the native stream unless it is closed, holding mu throughout: Close frees the
+// native stream after setting closed, so it cannot be freed while a call is on its way. The
+// calls only queue work on the stream's queue, so holding mu here never waits for the encoder.
+func (s *macStream) withNative(call func(unsafe.Pointer)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.closed && s.native != nil {
+		call(s.native)
 	}
 }
 
@@ -103,12 +115,6 @@ func (s *macStream) Err() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.err
-}
-
-func (s *macStream) live() bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return !s.closed
 }
 
 // Close stops capture and the encoder; Units is closed once it returns.

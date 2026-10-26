@@ -3,6 +3,7 @@ package desktop
 import (
 	"context"
 	"slices"
+	"sync"
 	"testing"
 	"time"
 )
@@ -110,5 +111,41 @@ func TestMacOSStreamEncodesAndAdjusts(t *testing.T) {
 		case <-closed:
 			t.Fatal("Units not closed after Close")
 		}
+	}
+}
+
+// Adjustments racing Close must never reach the freed native stream (a crash, not an error).
+func TestMacOSStreamAdjustDuringClose(t *testing.T) {
+	if p, _ := CurrentPermissions(); !p.ScreenRecording {
+		t.Skip("no Screen Recording permission")
+	}
+	if st, _ := State(); st.Locked || st.Asleep {
+		t.Skipf("screen unavailable: %+v", st)
+	}
+	for range 5 {
+		s, err := StartStream(context.Background(), StreamOptions{Width: 640, Height: 360, FPS: 30, Kbps: 800})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var wg sync.WaitGroup
+		for i := range 4 {
+			wg.Go(func() {
+				for j := range 200 {
+					switch (i + j) % 4 {
+					case 0:
+						s.SetBitrate(500 + j)
+					case 1:
+						s.SetSize(640-2*(j%8), 360)
+					case 2:
+						s.SetFrameRate(10 + j%20)
+					case 3:
+						s.Keyframe()
+					}
+				}
+			})
+		}
+		s.Close()
+		wg.Wait()
+		s.Keyframe() // after Close: a no-op
 	}
 }
