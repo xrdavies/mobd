@@ -14,7 +14,7 @@ for the live-view connection.
   prefer **Tailscale Serve** with restricted tailnet access, or use a trusted **SSH**
   tunnel. A public HTTPS/WSS proxy also needs authentication on every route; TLS alone
   is not access control.
-- Phone access without a VPN uses Tailscale Funnel or a self-hosted HTTPS gateway, with
+- Phone access without a VPN uses Tailscale Funnel, Cloudflare Tunnel or a self-hosted HTTPS gateway, with
   paired credentials on every route. Funnel provides transport, not application login.
   A gateway that terminates TLS can read proxied data; there is no end-to-end encryption
   from client to mobd in that topology.

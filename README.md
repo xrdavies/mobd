@@ -152,7 +152,7 @@ the link: HTTP does not encrypt invitations, credentials or data.
 For separate home and office networks, use **Tailscale + Tailscale Serve** when both
 devices can install Tailscale: a private HTTPS URL carries API requests, SSE and live
 desktop signaling, and the video flows directly over the tailnet. Without Tailscale on
-the client, use Tailscale Funnel, a self-hosted HTTPS gateway or an SSH tunnel; there
+the client, use Tailscale Funnel, Cloudflare Tunnel, a self-hosted HTTPS gateway or an SSH tunnel; there
 the live desktop falls back to the `/stream/ws` WebSocket. The
 [connection guide](docs/connection-setup.md) covers each option step by step.
 A managed relay is planned, not implemented.

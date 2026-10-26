@@ -9,6 +9,7 @@
 | [内网直连](#内网直连) | 同一局域网，或已有 VPN 能访问办公室 IP | 不需要 | `http://192.168.1.20:8080` | WebRTC |
 | [Tailscale Serve](#tailscale-serve) | 两端都能安装 Tailscale，入口仅在 tailnet 内可见 | 办公室 Mac、客户端 | `https://office-mac.example-tailnet.ts.net` | WebRTC |
 | [Tailscale Funnel](#tailscale-funnel) | 从外网访问，不维护公网服务器 | 办公室 Mac | `https://office-mac.example-tailnet.ts.net` | WebSocket 回退 |
+| [Cloudflare Tunnel](#cloudflare-tunnel) | 从外网访问，手机不装 VPN，使用自己的域名 | 不需要（办公室运行 cloudflared） | `https://mob.example.com` | WebSocket 回退 |
 | [自建中继](#自建中继) | 使用自己的公网服务器和域名 | 办公室 Mac、公网服务器 | `https://office.example.com` | WebSocket 回退 |
 | [SSH 跳板机](#ssh-跳板机) | 无法安装 VPN，但两端能 SSH 到同一台可信服务器 | 不需要 | `http://127.0.0.1:18080` | WebSocket 回退 |
 
@@ -216,6 +217,82 @@ Funnel 的 relay 由 Tailscale 运营，TLS 在办公室终止，relay 不解密
 Funnel 有不可配置的带宽限制，只通 TCP：实时桌面走 WebSocket 回退，从 540p 起步并随带宽调整，首帧需数秒，实测常降到 360p。
 Funnel 的启用权限只控制谁能发布服务，不替代 mobd 配对认证。
 
+## Cloudflare Tunnel
+
+```mermaid
+flowchart LR
+    C[手机或桌面客户端] -->|公网 HTTPS / WSS| E[Cloudflare 边缘节点]
+    E -->|出站隧道| D[办公室 cloudflared]
+    D -->|本机 HTTP / WS| M[mobd 设备认证]
+```
+
+客户端不安装任何 VPN，使用自己域名下的 HTTPS 地址；办公室只运行 `cloudflared`，
+它主动向 Cloudflare 建立出站连接，办公室无需公网 IP 或入站端口，也不需要 Tailscale。
+mobd 无需修改：API、SSE（每 15 秒心跳，低于 Cloudflare 100 秒空闲超时）和 `/stream/ws`
+都走同一个 HTTPS 入口。隧道不转发 UDP，实时桌面回退到 WebSocket。
+
+前提：一个 Cloudflare 账号，以及一个 DNS 托管在 Cloudflare 的域名（下文用 `mob.example.com`）。
+
+### 1. 创建隧道和公网主机名
+
+1. 打开 [Cloudflare 控制台](https://dash.cloudflare.com/) → **Zero Trust** → **Networks** → **Tunnels**，
+   新建一个 **Cloudflared** 类型的隧道，命名如 `office-mac`。
+2. 环境选 **macOS**，复制页面给出的安装命令（含隧道 token）。
+3. 添加 **Public hostname**：子域名 `mob`、域名 `example.com`，服务类型 **HTTP**，URL `127.0.0.1:8080`。
+   不要选 HTTPS：mobd 本身是 HTTP，TLS 由 Cloudflare 提供。
+
+控制台菜单名称可能随 Cloudflare 更新而变化，以 [Cloudflare Tunnel 文档](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/) 为准。
+
+### 2. 办公室安装并运行 cloudflared
+
+```bash
+brew install cloudflared
+sudo cloudflared service install <控制台给出的 token>
+```
+
+`service install` 注册为系统服务，开机后自动连接；它不会启动 mobd（见[共用准备](#共用准备)）。
+token 等同于隧道的凭据，不要提交到仓库或发给他人；泄露时在控制台重新生成。
+控制台中隧道状态应变为 **Healthy**。
+
+只通过隧道访问时，可将 mobd 改为只监听本机，避免局域网明文端口：
+
+```json
+"listen": "127.0.0.1:8080"
+```
+
+修改后在无任务运行时 `mobd restart`。仍需局域网配对时保留 `0.0.0.0:8080`。
+
+### 3. 验证和配对
+
+在家庭网络或手机蜂窝网络下：
+
+```bash
+curl -i https://mob.example.com/health
+```
+
+预期 **401**（未带凭据），说明经隧道到达 mobd。返回 Cloudflare 的 502/1033 错误页时，
+见[常见问题](#常见问题)。生成邀请，再完成[配对与验收](#配对与验收)：
+
+```bash
+mobd link --url https://mob.example.com
+mobd link --close   # 配对完成后关闭未使用的邀请
+```
+
+### 4. 安全注意
+
+- **Cloudflare 可读取流量。** TLS 在 Cloudflare 边缘终止，配对邀请、设备凭据、对话和实时画面
+  都经其解密后转发。不能接受时改用 [Tailscale Serve](#tailscale-serve)。
+- **入口对整个互联网可见。** 除 `/pair` 和每轮任务的 `/internal/tasks/...` 外，所有接口都要求已配对设备的凭据；
+  邀请为 256 位随机密钥、一次性、10 分钟有效，且只能在办公室本机用 `mobd link` 生成。
+  mobd 不记录失败的认证请求，可在 Cloudflare **Security → WAF → Rate limiting rules** 为 `/pair` 加限速规则。
+- **使用最新 mobd。** 每轮任务的令牌通过本机私有文件传给 `mobd mcp`，不出现在命令行或日志中；
+  旧版本中已配对的客户端能看到该令牌。
+- 设备丢失时 `mobd clients revoke CLIENT_ID`，立即断开。
+- 暂不建议在入口前加 **Cloudflare Access**：客户端目前无法完成 Access 登录或携带服务令牌，会被拦截。
+
+关闭入口：在控制台删除该 Public hostname 或停止隧道；`sudo cloudflared service uninstall` 移除办公室服务。
+这些操作不撤销 mobd 凭据。
+
 ## 自建中继
 
 使用一台 Ubuntu/Debian 公网服务器运行 Caddy，办公室运行私有 Tailscale Serve。
@@ -355,6 +432,7 @@ SSH 不会自动重连，mobd 也不管理这些进程；长期使用需用服�
 | 办公室局域网直连 | `http://192.168.1.20:8080` |
 | Tailscale 节点直连（mobd 监听可达接口） | `http://100.101.102.104:8080` 或 `http://office-mac:8080` |
 | Tailscale Serve / Funnel | `https://office-mac.example-tailnet.ts.net` |
+| Cloudflare Tunnel | `https://mob.example.com` |
 | 自建中继 | `https://office.example.com` |
 | SSH 转发 | `http://127.0.0.1:18080` |
 
@@ -436,6 +514,7 @@ unset MOBD_TEST_DIR MOBD_URL
 | 内网超时 | IP 是否变化、监听是否仍为 loopback、访客网络/AP 隔离、防火墙 |
 | tailnet 内超时 | 两端 `tailscale status`、办公室在线状态、DNS、TCP 443 访问规则及公司出站限制 |
 | Funnel 域名无法访问 | `funnel status`、办公室在线状态、首次 DNS 传播、Funnel/HTTPS 权限 |
+| Cloudflare 502 / 1033 | 1033：`cloudflared` 未运行或未连上（控制台隧道状态、`sudo launchctl list \| grep cloudflared`）；502：隧道正常但 mobd 未运行，或 Public hostname 的 URL 不是 `127.0.0.1:8080` / 写成了 HTTPS |
 | HTTP 502 | Serve 的本机目标、mobd 是否运行；自建中继先在网关 curl 办公室 Serve 域名 |
 | 证书错误 | 使用实际入口域名，检查 DNS、系统时间、证书签发；不要关闭证书校验 |
 | 配对后仍为 401 | 是否使用兑换后的 token、请求是否带 Authorization、设备是否已被撤销 |
