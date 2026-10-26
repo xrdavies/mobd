@@ -14,9 +14,14 @@ const gzipMin = 1024
 
 var gzipWriters = sync.Pool{New: func() any { w, _ := gzip.NewWriterLevel(nil, gzip.BestSpeed); return w }}
 
-// withGzip compresses JSON answers for clients that accept gzip: a conversation is mostly text
-// and shrinks about four times. Event streams, images, video and WebSocket upgrades pass through
-// untouched.
+// streamWriters compress event streams. A reply streams as its whole text so far on each update,
+// so most of an event repeats the previous one; level 5 finds those repeats far better than
+// BestSpeed (a 10 KB reply in 150 updates: about 55x smaller instead of 25x) for similar CPU.
+var streamWriters = sync.Pool{New: func() any { w, _ := gzip.NewWriterLevel(nil, 5); return w }}
+
+// withGzip compresses JSON answers and event streams for clients that accept gzip: a
+// conversation is mostly text and shrinks about four times, and a stream far more. Images, video
+// and WebSocket upgrades pass through untouched.
 func withGzip(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") || r.Header.Get("Upgrade") != "" {
@@ -29,11 +34,13 @@ func withGzip(next http.Handler) http.Handler {
 	})
 }
 
-// gzipWriter decides at WriteHeader: JSON is compressed, anything else is written as it is.
+// gzipWriter decides at WriteHeader: JSON and event streams are compressed, anything else is
+// written as it is.
 type gzipWriter struct {
 	http.ResponseWriter
 	decided bool
 	zw      *gzip.Writer
+	pool    *sync.Pool // where zw goes back
 	code    int
 	buf     []byte // the start of a JSON body, until it is large enough to compress
 }
@@ -44,13 +51,34 @@ func (g *gzipWriter) WriteHeader(code int) {
 	}
 	g.decided, g.code = true, code
 	h := g.Header()
-	if !strings.HasPrefix(h.Get("Content-Type"), "application/json") || h.Get("Content-Encoding") != "" ||
-		code < 200 || code == http.StatusNoContent || code == http.StatusNotModified {
+	if h.Get("Content-Encoding") != "" || code < 200 || code == http.StatusNoContent || code == http.StatusNotModified {
 		g.ResponseWriter.WriteHeader(code)
 		g.code = 0
 		return
 	}
-	g.buf = []byte{}
+	switch ct := h.Get("Content-Type"); {
+	case strings.HasPrefix(ct, "text/event-stream"):
+		// Compressed from the first byte; each Flush ends the events written so far, so nothing
+		// waits for more data.
+		g.start(&streamWriters)
+	case strings.HasPrefix(ct, "application/json"):
+		g.buf = []byte{}
+	default:
+		g.ResponseWriter.WriteHeader(code)
+		g.code = 0
+	}
+}
+
+// start sends the headers of a compressed body and opens its writer.
+func (g *gzipWriter) start(pool *sync.Pool) {
+	h := g.Header()
+	h.Set("Content-Encoding", "gzip")
+	h.Add("Vary", "Accept-Encoding")
+	h.Del("Content-Length")
+	g.ResponseWriter.WriteHeader(g.code)
+	g.pool = pool
+	g.zw = pool.Get().(*gzip.Writer)
+	g.zw.Reset(g.ResponseWriter)
 }
 
 func (g *gzipWriter) Write(p []byte) (int, error) {
@@ -70,13 +98,7 @@ func (g *gzipWriter) Write(p []byte) (int, error) {
 	if len(g.buf) < gzipMin {
 		return len(p), nil
 	}
-	h := g.Header()
-	h.Set("Content-Encoding", "gzip")
-	h.Add("Vary", "Accept-Encoding")
-	h.Del("Content-Length")
-	g.ResponseWriter.WriteHeader(g.code)
-	g.zw = gzipWriters.Get().(*gzip.Writer)
-	g.zw.Reset(g.ResponseWriter)
+	g.start(&gzipWriters)
 	if _, err := g.zw.Write(g.buf); err != nil {
 		return 0, err
 	}
@@ -89,7 +111,7 @@ func (g *gzipWriter) close() {
 	switch {
 	case g.zw != nil:
 		_ = g.zw.Close()
-		gzipWriters.Put(g.zw)
+		g.pool.Put(g.zw)
 		g.zw = nil
 	case g.buf != nil:
 		g.ResponseWriter.WriteHeader(g.code)
@@ -98,7 +120,8 @@ func (g *gzipWriter) close() {
 	}
 }
 
-// Flush sends what is written so far (event streams are never compressed).
+// Flush sends what is written so far: a compressed stream is sync-flushed, so the client can
+// decode every event at once; a small JSON body still being buffered waits for close.
 func (g *gzipWriter) Flush() {
 	if g.zw != nil {
 		_ = g.zw.Flush()

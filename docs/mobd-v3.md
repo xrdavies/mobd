@@ -134,8 +134,12 @@ the client replaces those turns in what it holds and keeps the rest; with `full:
 `since=0`, or a `since` ahead of mobd's revision, e.g. after restoring an older state) it replaces
 everything. Turns are never deleted on their own; a deleted conversation answers 404.
 
-JSON answers of 1 KB or more are gzip-compressed for clients that send `Accept-Encoding: gzip`;
-event streams, images, video and WebSocket upgrades are never compressed.
+JSON answers of 1 KB or more, and event streams (`/events`, `/tasks/{id}/events`), are
+gzip-compressed for clients that send `Accept-Encoding: gzip`. A stream is compressed from its
+first byte and sync-flushed after every event, so each event can be decoded at once; since a reply
+streams as its whole text so far, the repeats shrink to little more than the new words while the
+reply is under gzip's 32 KB window (longer replies still shrink about 4×). Images, video and
+WebSocket upgrades are never compressed. A proxy in front of mobd must not buffer the stream.
 
 ## Desktop queue
 
