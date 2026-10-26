@@ -18,6 +18,7 @@ import (
 	"github.com/xrdavies/mobd/internal/desktop"
 	"github.com/xrdavies/mobd/internal/pairing"
 	"github.com/xrdavies/mobd/internal/runner"
+	"github.com/xrdavies/mobd/internal/settings"
 	"github.com/xrdavies/mobd/internal/stream"
 	"github.com/xrdavies/mobd/internal/task"
 )
@@ -27,6 +28,10 @@ type Server struct {
 	cfg     config.Config
 	store   *task.Store
 	runners *runner.Registry
+	// settings are the machine settings changed from the apps; configuredDefault is the
+	// default runner before them.
+	settings          *settings.Store
+	configuredDefault string
 
 	hub       *hub
 	artifacts *artifact.Store
@@ -77,11 +82,13 @@ func New(cfg config.Config, store *task.Store, auth *pairing.Store, desktops des
 	}
 	s := &Server{
 		cfg: cfg, store: store, pairing: auth, runners: reg, hub: newHub(),
+		settings: settings.Open(filepath.Join(dataDir(cfg), "settings.json")), configuredDefault: def,
 		artifacts: artifact.New(filepath.Join(dataDir(cfg), "artifacts")),
 		cancels:   make(map[string]context.CancelFunc), done: make(chan struct{}),
 		tokens: make(map[string]string), waiters: make(map[string]chan struct{}),
 		reservations: make(map[string]desktop.Reservation), starting: make(map[string]bool),
 	}
+	s.applyDefaultAgent(s.settings.Get())
 	if desktops == nil {
 		desktops = desktop.Shared(desktop.Current())
 	}
@@ -156,6 +163,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /tasks/{id}/events", s.handleTaskEvents)
 	mux.HandleFunc("POST /tasks/{id}/cancel", s.handleCancelTask)
 	mux.HandleFunc("GET /queue", s.handleQueue)
+	mux.HandleFunc("GET /settings", s.handleGetSettings)
+	mux.HandleFunc("PUT /settings", s.handlePutSettings)
 	mux.HandleFunc("GET /events", s.handleEvents)
 	mux.HandleFunc("GET /screen", s.handleScreen)
 	mux.HandleFunc("GET /desktops", s.handleListDesktops)
@@ -316,6 +325,12 @@ func (s *Server) handlePatchSession(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64*1024)).Decode(&patch); err != nil {
 		writeErr(w, http.StatusBadRequest, "invalid JSON body")
 		return
+	}
+	if patch.Model != nil || patch.Effort != nil {
+		if problem, code := s.checkSessionSettings(r.PathValue("id"), patch); code != 0 {
+			writeErr(w, code, problem)
+			return
+		}
 	}
 	session, err := s.store.UpdateSession(r.PathValue("id"), patch)
 	if err == nil && patch.Archived != nil && *patch.Archived && s.desktops.PerSession() {

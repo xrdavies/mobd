@@ -30,6 +30,10 @@ type SessionPatch struct {
 	Title    *string `json:"title"`
 	Pinned   *bool   `json:"pinned"`
 	Archived *bool   `json:"archived"`
+	// Model and Effort set the conversation's settings; "" follows the machine default. The
+	// caller validates them against the conversation's runner.
+	Model  *string `json:"model"`
+	Effort *string `json:"effort"`
 }
 
 // Change summarizes a committed mutation for live clients. Task changes carry
@@ -172,6 +176,12 @@ func (s *Store) CreateTurnWith(sessionID, prompt string, opts TurnOptions) (*Tas
 		}
 		session = cloneSession(stored)
 	}
+	if opts.SaveModel {
+		session.Model = opts.Model
+	}
+	if opts.SaveEffort {
+		session.Effort = opts.Effort
+	}
 	t := &Task{
 		ID: newID(), SessionID: session.ID, ResumeID: session.ResumeID,
 		Prompt: prompt, Status: StatusQueued, Runner: session.Runner,
@@ -188,6 +198,17 @@ func (s *Store) CreateTurnWith(sessionID, prompt string, opts TurnOptions) (*Tas
 	s.publish(t.ID, Event{ID: 1, Type: "status", Status: t.Status, Message: "queued", Timestamp: now})
 	s.notifyLocked(session, t)
 	return s.view(t, s.queuePositions()), nil
+}
+
+// SessionSettings returns a conversation's runner and its model and effort ("" = machine default).
+func (s *Store) SessionSettings(id string) (runner, model, effort string, err error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	session, ok := s.data.Sessions[id]
+	if !ok {
+		return "", "", "", ErrNotFound
+	}
+	return session.Runner, session.Model, session.Effort, nil
 }
 
 // SessionRunner returns the runner a conversation is pinned to.
@@ -373,6 +394,12 @@ func (s *Store) UpdateSession(id string, patch SessionPatch) (*Session, error) {
 	}
 	if patch.Archived != nil {
 		session.Archived = *patch.Archived
+	}
+	if patch.Model != nil {
+		session.Model = *patch.Model
+	}
+	if patch.Effort != nil {
+		session.Effort = *patch.Effort
 	}
 	bump(session, nil)
 	next := s.next()

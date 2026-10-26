@@ -18,7 +18,7 @@ import (
 // APIVersion is advertised on /health; clients gate features on it.
 const APIVersion = 3
 
-var baseFeatures = []string{"queue", "activities", "sessionAdmin", "events", "screen", "uploads", "taskOptions", "runners", "questions", "steer", "pairing", "stream", "streamResize"}
+var baseFeatures = []string{"queue", "activities", "sessionAdmin", "events", "screen", "uploads", "taskOptions", "runners", "questions", "steer", "pairing", "stream", "streamResize", "settings"}
 
 // features adds what this server's desktops can do: sessionDesktops where each conversation
 // has its own desktop (Linux).
@@ -54,23 +54,32 @@ type runnerHealth struct {
 	Available bool   `json:"available"`
 	Detail    string `json:"detail,omitempty"`
 	Default   bool   `json:"default"`
+	// Permissions is "bypass" or "approve" (machine settings, else config).
+	Permissions string `json:"permissions"`
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	checks := s.readiness(r.Context())
+	set := s.settings.Get()
 	var runners []runnerHealth
+	defModels, defEfforts := []string{}, []string{}
 	for _, rn := range s.runners.All() {
 		info := rn.Info()
 		c := checks[info.Name]
-		runners = append(runners, runnerHealth{Info: info, Available: c.OK, Detail: c.Detail, Default: info.Name == s.runners.Default()})
+		// The models and defaults the apps offer come from the machine settings.
+		eff := s.effective(info, set)
+		info.Models, info.DefaultModel, info.DefaultEffort = eff.Models, eff.DefaultModel, eff.DefaultEffort
+		runners = append(runners, runnerHealth{Info: info, Available: c.OK, Detail: c.Detail, Default: info.Name == s.runners.Default(), Permissions: eff.Permissions})
+		if info.Name == s.runners.Default() {
+			defModels, defEfforts = info.Models, info.Efforts
+		}
 	}
-	def, _ := s.runners.Get(s.runners.Default())
 	body := map[string]any{
 		"ok": true, "service": "mobd", "apiVersion": APIVersion,
 		"runner": s.runners.Default(), "runners": runners, "mobMcp": s.cfg.MobMCPCommand,
 		"maxRunning": max(s.cfg.MaxRunning, 1), "features": s.features(),
 		// models/efforts describe the default runner (API v3 clients read these).
-		"models": def.Info().Models, "efforts": def.Info().Efforts, "checks": checks,
+		"models": defModels, "efforts": defEfforts, "checks": checks,
 		"streamSessions": s.streams.Count(),
 	}
 	if s.desktops.PerSession() {

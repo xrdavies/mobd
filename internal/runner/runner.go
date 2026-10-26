@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"sync"
 	"time"
 
 	"github.com/xrdavies/mobd/internal/task"
@@ -43,6 +44,17 @@ type Options struct {
 	OOMScoreAdj int
 	// Started is told the agent process's pid (its process group) once it runs; nil ignores it.
 	Started func(pid int)
+	// Permissions is "bypass" or "approve" for this turn (the machine settings); "" uses the
+	// runner's configured permissions.
+	Permissions string
+}
+
+// Approve reports whether a turn gates the agent's own tools, from opts or else configured.
+func Approve(opts Options, configured string) bool {
+	if opts.Permissions != "" {
+		return opts.Permissions == "approve"
+	}
+	return configured == "approve"
 }
 
 // AskFunc asks the user; kind is task.QuestionAsk or task.QuestionApproval.
@@ -94,6 +106,7 @@ type Runner interface {
 // Registry holds the enabled runners and the default for new conversations.
 type Registry struct {
 	runners map[string]Runner
+	mu      sync.RWMutex // guards def
 	def     string
 }
 
@@ -116,7 +129,22 @@ func (r *Registry) Get(name string) (Runner, bool) {
 }
 
 // Default is the runner for conversations that do not pick one.
-func (r *Registry) Default() string { return r.def }
+func (r *Registry) Default() string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.def
+}
+
+// SetDefault changes the runner new conversations use (machine settings); it must be enabled.
+func (r *Registry) SetDefault(name string) error {
+	if _, ok := r.runners[name]; !ok {
+		return fmt.Errorf("runner %q is not enabled", name)
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.def = name
+	return nil
+}
 
 // All returns the runners with the default first, then by name.
 func (r *Registry) All() []Runner {

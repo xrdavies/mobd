@@ -93,7 +93,7 @@ func (r *Runner) buildArgs(t *task.Task, opts runner.Options) []string {
 	if src := r.cfg.ClaudeSettingSources; src != "" && src != "all" {
 		args = append(args, "--setting-sources", src)
 	}
-	if r.cfg.ClaudePermissions == "approve" {
+	if runner.Approve(opts, r.cfg.ClaudePermissions) {
 		args = append(args, "--permission-mode", "manual", "--permission-prompt-tool", ApproveTool,
 			"--allowedTools", strings.Join(safeTools, ","))
 	} else {

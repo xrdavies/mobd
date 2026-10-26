@@ -185,7 +185,7 @@ func (at *appTurn) begin() error {
 	}
 	at.send(map[string]any{"method": "initialized"})
 	policy := "never"
-	if at.r.cfg.CodexPermissions == "approve" {
+	if runner.Approve(at.opts, at.r.cfg.CodexPermissions) {
 		policy = "untrusted"
 	}
 	thread := map[string]any{"cwd": at.r.cfg.CodexWorkDir, "approvalPolicy": policy, "sandbox": "danger-full-access"}

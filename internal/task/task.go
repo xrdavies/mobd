@@ -159,6 +159,10 @@ type Session struct {
 	Archived       bool      `json:"archived"`
 	CreatedAt      time.Time `json:"createdAt"`
 	UpdatedAt      time.Time `json:"updatedAt"`
+	// Model and Effort are the conversation's settings, used by each of its turns; "" follows
+	// the machine default. A new conversation starts with the defaults of that moment.
+	Model  string `json:"model,omitempty"`
+	Effort string `json:"effort,omitempty"`
 	// Rev goes up on every change in the conversation (a turn, its steps, messages or questions,
 	// or the title and flags). Clients pass it back as ?since= to fetch only what changed.
 	Rev      int64     `json:"rev,omitempty"`
@@ -199,6 +203,9 @@ type TurnOptions struct {
 	Model       string
 	Effort      string
 	Attachments []string
+	// SaveModel and SaveEffort store Model and Effort as the conversation's settings (a new
+	// conversation, or a turn that names them).
+	SaveModel, SaveEffort bool
 }
 
 func (s Status) Terminal() bool {
