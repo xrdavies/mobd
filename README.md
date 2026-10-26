@@ -135,7 +135,13 @@ until it is revoked, deleted or authentication is reset. There is no anonymous m
 See [pairing](docs/pairing.md).
 
 ```bash
-mobd link --url https://office.example.com  # QR + one-use link, expires in 10 minutes
+mobd link                                 # QR + one-use link (10 minutes) for the remote
+                                          # address of mobd remote, else the LAN one
+mobd link --lan                           # always the office network (LAN) address
+mobd link --url https://office.example.com  # exactly this address
+mobd remote                               # remote access: show it and check it reaches mobd
+mobd remote setup                         # set up Tailscale Serve or Cloudflare Tunnel (wizard)
+mobd remote off                           # turn it off; paired devices stay paired
 mobd clients list
 mobd connections
 mobd clients revoke CLIENT_ID

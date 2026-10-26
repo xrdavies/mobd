@@ -4,6 +4,19 @@
 所有方式共用 mobd 的强制配对认证：首次配对，之后用设备凭据访问，没有匿名模式。
 先选一种入口，完成网络验证，再按[配对与验收](#配对与验收)添加客户端。
 
+**向导：`mobd remote setup`。** 远程访问（Tailscale Serve 或 Cloudflare Tunnel）可以用向导配置：
+它检测已安装的工具、在执行每条命令（含 `sudo`、安装软件）前显示并确认、确认地址确实连到**本机**
+mobd，并把地址保存到 `~/.mobd/remote.json`；之后 `mobd link` 不带 `--url` 即使用该地址。
+`mobd remote` 显示当前方式并重新检查，`mobd remote off` 关闭（已配对设备保持配对）。
+无交互：`mobd remote setup --tailscale --yes`，或
+`mobd remote setup --cloudflare --hostname mob.example.com --token TOKEN --yes`。
+向导无法替你完成的步骤（安装并登录 Tailscale、在管理页开启 MagicDNS 和 HTTPS 证书、
+在 Cloudflare 控制台创建隧道和主机名）会给出明确提示。下文是相同步骤的手动版本。
+
+“连到本机 mobd”的检查：命令行经本机管理 socket 取得一个 2 分钟有效的随机探测码，再请求
+`<地址>/probe/<探测码>`；只有本机 mobd 回答 204，其他服务（例如占用同一端口的程序）无法通过。
+探测码不授予任何权限。
+
 | 方式 | 适用场景 | Tailscale 安装位置 | 客户端入口示例 | 实时桌面 |
 | --- | --- | --- | --- | --- |
 | [内网直连](#内网直连) | 同一局域网，或已有 VPN 能访问办公室 IP | 不需要 | `http://192.168.1.20:8080` | WebRTC |

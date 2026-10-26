@@ -99,9 +99,11 @@ type Store struct {
 	state   state
 	invites map[string]time.Time
 	tickets map[string]ticket
-	active  map[string]active
-	now     func() time.Time
-	closed  bool
+	// probes are short-lived codes `mobd remote` uses to check an address reaches this mobd.
+	probes map[string]time.Time
+	active map[string]active
+	now    func() time.Time
+	closed bool
 }
 
 func random() string {
@@ -128,7 +130,7 @@ func Open(path string) (*Store, error) {
 		lock.Close()
 		return nil, fmt.Errorf("authentication state already in use: %w", err)
 	}
-	s := &Store{path: path, lock: lock, invites: make(map[string]time.Time), tickets: make(map[string]ticket), active: make(map[string]active), now: time.Now}
+	s := &Store{path: path, lock: lock, invites: make(map[string]time.Time), tickets: make(map[string]ticket), probes: make(map[string]time.Time), active: make(map[string]active), now: time.Now}
 	data, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
 		s.state = state{Version: 1, ServerID: random(), Clients: make(map[string]record)}
@@ -239,6 +241,33 @@ func (s *Store) InvitationsOpen() bool {
 		delete(s.invites, key)
 	}
 	return false
+}
+
+// ProbeTTL bounds how long a probe code works.
+const ProbeTTL = 2 * time.Minute
+
+// NewProbe returns a random code that GET /probe/{code} accepts for ProbeTTL: proof that an
+// address reaches this mobd, not another server. It grants nothing else.
+func (s *Store) NewProbe() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := s.now()
+	for k, exp := range s.probes {
+		if !now.Before(exp) {
+			delete(s.probes, k)
+		}
+	}
+	code := random()
+	s.probes[hash(code)] = now.Add(ProbeTTL)
+	return code
+}
+
+// Probe reports whether code is a live probe code.
+func (s *Store) Probe(code string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	exp, ok := s.probes[hash(code)]
+	return ok && s.now().Before(exp)
 }
 
 func (s *Store) CloseInvitations() {

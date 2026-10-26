@@ -180,6 +180,7 @@ Invitation redemption and preview are documented in [pairing](pairing.md).
 | GET | `/artifacts/{id}` | Stored image (screenshots from tool results, uploads). Authenticated, `Cache-Control: no-store` |
 | POST | `/tasks/{id}/questions/{qid}/answer` | Answer a pending question: `{answer}` (questions) or `{approved, answer?}` (approvals) → question; 409 if already settled ([runners.md](runners.md#asking-the-user-ask_user-request_approval)) |
 | POST | `/tasks/{id}/steer` | `{prompt}`: add a message to the running turn (runners with `steer`; Codex app-server). 409 when the turn cannot take input |
+| GET | `/probe/{code}` | No credential. **204** when `code` is a live probe code from the management socket (`mobd remote` checks an address reaches this mobd), else **404**. Grants nothing |
 | POST | `/internal/tasks/{id}/ask` | Used by `mobd mcp` only (per-turn token); blocks until the question is settled |
 | POST | `/stream` | Opens the live desktop: `{offer?, maxWidth, maxHeight, quality, sessionId?}` → **201** `{session, answer?, wsTicket, width, height, display}` ([desktop-streaming.md](desktop-streaming.md)). With `sessionDesktops`, `sessionId` is required (**400** `session_required`, **404** `session_not_found`, **409** `no_desktop`); opening wakes an asleep desktop, and the stream ends with the reason when the desktop closes |
 | GET | `/desktops` | `{desktops: Info[], memory, disk}`, largest memory first; `{desktops: []}` with one shared desktop |

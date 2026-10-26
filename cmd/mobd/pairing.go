@@ -27,9 +27,10 @@ func manage(command string, args []string) error {
 	fs := flag.NewFlagSet(command, flag.ContinueOnError)
 	fs.StringVar(&socket, "socket", socket, "Running mobd management socket")
 	var address string
-	var closeInvites, confirm bool
+	var closeInvites, confirm, lan bool
 	if command == "link" {
-		fs.StringVar(&address, "url", "", "Client-accessible HTTP or HTTPS origin")
+		fs.StringVar(&address, "url", "", "Client-accessible HTTP or HTTPS origin (default: the address of mobd remote, else the LAN one)")
+		fs.BoolVar(&lan, "lan", false, "Pair with this computer's office network address")
 		fs.BoolVar(&closeInvites, "close", false, "Invalidate all unused invitations")
 	}
 	if command == "auth" {
@@ -67,8 +68,19 @@ func manage(command string, args []string) error {
 			fmt.Println("Unused invitations closed; paired clients remain authorized.")
 			return nil
 		}
+		if lan && address != "" {
+			return errors.New("use either --lan or --url")
+		}
 		if address == "" {
-			return errors.New("usage: mobd link --url https://office.example.com [--socket PATH]")
+			c, err := newRemoteCLI(socket)
+			if err != nil {
+				return err
+			}
+			var kind string
+			if address, kind, err = c.linkAddress(lan); err != nil {
+				return err
+			}
+			fmt.Printf("Pairing address: %s (%s)\n", address, kind)
 		}
 		var invite pairing.Invitation
 		if err := control.Call(socket, "POST", "/invitations", map[string]string{"url": address}, &invite); err != nil {

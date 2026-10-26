@@ -191,6 +191,15 @@ func (s *Server) Handler() http.Handler {
 	public := http.NewServeMux()
 	public.HandleFunc("POST /pair", s.handlePair)
 	public.HandleFunc("GET /pair", s.handlePairInfo)
+	// A probe code from the management socket: `mobd remote` checks an address reaches this mobd.
+	public.HandleFunc("GET /probe/{code}", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store")
+		if s.pairing.Probe(r.PathValue("code")) {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		http.NotFound(w, r)
+	})
 	public.HandleFunc("POST /internal/tasks/{id}/ask", s.handleAsk)
 	public.HandleFunc("POST /internal/tasks/{id}/desktop/{op}", s.handleInternalDesktop)
 	public.Handle("/", s.withAuth(mux))

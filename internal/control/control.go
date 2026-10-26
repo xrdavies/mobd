@@ -88,6 +88,8 @@ type Desktops interface {
 type Deps struct {
 	Pairing  *pairing.Store
 	Desktops Desktops
+	// Listen is mobd's HTTP listen address, so `mobd link` and `mobd remote` know the port.
+	Listen string
 }
 
 // DesktopList is GET /desktops on the control socket.
@@ -106,7 +108,10 @@ func Handler(deps Deps) http.Handler {
 		desktopRoutes(mux, deps.Desktops)
 	}
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
-		reply(w, 200, map[string]any{"ok": true, "service": "mobd"})
+		reply(w, 200, map[string]any{"ok": true, "service": "mobd", "listen": deps.Listen})
+	})
+	mux.HandleFunc("POST /probes", func(w http.ResponseWriter, r *http.Request) {
+		reply(w, 201, map[string]string{"code": store.NewProbe()})
 	})
 	mux.HandleFunc("POST /invitations", func(w http.ResponseWriter, r *http.Request) {
 		var req struct {

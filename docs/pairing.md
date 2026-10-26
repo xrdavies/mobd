@@ -17,6 +17,10 @@ mobd 强制设备认证：每个客户端先用一次性邀请配对，之后用
 ## 办公室管理
 
 ```bash
+# 不带 --url：使用 mobd remote setup 保存的远程地址，否则本机局域网地址（macOS 用 名称.local），
+# 并打印所用地址；--lan 总是使用局域网地址。mobd 只监听 127.0.0.1 时，局域网地址会被拒绝并说明原因。
+mobd link
+mobd link --lan
 mobd link --url https://office.example.com
 # 局域网直连：提示 HTTP 风险，仍正常生成二维码和链接
 mobd link --url http://192.168.1.20:8080

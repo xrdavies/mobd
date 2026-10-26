@@ -251,3 +251,16 @@ func TestPairingIsOffWithoutAnInvitationAndRefusalsAreLogged(t *testing.T) {
 		t.Fatal("invitation secret in the log")
 	}
 }
+
+// A probe code from the management socket proves an address reaches this mobd, and nothing else.
+func TestProbeAnswersOnlyALiveCode(t *testing.T) {
+	s := testServer(t, "")
+	code := s.pairing.NewProbe()
+	for path, want := range map[string]int{"/probe/" + code: 204, "/probe/guess": 404, "/probe/": 401} {
+		rr := httptest.NewRecorder()
+		s.Handler().ServeHTTP(rr, httptest.NewRequest("GET", path, nil))
+		if rr.Code != want {
+			t.Fatalf("%s: %d, want %d", path, rr.Code, want)
+		}
+	}
+}

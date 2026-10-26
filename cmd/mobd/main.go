@@ -42,7 +42,9 @@ const usage = `Usage: mobd <command> [options]
   restart    Reload configuration and restart; preserve login setting
   status     Show background service address and health
   logs       Follow background service logs
-  link       --url HTTP(S)_ORIGIN: print a one-use pairing link and QR; --close: close invitations
+  link       print a one-use pairing link and QR for the remote address (mobd remote), else the
+             LAN one; --lan: the LAN address; --url ORIGIN: that address; --close: close invitations
+  remote     show remote access; setup: Tailscale Serve or Cloudflare Tunnel; off: turn it off
   clients    list | revoke CLIENT_ID | delete CLIENT_ID (local management)
   connections  List authenticated active requests and streams
   auth       reset --yes: invalidate all clients and invitations
@@ -90,6 +92,9 @@ func run(args []string) error {
 	}
 	if command == "desktops" {
 		return desktopsCommand(args)
+	}
+	if command == "remote" {
+		return remoteCommand(args)
 	}
 	if command == "uninstall" {
 		return uninstall(args)
@@ -285,7 +290,7 @@ func serve(cfg config.Config) error {
 
 	defer httpSrv.Close()
 
-	adminSrv := &http.Server{Handler: control.Handler(control.Deps{Pairing: auth, Desktops: srv}),
+	adminSrv := &http.Server{Handler: control.Handler(control.Deps{Pairing: auth, Desktops: srv, Listen: cfg.ListenAddr}),
 		// Closing every desktop (stop, uninstall) can take a while.
 		ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 5 * time.Minute}
 	defer adminSrv.Close()
