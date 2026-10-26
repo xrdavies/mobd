@@ -25,7 +25,7 @@ type proxyDesktop struct {
 
 // desktopFromEnv returns the proxy when mobd asked for it, else this machine's desktop.
 func desktopFromEnv() Desktop {
-	api, id, token := os.Getenv("MOB_API"), os.Getenv("MOB_TASK_ID"), os.Getenv("MOB_TASK_TOKEN")
+	api, id, token := os.Getenv("MOB_API"), os.Getenv("MOB_TASK_ID"), taskToken()
 	if os.Getenv("MOB_DESKTOP_PROXY") != "1" || api == "" || id == "" || token == "" {
 		return hostDesktop{}
 	}

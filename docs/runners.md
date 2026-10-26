@@ -59,7 +59,7 @@ A conversation's `resumeId` only means something to the runner that created it. 
 
 How a call travels:
 
-1. When mobd dispatches a turn it creates a per-task secret and passes `MOB_API`, `MOB_TASK_ID` and `MOB_TASK_TOKEN` to the runner as `Options.MCPEnv`. The runner hands them to the mob-mcp server's environment.
+1. When mobd dispatches a turn it creates a per-task secret, writes it to a 0600 file in a new 0700 directory under the data directory (removed when the turn ends), and passes `MOB_API`, `MOB_TASK_ID` and `MOB_TASK_TOKEN_FILE` to the runner as `Options.MCPEnv`. The runner hands them to the mob-mcp server's environment. The secret itself never goes into `MCPEnv`: agent CLIs only take an MCP server's environment on their command line, which `ps` shows and mobd logs. `mobd mcp` still accepts `MOB_TASK_TOKEN` from older mobd.
 2. The tool calls `POST /internal/tasks/{id}/ask` on mobd (token in `X-Mob-Task-Token`). mobd stores a **question** on the turn, marks the turn and session `waiting`, and publishes a `question` event.
 3. The App shows a card; `POST /tasks/{id}/questions/{qid}/answer` with `{answer}` or `{approved, answer?}` settles it and the blocked tool call returns.
 4. The question becomes `expired` after `MOBD_QUESTION_TIMEOUT` (default 30m), `cancelled` if the turn is cancelled or the agent drops the call, and `expired` on a mobd restart. The turn keeps the desktop while it waits.

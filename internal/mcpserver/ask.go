@@ -34,10 +34,23 @@ type httpAsker struct {
 	api, taskID, token string
 }
 
-// askerFromEnv uses MOB_API / MOB_TASK_ID / MOB_TASK_TOKEN, set by mobd for
-// each turn. Without them (another MCP client) the ask tools are not offered.
+// taskToken is the turn's token: read from MOB_TASK_TOKEN_FILE (how mobd passes it, so it never
+// shows in an agent's arguments or logs), or from MOB_TASK_TOKEN (older mobd).
+func taskToken() string {
+	if path := os.Getenv("MOB_TASK_TOKEN_FILE"); path != "" {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return ""
+		}
+		return strings.TrimSpace(string(data))
+	}
+	return os.Getenv("MOB_TASK_TOKEN")
+}
+
+// askerFromEnv uses MOB_API / MOB_TASK_ID and the task token, set by mobd for each turn.
+// Without them (another MCP client) the ask tools are not offered.
 func askerFromEnv() Asker {
-	api, id, token := os.Getenv("MOB_API"), os.Getenv("MOB_TASK_ID"), os.Getenv("MOB_TASK_TOKEN")
+	api, id, token := os.Getenv("MOB_API"), os.Getenv("MOB_TASK_ID"), taskToken()
 	if api == "" || id == "" || token == "" {
 		return nil
 	}

@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -34,7 +36,11 @@ func TestProxyForwardsToolsWithTheTaskToken(t *testing.T) {
 	defer srv.Close()
 	t.Setenv("MOB_API", srv.URL+"/")
 	t.Setenv("MOB_TASK_ID", "t1")
-	t.Setenv("MOB_TASK_TOKEN", "tok")
+	// mobd passes the token as a file; the variable is the fallback for older mobd.
+	tokenFile := filepath.Join(t.TempDir(), "token")
+	os.WriteFile(tokenFile, []byte("tok"), 0o600)
+	t.Setenv("MOB_TASK_TOKEN_FILE", tokenFile)
+	t.Setenv("MOB_TASK_TOKEN", "stale")
 	if _, ok := desktopFromEnv().(hostDesktop); !ok {
 		t.Fatal("proxy used without MOB_DESKTOP_PROXY")
 	}

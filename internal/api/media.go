@@ -5,9 +5,11 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strconv"
@@ -188,17 +190,23 @@ func (s *Server) turnOptions(req task.CreateRequest) (task.TurnOptions, string, 
 	return opts, "", 0
 }
 
-// runOptions resolves attachments to files and lets the runner save screenshots.
-func (s *Server) runOptions(t *task.Task, env desktop.TurnEnv) runner.Options {
+// runOptions resolves attachments to files and lets the runner save screenshots. The task
+// token reaches mobd mcp as a private file, never in an agent's arguments or environment
+// (agent CLIs log and expose both); done removes it when the turn ends.
+func (s *Server) runOptions(t *task.Task, env desktop.TurnEnv) (opts runner.Options, done func(), err error) {
 	s.mu.Lock()
 	token := s.tokens[t.ID]
 	s.mu.Unlock()
-	opts := runner.Options{
+	tokenFile, done, err := s.writeTaskToken(token)
+	if err != nil {
+		return runner.Options{}, nil, fmt.Errorf("write the turn's token: %w", err)
+	}
+	opts = runner.Options{
 		SaveImage:    s.artifacts.Save,
 		Instructions: askInstructions(),
 		// The agent's MCP call must outlive the user's answer time.
 		ToolTimeout: s.questionTimeout() + time.Minute,
-		MCPEnv:      map[string]string{"MOB_API": s.selfURL(), "MOB_TASK_ID": t.ID, "MOB_TASK_TOKEN": token},
+		MCPEnv:      map[string]string{"MOB_API": s.selfURL(), "MOB_TASK_ID": t.ID, "MOB_TASK_TOKEN_FILE": tokenFile},
 		Ask: func(ctx context.Context, kind, text, details string) (task.Question, error) {
 			return s.ask(ctx, t.ID, askRequest{Kind: kind, Text: text, Details: details})
 		},
@@ -221,5 +229,25 @@ func (s *Server) runOptions(t *task.Task, env desktop.TurnEnv) runner.Options {
 			opts.Images = append(opts.Images, path)
 		}
 	}
-	return opts
+	return opts, done, nil
+}
+
+// writeTaskToken stores a turn's token in a new 0700 directory under the data directory, so
+// only this user can read it and a service's private /tmp cannot hide it from the agent.
+func (s *Server) writeTaskToken(token string) (string, func(), error) {
+	parent := filepath.Join(s.cfg.DataDir, "turns")
+	if err := os.MkdirAll(parent, 0o700); err != nil {
+		return "", nil, err
+	}
+	dir, err := os.MkdirTemp(parent, "turn-")
+	if err != nil {
+		return "", nil, err
+	}
+	done := func() { os.RemoveAll(dir) }
+	path := filepath.Join(dir, "token")
+	if err := os.WriteFile(path, []byte(token), 0o600); err != nil {
+		done()
+		return "", nil, err
+	}
+	return path, done, nil
 }

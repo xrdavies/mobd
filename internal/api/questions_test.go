@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -178,12 +180,33 @@ func TestRunOptionsCarryAskSettings(t *testing.T) {
 	s := newTestServer(t, cfg, task.NewStore(), codex.New(cfg))
 	t.Cleanup(s.Close)
 	s.tokens["t1"] = "tok"
-	opts := s.runOptions(&task.Task{ID: "t1"}, desktop.TurnEnv{Env: []string{"DISPLAY=:101"}, Cgroup: "/sys/fs/cgroup/x/turn", OOMScoreAdj: 300})
+	opts, done, err := s.runOptions(&task.Task{ID: "t1"}, desktop.TurnEnv{Env: []string{"DISPLAY=:101"}, Cgroup: "/sys/fs/cgroup/x/turn", OOMScoreAdj: 300})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !slices.Equal(opts.Env, []string{"DISPLAY=:101"}) || opts.Cgroup != "/sys/fs/cgroup/x/turn" || opts.OOMScoreAdj != 300 {
 		t.Fatalf("turn environment not passed: %+v", opts)
 	}
-	if opts.MCPEnv["MOB_API"] != "http://127.0.0.1:9090" || opts.MCPEnv["MOB_TASK_TOKEN"] != "tok" ||
-		opts.ToolTimeout != 11*time.Minute || !strings.Contains(opts.Instructions, "request_approval") {
+	if opts.MCPEnv["MOB_API"] != "http://127.0.0.1:9090" || opts.ToolTimeout != 11*time.Minute ||
+		!strings.Contains(opts.Instructions, "request_approval") {
 		t.Fatalf("%+v", opts)
+	}
+	// Agent CLIs put MCPEnv in their arguments and logs: it carries a file, not the token.
+	for k, v := range opts.MCPEnv {
+		if strings.Contains(v, "tok") && k != "MOB_TASK_TOKEN_FILE" || k == "MOB_TASK_TOKEN" {
+			t.Fatalf("token in MCPEnv[%s]=%q", k, v)
+		}
+	}
+	path := opts.MCPEnv["MOB_TASK_TOKEN_FILE"]
+	info, err := os.Stat(path)
+	if data, _ := os.ReadFile(path); err != nil || string(data) != "tok" || info.Mode().Perm() != 0o600 {
+		t.Fatalf("token file %s: %q %v", path, data, err)
+	}
+	if dir, _ := os.Stat(filepath.Dir(path)); dir == nil || dir.Mode().Perm() != 0o700 {
+		t.Fatalf("token directory %+v", dir)
+	}
+	done()
+	if _, err := os.Stat(filepath.Dir(path)); !os.IsNotExist(err) {
+		t.Fatalf("token file left after the turn: %v", err)
 	}
 }

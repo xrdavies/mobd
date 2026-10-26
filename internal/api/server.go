@@ -605,7 +605,12 @@ func (s *Server) runTask(ctx context.Context, id string) {
 		if !ok {
 			err = fmt.Errorf("runner %q is not enabled on this mobd", t.Runner)
 		} else {
-			err = rn.Start(ctx, t, s.runOptions(t, env), func(ev task.Event) error { return s.store.AppendEvent(id, ev) })
+			var opts runner.Options
+			var done func()
+			if opts, done, err = s.runOptions(t, env); err == nil {
+				err = rn.Start(ctx, t, opts, func(ev task.Event) error { return s.store.AppendEvent(id, ev) })
+				done()
+			}
 		}
 	}
 	if t != nil {
