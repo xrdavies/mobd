@@ -515,3 +515,31 @@ func TestQuestionsMoveTheRevision(t *testing.T) {
 		t.Fatalf("question: %+v %+v", tasks, questions)
 	}
 }
+
+// A question left on a finished turn (asked just as it ended) is settled later; that must
+// not clear the waiting flag the next turn's own question set.
+func TestLateQuestionOfFinishedTurnKeepsNextTurnWaiting(t *testing.T) {
+	s, _ := OpenStore(filepath.Join(t.TempDir(), "state.json"))
+	first, _ := s.Create("first")
+	_, _ = s.UpdateStatus(first.ID, StatusRunning, "")
+	late, err := s.AddQuestion(first.ID, Question{Kind: QuestionAsk, Text: "late?"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = s.UpdateStatus(first.ID, StatusSucceeded, "")
+	second, _ := s.CreateTurn(first.SessionID, "second")
+	_, _ = s.UpdateStatus(second.ID, StatusRunning, "")
+	if _, err := s.AddQuestion(second.ID, Question{Kind: QuestionAsk, Text: "now?"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ResolveQuestion(first.ID, late.ID, QuestionExpired, "", nil); err != nil {
+		t.Fatal(err)
+	}
+	if session, _, _, _ := s.Session(first.SessionID); !session.Waiting {
+		t.Fatal("the finished turn's question cleared the next turn's waiting flag")
+	}
+	// The finished turn's own flag still follows its questions.
+	if got, _ := s.Get(first.ID); got.Waiting {
+		t.Fatal("finished turn still waiting")
+	}
+}

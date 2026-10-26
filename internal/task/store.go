@@ -763,7 +763,12 @@ func (s *Store) commitQuestions(stored *Task, questions []Question, changed Ques
 	}
 	t.UpdatedAt, t.EventID = now, t.EventID+1
 	session := cloneSession(s.data.Sessions[t.SessionID])
-	session.Waiting, session.UpdatedAt = t.Waiting, now
+	session.UpdatedAt = now
+	// Only the active turn says whether the conversation waits: a question left on a finished
+	// turn (asked as it ended) may be settled while the next turn waits for its own.
+	if session.ActiveTaskID == t.ID {
+		session.Waiting = t.Waiting
+	}
 	bump(session, t)
 	next := s.next()
 	next.Tasks[t.ID], next.Sessions[session.ID] = t, session
