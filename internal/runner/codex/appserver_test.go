@@ -23,7 +23,7 @@ func fakeAppServer(afterTurn string) string {
   id=$(printf '%s' "$line" | sed -n 's/^{"id":\([0-9]*\).*/\1/p')
   case "$line" in
     *'"method":"initialize"'*) printf '{"id":%s,"result":{}}\n' "$id" ;;
-    *'"method":"thread/start"'*|*'"method":"thread/resume"'*) printf '{"id":%s,"result":{"thread":{"id":"rid-1"}}}\n' "$id" ;;
+    *'"method":"thread/start"'*|*'"method":"thread/resume"'*) printf '{"id":%s,"result":{"model":"resolved-model","thread":{"id":"rid-1"}}}\n' "$id" ;;
     *'"method":"turn/start"'*) printf '{"id":%s,"result":{"turn":{"id":"turn-1","status":"inProgress"}}}\n' "$id"
 ` + afterTurn + `
       ;;
@@ -85,6 +85,7 @@ func TestAppServerStreamsUsageAndSettings(t *testing.T) {
 	var mu sync.Mutex
 	var messages []string
 	var usage *task.Usage
+	var model string
 	err := appRunner(bin, dir, "approve").Start(context.Background(),
 		&task.Task{ID: "t", Prompt: "hi", Model: "m", Effort: "high"},
 		runner.Options{Instructions: "be careful", Images: []string{"/tmp/a.png"}},
@@ -97,10 +98,16 @@ func TestAppServerStreamsUsageAndSettings(t *testing.T) {
 			if ev.Type == "usage" {
 				usage = ev.Usage
 			}
+			if ev.Type == "resume" {
+				model = ev.Model
+			}
 			return nil
 		})
 	if err != nil {
 		t.Fatal(err)
+	}
+	if model != "resolved-model" {
+		t.Fatalf("model = %q", model)
 	}
 	if messages[0] != "hel" || messages[len(messages)-1] != "hello" {
 		t.Fatalf("messages %q", messages)

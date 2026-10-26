@@ -614,6 +614,9 @@ func (s *Store) AppendEvent(id string, ev Event) error {
 				return errors.New("runner returned an unexpected resume ID")
 			}
 			session.ResumeID, t.ResumeID = ev.ResumeID, ev.ResumeID
+			if ev.Model != "" {
+				t.Model = ev.Model
+			}
 		} else {
 			if ev.MessageID == "" {
 				return errors.New("assistant message ID is required")

@@ -78,6 +78,42 @@ func TestGetMissing(t *testing.T) {
 	}
 }
 
+func TestReportedModelIsPersistedAndStreamed(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+	s, err := OpenStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tk, err := s.Create("use the default model")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, model := range []string{"actual-model", ""} {
+		if err := s.AppendEvent(tk.ID, Event{Type: "resume", ResumeID: "thread", Model: model}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, _ := s.Get(tk.ID)
+	if got.Model != "actual-model" {
+		t.Fatalf("model = %q", got.Model)
+	}
+	events, _ := s.Events(tk.ID)
+	if events[len(events)-2].Model != "actual-model" {
+		t.Fatalf("events = %+v", events)
+	}
+	if _, err := s.UpdateStatus(tk.ID, StatusSucceeded, ""); err != nil {
+		t.Fatal(err)
+	}
+	restored, err := OpenStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, _ = restored.Get(tk.ID)
+	if got.Model != "actual-model" {
+		t.Fatalf("restored model = %q", got.Model)
+	}
+}
+
 func TestSessionContinuationAndIsolation(t *testing.T) {
 	s := NewStore()
 	first, _ := s.Create("Remember 蓝鲸")

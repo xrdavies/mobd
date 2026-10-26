@@ -17,6 +17,22 @@ import (
 
 const init1 = `{"type":"system","subtype":"init","session_id":"rid-1","tools":["Bash","mcp__mob-mcp__click"],"mcp_servers":[{"name":"mob-mcp","status":"connected"}],"model":"claude-haiku"}`
 
+func TestInitReportsEffectiveModel(t *testing.T) {
+	var resumed task.Event
+	p := newParser(func(ev task.Event) error {
+		if ev.Type == "resume" {
+			resumed = ev
+		}
+		return nil
+	}, nil)
+	if err := p.Line(init1); err != nil {
+		t.Fatal(err)
+	}
+	if resumed.Model != "claude-haiku" || resumed.ResumeID != "rid-1" {
+		t.Fatalf("resume = %+v", resumed)
+	}
+}
+
 const claudeReply = `cat > prompt.txt
 printf '%s\n' "$@" > args.txt
 printf '%s\n' '` + init1 + `' \

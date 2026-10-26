@@ -30,6 +30,7 @@ type event struct {
 	Type      string `json:"type"`
 	Subtype   string `json:"subtype"`
 	SessionID string `json:"session_id"`
+	Model     string `json:"model"`
 	Message   struct {
 		ID      string  `json:"id"`
 		Content []block `json:"content"`
@@ -90,7 +91,7 @@ func (p *parser) Line(line string) error {
 				return errors.New("Claude init is missing session_id")
 			}
 			p.resumeSeen = true
-			if err := p.emit(task.Event{Type: "resume", ResumeID: ev.SessionID}); err != nil {
+			if err := p.emit(task.Event{Type: "resume", ResumeID: ev.SessionID, Model: ev.Model}); err != nil {
 				return err
 			}
 		}

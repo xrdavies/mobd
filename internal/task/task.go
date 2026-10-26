@@ -174,6 +174,7 @@ type Event struct {
 	// Role is "user" for messages the user added during a turn (steering).
 	Role      string    `json:"role,omitempty"`
 	ResumeID  string    `json:"resumeId,omitempty"`
+	Model     string    `json:"model,omitempty"` // effective model reported by the runner
 	Status    Status    `json:"status,omitempty"`
 	Activity  *Activity `json:"activity,omitempty"`
 	Question  *Question `json:"question,omitempty"`

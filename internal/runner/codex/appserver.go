@@ -204,6 +204,7 @@ func (at *appTurn) begin() error {
 		return fmt.Errorf("Codex %s: %w", method, err)
 	}
 	var started struct {
+		Model  string `json:"model"`
 		Thread struct {
 			ID string `json:"id"`
 		} `json:"thread"`
@@ -214,7 +215,7 @@ func (at *appTurn) begin() error {
 	at.mu.Lock()
 	at.threadID = started.Thread.ID
 	at.mu.Unlock()
-	if err := at.emit(task.Event{Type: "resume", ResumeID: started.Thread.ID}); err != nil {
+	if err := at.emit(task.Event{Type: "resume", ResumeID: started.Thread.ID, Model: started.Model}); err != nil {
 		return err
 	}
 	input := []map[string]any{{"type": "text", "text": at.t.Prompt, "text_elements": []any{}}}
