@@ -1,11 +1,13 @@
 name: CI
-# Tests on every push and pull request. macOS runs the full suite (desktop tests that need a
+# Checks every push to main and every pull request to main (other branches run nothing until a
+# pull request is open); it makes no downloads, see build.yml for those. macOS runs the full suite (desktop tests that need a
 # logged-in Mac with Screen Recording skip themselves); Linux runs everything that builds there;
 # Windows must at least build.
 on:
   push:
-    branches: [main, 'feat/**']
+    branches: [main]
   pull_request:
+    branches: [main]
   workflow_dispatch:
 permissions:
   contents: read
@@ -34,8 +36,9 @@ jobs:
             gstreamer1.0-plugins-base gstreamer1.0-plugins-bad gstreamer1.0-libav xvfb xterm x11-xkb-utils
       - name: Vet
         run: go vet ./...
+      # The same tests as the release build, including the slow live-view link tests.
       - name: Test
-        run: go test -short ./...
+        run: go test ./...
       - uses: actions/setup-node@v7
         with:
           node-version: '24'

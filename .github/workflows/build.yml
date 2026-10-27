@@ -1,0 +1,83 @@
+name: Test builds
+# Unsigned mobd binaries from any branch, to try a change before it is released. Started by hand
+# (Actions → Test builds → Run workflow); signed releases come from release.yml.
+# An unsigned macOS binary loses its Screen Recording and Accessibility grants on every build:
+# use it for a quick try, not on a Mac that runs mobd every day.
+on:
+  workflow_dispatch:
+    inputs:
+      macos:
+        description: macOS arm64
+        type: boolean
+        default: true
+      linux:
+        description: Linux amd64 and arm64 (tarball and .deb)
+        type: boolean
+        default: true
+permissions:
+  contents: read
+jobs:
+  macos:
+    if: inputs.macos
+    runs-on: macos-15
+    env:
+      MACOSX_DEPLOYMENT_TARGET: '13.0'
+      CGO_ENABLED: '1'
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: Build
+        run: |
+          set -euo pipefail
+          version="0.0.0-test.${GITHUB_SHA::7}"
+          mkdir -p dist/mobd out
+          go build -trimpath -ldflags "-s -w -X main.version=$version" -o dist/mobd/mobd ./cmd/mobd
+          dist/mobd/mobd --version
+          cp LICENSE README.md dist/mobd/
+          COPYFILE_DISABLE=1 tar -czf "out/mobd_${version}_darwin_arm64.tar.gz" -C dist/mobd mobd LICENSE README.md
+      - uses: actions/upload-artifact@v7
+        with:
+          name: mobd-test-darwin-arm64
+          path: out/*
+          if-no-files-found: error
+          retention-days: 14
+  linux:
+    if: inputs.linux
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-22.04
+            arch: amd64
+          - runner: ubuntu-22.04-arm
+            arch: arm64
+    # Ubuntu 22.04 like the release, for the same glibc floor.
+    runs-on: ${{ matrix.runner }}
+    env:
+      CGO_ENABLED: '1'
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: Build dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq dpkg-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
+      - name: Build and package
+        env:
+          ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          version="0.0.0-test.${GITHUB_SHA::7}"
+          go build -trimpath -ldflags "-s -w -X main.version=$version" -o dist/mobd ./cmd/mobd
+          dist/mobd --version
+          packaging/linux/build.sh "$version" "$ARCH" dist/mobd out
+      - uses: actions/upload-artifact@v7
+        with:
+          name: mobd-test-linux-${{ matrix.arch }}
+          path: out/*
+          if-no-files-found: error
+          retention-days: 14
