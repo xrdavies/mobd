@@ -59,9 +59,8 @@
 | `DOWNLOAD_BASE_URL` | `https://mob-releases.0xd.app`；不能附加 `/mobd` 路径、认证信息或查询参数 |
 | `R2_ACCOUNT_ID` | Cloudflare 的 32 位账户 ID |
 | `R2_BUCKET` | 发布桶名称，如 `mob-releases` |
-| `RELEASE_LINUX` | 可选，仓库级 Variable。设为 `true` 时同时构建并发布 Linux 的 tarball 和 `.deb`；未设置时只发布 macOS（目前不设置） |
 
-在 **mobd 仓库**单独创建 `release` environment 并配置上述 **8 个 Secrets、3 个必需 Variables**（`RELEASE_LINUX` 可选，须配置为**仓库级** Variable：Settings → Secrets and variables → Actions → Variables；任务级 `if` 读不到 environment 变量。构建和 R2 发布都读取它）。
+在 **mobd 仓库**单独创建 `release` environment 并配置上述 **8 个 Secrets、3 个必需 Variables**。
 上表在 **Environment variables** 中添加；Apple 凭据和 R2 访问密钥在 **Environment secrets** 中添加。
 可以复用同一 Developer ID 证书、Apple 公证账号和 R2 桶，但 mob 仓库的 environment
 配置不会自动继承；若使用组织级 Secrets，须给 mobd 仓库授权。这里不需要 Tauri 密钥。
@@ -112,11 +111,11 @@ Actions 中执行。本地可先运行 `make check`；只测试发布工具使�
 `.github/workflows/release.yml` 将标签解析为确切提交，运行 Go vet/test，以 CGO
 构建 arm64 二进制并注入版本；验证版本和架构后，执行 Developer ID 签名、Apple
 公证和签名验证，打包 `mobd`、LICENSE、README，并生成 `SHA256SUMS` 和草稿 Release。
-Linux 任务只在仓库变量 `RELEASE_LINUX` 为 `true` 时运行：在 Ubuntu 22.04（amd64 与 arm64
-runner，glibc 2.35）上运行 vet/test，以 CGO 链接系统 GStreamer 构建，再由
-`packaging/linux/build.sh` 打包。R2 发布读取同一个变量：开启时四个 Linux 文件缺一不可，
-关闭时 `release.json` 只有 `darwin-aarch64`，Linux 上的安装脚本提示该版本没有 Linux 构建。
-Release 上传：`mobd_<版本>_darwin_arm64.tar.gz` 和 `SHA256SUMS`；开启 Linux 时另有
+每个版本都同时发布 macOS 和 Linux。Linux 任务在 Ubuntu 22.04（amd64 与 arm64 runner，glibc 2.35）
+上运行 vet/test，以 CGO 链接系统 GStreamer 构建，再由 `packaging/linux/build.sh` 打包；任一平台失败
+都不会创建草稿。R2 发布要求四个 Linux 文件齐全，`release.json` 包含 `darwin-aarch64`、
+`linux-x86_64` 和 `linux-aarch64`。
+Release 上传：`mobd_<版本>_darwin_arm64.tar.gz`、`SHA256SUMS`，以及
 `mobd_<版本>_linux_amd64.tar.gz`、`mobd_<版本>_linux_arm64.tar.gz`、`mobd_<版本>_amd64.deb`、
 `mobd_<版本>_arm64.deb`。
 归档保留 `LICENSE` 和 `README.md`；安装脚本校验这三个条目，但只安装 `mobd`。
@@ -179,7 +178,7 @@ gh workflow run publish-r2.yml --repo xrdavies/mobd --ref main \
 mobd/
   v0.1.0/
     mobd_0.1.0_darwin_arm64.tar.gz
-    mobd_0.1.0_linux_*.tar.gz, mobd_0.1.0_*.deb   （仅 RELEASE_LINUX）
+    mobd_0.1.0_linux_*.tar.gz, mobd_0.1.0_*.deb
     SHA256SUMS
     release.json
     install.sh
@@ -267,7 +266,7 @@ Codex/Claude 的安装和登录、辅助功能和屏幕录制权限是办公室�
 
 每次发布核对：
 
-- [ ] mobd 仓库 `release` 环境已配置 8 个 Secrets 和 3 个 Variables；`RELEASE_LINUX` 符合本次计划。
+- [ ] mobd 仓库 `release` 环境已配置 8 个 Secrets 和 3 个 Variables。
 - [ ] R2 下载域名公开可访问，动态入口绕过缓存。
 - [ ] `make release VERSION=vX.Y.Z` 成功：`main` 上有 `chore(release)` 提交，标签已推送。
 - [ ] 签名与公证成功，在另一台 Apple Silicon Mac 上试装；已发布的 Mob 客户端能配对并使用。

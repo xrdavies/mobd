@@ -70,6 +70,7 @@ test('running daemon, invalid versions and unsupported arguments never install',
 });
 
 // The Linux branch reads release.json as release.mjs writes it.
+// linux false serves a release from before mobd was released for Linux (no linux-* platforms).
 function linuxFixture(t, linux) {
   const root = mkdtempSync(join(tmpdir(), 'mob-installer-linux-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
@@ -90,8 +91,12 @@ function linuxFixture(t, linux) {
     writeFileSync(join(assets, `mobd_1.2.3_${arch}.deb`), 'deb');
   }
   writeFileSync(join(assets, 'mobd_1.2.3_darwin_arm64.tar.gz'), 'mac');
-  const manifest = prepareDistribution(assets, out, { version: '1.2.3', base: 'https://download.example.com', team: 'A123456789', date: '2026-10-14T00:00:00Z', linux }).mobd;
+  const manifest = prepareDistribution(assets, out, { version: '1.2.3', base: 'https://download.example.com', team: 'A123456789', date: '2026-10-14T00:00:00Z' }).mobd;
   const downloads = join(out, 'mobd/v1.2.3');
+  if (!linux) {
+    for (const key of Object.keys(manifest.platforms)) if (key.startsWith('linux-')) delete manifest.platforms[key];
+    writeFileSync(join(downloads, 'release.json'), JSON.stringify(manifest, null, 2) + '\n');
+  }
   writeFileSync(join(downloads, 'latest.json'), JSON.stringify(manifest, null, 2) + '\n');
   script('curl', `while [ "$#" -gt 0 ]; do case "$1" in https://*) url="$1" ;; -o) shift; dest="$1" ;; esac; shift; done\ncp "${downloads}/\${url##*/}" "$dest"`);
   const installer = join(downloads, 'install.sh');

@@ -16,7 +16,7 @@ function assetsDir(t, names) {
   return { assets, output: join(root, 'output') };
 }
 
-const options = { version: '1.2.3', base: 'https://download.example.com', team: 'A123456789', date: '2026-10-14T00:00:00Z', notes: 'New release', linux: true };
+const options = { version: '1.2.3', base: 'https://download.example.com', team: 'A123456789', date: '2026-10-14T00:00:00Z', notes: 'New release' };
 
 function fixture(t) {
   const { assets, output } = assetsDir(t, ['mobd_1.2.3_darwin_arm64.tar.gz', ...LINUX_ASSETS]);
@@ -57,14 +57,7 @@ test('manifests agree with payloads, pin the installer identity', t => {
   assert.ok(!installer.includes('@DOWNLOAD_BASE_URL@'));
 });
 
-test('a macOS-only release lists no Linux platforms and needs no Linux files', t => {
-  const { assets, output } = assetsDir(t, ['mobd_1.2.3_darwin_arm64.tar.gz']);
-  const manifests = prepareDistribution(assets, output, { ...options, linux: false });
-  assert.deepEqual(Object.keys(manifests.mobd.platforms), ['darwin-aarch64']);
-  assert.equal(readFileSync(join(output, 'mobd/v1.2.3/SHA256SUMS'), 'utf8').split('\n').filter(Boolean).length, 1);
-});
-
-test('a Linux release fails when any Linux file is missing', t => {
+test('a release fails when any Linux file is missing', t => {
   for (const missing of LINUX_ASSETS) {
     const { assets, output } = assetsDir(t, ['mobd_1.2.3_darwin_arm64.tar.gz', ...LINUX_ASSETS.filter(name => name !== missing)]);
     assert.throws(() => prepareDistribution(assets, output, options), /ENOENT/);

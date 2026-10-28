@@ -28,9 +28,8 @@ export function prepareDistribution(assets, output, options) {
   if (!Number.isFinite(Date.parse(options.date))) throw Error('Missing release publication date');
   const prefix = `mobd/v${v}`;
   const stem = `mobd_${v}_darwin_arm64`;
-  // Linux (only with options.linux, all architectures or none): tarballs for install.sh, Debian
-  // packages for apt.
-  const linux = options.linux ? { 'linux-x86_64': 'amd64', 'linux-aarch64': 'arm64' } : {};
+  // Linux, every architecture: tarballs for install.sh, Debian packages for apt.
+  const linux = { 'linux-x86_64': 'amd64', 'linux-aarch64': 'arm64' };
   const names = [`${stem}.tar.gz`, ...Object.values(linux).flatMap(arch => [`mobd_${v}_linux_${arch}.tar.gz`, `mobd_${v}_${arch}.deb`])];
   const put = (key, data) => {
     mkdirSync(dirname(join(output, key)), { recursive: true });
@@ -169,8 +168,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     const output = join(process.env.RUNNER_TEMP, 'r2-distribution');
     if (existsSync(output)) throw Error('Distribution directory must be fresh');
     const base = baseURL(process.env.DOWNLOAD_BASE_URL);
-    const linux = process.env.RELEASE_LINUX === 'true';
-    const manifests = prepareDistribution(path, output, { version: v, base, team: process.env.APPLE_TEAM_ID, notes: metadata.body, date: metadata.publishedAt, linux });
+    const manifests = prepareDistribution(path, output, { version: v, base, team: process.env.APPLE_TEAM_ID, notes: metadata.body, date: metadata.publishedAt });
     // Keep remote reads outside the immutable artifact tree.
     const remote = r2Remote(process.env.RUNNER_TEMP, base);
     if (command === 'publish-installer') await publishInstaller(output, manifests.mobd, remote);
