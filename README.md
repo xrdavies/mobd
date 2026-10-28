@@ -433,4 +433,4 @@ CORS covers API responses and SSE, plus `OPTIONS` preflight for `GET`/`POST`/`PA
 - [Linux](docs/linux.md): one virtual desktop per conversation (Xvfb), sleep, memory, browsers, packaging.
 - [Linux design](docs/linux-design.md): packages, interfaces, desktop state machine, API, CLI, and what was built differently.
 - [Building on Linux](docs/linux-build.md): other distributions, from source.
-- [Windows](docs/windows.md) (draft plan, not implemented): backend for the logged-in user's desktop, session model, packaging and phases.
+- [Windows](docs/windows.md) (planned; waits for a test machine): current state, stages (first without the desktop, then the desktop), the logged-in user's desktop, session model and packaging.

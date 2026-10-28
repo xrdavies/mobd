@@ -180,7 +180,7 @@ first-picture time, bitrate and frame rate. `-ws` uses the WebSocket fallback; `
   Clients configure nothing.
 - **Linux backend:** one virtual desktop per conversation (Xvfb, XShm, XTest, GStreamer); see the
   draft plan in [Linux](linux.md).
-- **Windows backend:** the logged-in user's desktop (DXGI, Media Foundation, SendInput); see the
-  draft plan in [Windows](windows.md).
+- **Windows backend:** the logged-in user's desktop (DXGI, Media Foundation, SendInput); stage 2
+  of the plan in [Windows](windows.md).
 - **macOS login window:** a privileged helper to reach the screen before any user signs in.
 - Not planned for now: audio, file transfer, clipboard sync, multi-monitor selection (main display only).
