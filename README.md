@@ -330,6 +330,10 @@ curl -H "Authorization: Bearer $MOBD_TOKEN" -N -H 'Last-Event-ID: 12' localhost:
 curl -H "Authorization: Bearer $MOBD_TOKEN" -s -X POST localhost:8080/tasks/TASK_ID/cancel | jq .
 ```
 
+General file exchange uses [tus uploads and HTTP Range downloads](docs/file-transfers.md).
+Clients show the shared `<dataDir>/files/` directory; uploads are checksum-verified before
+publication and never overwrite an existing file.
+
 Task options, attachments, session management and live updates
 ([API reference](docs/mobd-v3.md)):
 

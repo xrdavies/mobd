@@ -59,7 +59,7 @@ until canceled. Published files are never automatically removed.
 Advertise `fileTransfers` in `/health.features`. Older servers show an upgrade explanation.
 All transfer requests use the existing paired-device Bearer authentication, including HEAD,
 PATCH, completion and Range requests. Never put credentials in URLs or persisted task JSON.
-Do not follow redirects with credentials; accept upload locations only within the selected
+Do not follow cross-origin redirects with credentials; accept upload locations only within the selected
 server's transfer route. A new address or machine must not inherit another transfer's URL.
 
 Reject unsafe names, path traversal and symlinks. Download as `application/octet-stream`

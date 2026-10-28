@@ -178,6 +178,10 @@ Invitation redemption and preview are documented in [pairing](pairing.md).
 | GET | `/screen` | Current desktop snapshot. `?format=png\|jpeg` (default jpeg), `?maxWidth=` (default full size), `?quality=1..100` (default 80). With `sessionDesktops`, `?sessionId=` picks the conversation; an asleep desktop answers with its last frame and `X-Mob-Desktop-State: asleep` without waking; **409** `no_desktop` when it has none |
 | POST | `/uploads` | `multipart/form-data` field `file`; PNG/JPEG/GIF/WebP up to 20 MiB → `{id, name, mime, size, url}` |
 | GET | `/artifacts/{id}` | Stored image (screenshots from tool results, uploads). Authenticated, `Cache-Control: no-store` |
+| GET | `/files` | Shared directory path, upload limit and regular file list; see [file transfers](file-transfers.md) |
+| GET, HEAD | `/files/{name}` | Authenticated attachment with SHA-256, ETag, Range and If-Match support |
+| POST, HEAD, PATCH, DELETE | `/file-uploads/`, `/file-uploads/{id}` | tus 1.0 creation, resume and cancellation; maximum 20 GiB |
+| POST | `/file-uploads/{id}/complete` | Verify checksum and publish without overwriting; idempotent receipt |
 | POST | `/tasks/{id}/questions/{qid}/answer` | Answer a pending question: `{answer}` (questions) or `{approved, answer?}` (approvals) → question; 409 if already settled ([runners.md](runners.md#asking-the-user-ask_user-request_approval)) |
 | POST | `/tasks/{id}/steer` | `{prompt}`: add a message to the running turn (runners with `steer`; Codex app-server). 409 when the turn cannot take input |
 | GET | `/probe/{code}` | No credential. **204** when `code` is a live probe code from the management socket (`mobd remote` checks an address reaches this mobd), else **404**. Grants nothing |
@@ -199,7 +203,7 @@ Example response (abridged):
   "ok": true, "service": "mobd", "apiVersion": 3,
   "runner": "codex", "maxRunning": 1,
   "mobMcp": "/path/to/mobd",
-  "features": ["queue", "activities", "sessionAdmin", "events", "screen", "uploads", "taskOptions", "runners", "questions", "steer", "pairing", "stream", "streamResize", "settings"],
+  "features": ["queue", "activities", "sessionAdmin", "events", "screen", "uploads", "fileTransfers", "taskOptions", "runners", "questions", "steer", "pairing", "stream", "streamResize", "settings"],
   "checks": {
     "codex":     { "ok": true,  "detail": "/Users/me/.local/bin/codex" },
     "actuation": { "ok": true,  "detail": "built-in (mobd mcp)" },
@@ -301,7 +305,7 @@ JSON keys, environment variables and defaults.
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `MOBD_MAX_RUNNING` | `1` | Tasks allowed to run at once (one desktop → 1) |
-| `MOBD_DATA_DIR` | directory of `MOBD_STATE_PATH` | Root for `artifacts/` (screenshots, uploads) |
+| `MOBD_DATA_DIR` | directory of `MOBD_STATE_PATH` | Root for `artifacts/` (images), `files/` (shared files) and `file-uploads/` (tus staging) |
 | `MOBD_QUESTION_TIMEOUT` | `30m` | How long a turn waits for an answer to `ask_user` / `request_approval` |
 
 ## Internal structure
