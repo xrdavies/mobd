@@ -124,7 +124,6 @@ machine is not watched or controlled (see [Not supported in v1](#not-supported-i
 | Option | For | Against |
 | --- | --- | --- |
 | **Xvfb** (chosen) | in every distro, no GPU, driver or config file, small; has MIT-SHM, DAMAGE, XTEST, XFIXES, RANDR; starts in ~100 ms | size fixed at start; software GL only (Mesa llvmpipe) |
-| Xvnc (TigerVNC) | live resize through RandR | carries a VNC server we do not use; one more dependency |
 | Xorg + dummy driver | real Xorg, xrandr modes | needs a generated `xorg.conf` per display, heavier, no real GPU benefit with the dummy driver |
 | headless Wayland (sway/weston `--headless`) | modern stack | capture and input need compositor-specific protocols (wlr-screencopy, virtual-pointer), no portable window list; out of scope by decision |
 
@@ -133,7 +132,7 @@ Each desktop runs
 (`-s 0` disables the screen saver, so a desktop is never "asleep" or "locked").
 Size is `desktopSize` (default `1920x1080`) and `desktopScale` (default `1`; `2` sets the DPI,
 `Xft.dpi` and `GDK_SCALE`, and `Display.Scale = 2`, so agent coordinates stay in points like on
-macOS). Changing the size means a new desktop; live resize would need Xvnc *(only if needed)*.
+macOS). Changing the size means a new desktop; Xvfb cannot resize a running display.
 The live view's `resize` keeps working: it scales the encoded picture, not the display.
 
 ### Window manager: openbox
@@ -463,7 +462,7 @@ as today.
   SwiftShader WebGL. Pages work but use more CPU; WebGL-heavy sites and video are slow; WebGPU is
   off. Later options: Xorg with a real GPU driver headless, or VirtualGL.
 - **Desktop size per conversation:** fixed `desktopSize` for everyone in v1, also when watched from
-  a portrait phone. A per-conversation size (new desktop) or Xvnc for live resize can come later.
+  a portrait phone. A per-conversation size (a new desktop) can come later.
 - **Audio:** none. Apps find no sound server and stay silent. A PipeWire/PulseAudio null sink per
   desktop could come later.
 
