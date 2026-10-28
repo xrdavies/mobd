@@ -86,22 +86,29 @@ R2 发布只需要 `contents: read`。Apple 凭据缺失或签名、公证失败
 git switch main
 git pull --ff-only
 # 如果有本地提交，先执行 git push origin main
-make release VERSION=v0.1.0
+make version          # 当前版本（cmd/mobd/main.go）、上一个发布标签和之后的提交
+make release-patch    # 0.3.1 → 0.3.2；新功能用 release-minor（→ 0.4.0），不兼容的改动用 release-major（→ 1.0.0）
 ```
 
-`v0.1.0` 是版本号示例；执行时选择高于已有标签的版本。
+版本号以 `cmd/mobd/main.go` 为准：`make release-*` 在它的基础上递增，标签只是它的镜像。
+需要跳号或修正版本时，用 `make release VERSION=vX.Y.Z` 指定版本（必须高于已有标签）。
 若只需重试已发布版本的 R2 分发，直接使用下方的 R2 工作流，不运行此命令。
 脚本 `.github/release/tag.mjs` 会：
 
 1. 校验 `vMAJOR.MINOR.PATCH` 格式，不接受预发布后缀或带前导零的版本。
 2. 要求当前分支为 `main`，工作区和暂存区干净（包括未跟踪文件）。
 3. 在线读取 `origin/main` 和版本标签，确认当前提交已经推送、没有落后远端。
-4. 拒绝本地或远端已有的标签，以及低于远端已有稳定标签的版本。
-5. 把版本写入 `cmd/mobd/main.go` 的 `version`，提交 `chore(release): vX.Y.Z`（文件已是该版本时不提交）。
-6. 在该提交创建附注标签，用 `git push --atomic` 同时推送 `main` 和标签，触发 **Release mobd**。
+4. 拒绝本地或远端已有的标签、低于远端已有稳定标签的版本，以及已经发布过的提交。
+   `make release-*` 还要求版本文件不落后于远端最新标签（否则用 `VERSION=` 指定）。
+5. 显示「当前 → 新版本」和上一个标签之后的提交，询问 `[y/N]`；回答 `y` 才继续，其他回答不做任何修改。
+6. 把版本写入 `cmd/mobd/main.go` 的 `version`，提交 `chore(release): vX.Y.Z`（文件已是该版本时不提交）。
+7. 在该提交创建附注标签，用 `git push --atomic` 同时推送 `main` 和标签，触发 **Release mobd**。
    推送被拒时两者都不会到达 GitHub，本地提交和标签保留，按提示重试。
 
-也可以直接运行 `node .github/release/tag.mjs v0.1.0`。除版本提交外，脚本不合并或推送其他提交；
+CI 检查 `main` 上的版本文件格式正确；**Release mobd** 在构建前确认标签提交的版本文件与标签一致
+（`node .github/release/version.mjs --check vX.Y.Z --ref <commit>`），不一致时直接失败。
+
+也可以直接运行 `node .github/release/tag.mjs patch` 或 `… v0.1.0`。除版本提交外，脚本不合并或推送其他提交；
 二进制版本仍由 CI 根据标签注入并校验。测试、打包和签名在
 Actions 中执行。本地可先运行 `make check`；只测试发布工具使用 `make release-test`。
 
@@ -268,7 +275,7 @@ Codex/Claude 的安装和登录、辅助功能和屏幕录制权限是办公室�
 
 - [ ] mobd 仓库 `release` 环境已配置 8 个 Secrets 和 3 个 Variables。
 - [ ] R2 下载域名公开可访问，动态入口绕过缓存。
-- [ ] `make release VERSION=vX.Y.Z` 成功：`main` 上有 `chore(release)` 提交，标签已推送。
+- [ ] `make release-patch`（或 `-minor`、`-major`、`VERSION=vX.Y.Z`）成功：`main` 上有 `chore(release)` 提交，标签已推送。
 - [ ] 签名与公证成功，在另一台 Apple Silicon Mac 上试装；已发布的 Mob 客户端能配对并使用。
 - [ ] Release 正文已改为面向用户的英文说明。
 - [ ] 发布后无 GitHub 登录也能下载安装；旧配置和会话保留。

@@ -3,8 +3,9 @@ import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { bumpVersion, VERSION_FILES } from './bump.mjs';
+import { bumpVersion, readVersion, VERSION_FILES } from './bump.mjs';
 
 function fixture(t) {
   const root = mkdtempSync(join(tmpdir(), 'mobd-tag-test-'));
@@ -18,7 +19,7 @@ function fixture(t) {
   git('config', 'user.name', 'Release Test');
   git('config', 'user.email', 'release@example.com');
   mkdirSync(join(repo, '.github/release'), { recursive: true });
-  for (const name of ['tag.mjs', 'release.mjs', 'bump.mjs']) {
+  for (const name of ['tag.mjs', 'release.mjs', 'bump.mjs', 'version.mjs']) {
     copyFileSync(new URL(name, import.meta.url), join(repo, '.github/release', name));
   }
   copyFileSync(new URL('../../Makefile', import.meta.url), join(repo, 'Makefile'));
@@ -31,10 +32,18 @@ function fixture(t) {
   git('commit', '-m', 'Initial release fixture');
   git('remote', 'add', 'origin', remote);
   git('push', 'origin', 'main');
-  const run = (...args) => spawnSync(process.execPath, [join(repo, '.github/release/tag.mjs'), ...args], {
+  // Answers yes to the confirmation unless told otherwise.
+  const run = (...args) => {
+    const input = typeof args.at(-1) === 'object' ? args.pop().input : 'y\n';
+    return spawnSync(process.execPath, [join(repo, '.github/release/tag.mjs'), ...args], {
+      cwd: root, env, encoding: 'utf8', input,
+    });
+  };
+  const version = (...args) => spawnSync(process.execPath, [join(repo, '.github/release/version.mjs'), ...args], {
     cwd: root, env, encoding: 'utf8',
   });
-  return { repo, remote, env, git, run };
+  const commit = message => { git('commit', '-q', '--allow-empty', '-m', message); git('push', '-q', 'origin', 'main'); };
+  return { repo, remote, env, git, run, version, commit };
 }
 
 test('make release commits the version files and pushes that commit with the annotated tag', t => {
@@ -42,7 +51,7 @@ test('make release commits the version files and pushes that commit with the ann
   const head = git('rev-parse', 'HEAD');
   git('tag', '-a', 'v0.1.0', '-m', 'Unrelated local tag');
   git('config', 'push.followTags', 'true');
-  const result = spawnSync('make', ['release', 'VERSION=v1.2.3'], { cwd: repo, env, encoding: 'utf8' });
+  const result = spawnSync('make', ['release', 'VERSION=v1.2.3'], { cwd: repo, env, encoding: 'utf8', input: 'y\n' });
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /Pushed v1\.2\.3/);
   assert.match(result.stdout, /Actions → Release mobd,/);
@@ -96,7 +105,7 @@ test('other branches, detached HEAD and unpublished or outdated main block taggi
 });
 
 test('existing and lower versions are rejected using live remote tags', t => {
-  const { git, run } = fixture(t);
+  const { git, run, commit } = fixture(t);
   git('tag', 'v1.10.0');
   git('push', 'origin', 'refs/tags/v1.10.0');
   assert.match(run('v1.10.0').stderr, /Local tag .* already exists/);
@@ -104,6 +113,8 @@ test('existing and lower versions are rejected using live remote tags', t => {
   assert.match(run('v1.10.0').stderr, /Remote tag .* already exists/);
   assert.match(run('v1.2.3').stderr, /backwards/);
   assert.equal(git('tag', '--list'), '');
+  assert.match(run('v1.11.0').stderr, /already released as v1\.10\.0/, 'the tagged commit is not released twice');
+  commit('Change after v1.10.0');
   const result = run('v1.11.0');
   assert.equal(result.status, 0, result.stderr);
 });
@@ -153,4 +164,80 @@ test('a version file in an unexpected shape stops the release before anything is
   assert.equal(git('rev-parse', 'HEAD'), head);
   assert.equal(git('status', '--porcelain'), '');
   assert.equal(git('tag', '--list'), '');
+});
+
+test('the repository version files agree', () => {
+  readVersion(fileURLToPath(new URL('../../', import.meta.url)));
+});
+
+test('make release-patch, -minor and -major release the next version after the version files', t => {
+  const { repo, env, git, run, commit } = fixture(t);
+  const current = readVersion(repo);
+  const [major, minor, patch] = current.split('.').map(Number);
+  const result = spawnSync('make', ['release-patch'], { cwd: repo, env, encoding: 'utf8', input: 'y\n' });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, new RegExp(`${current} \\(never released\\) → v${major}\\.${minor}\\.${patch + 1}`));
+  assert.match(result.stdout, /1 commit on main:\n {2}[0-9a-f]+ Initial release fixture/);
+  assert.equal(readVersion(repo), `${major}.${minor}.${patch + 1}`);
+  commit('Feature');
+  commit('Fix');
+  const minorRun = run('minor');
+  assert.equal(minorRun.status, 0, minorRun.stderr);
+  assert.match(minorRun.stdout, new RegExp(`v${major}\\.${minor}\\.${patch + 1} → v${major}\\.${minor + 1}\\.0\n2 commits since`));
+  commit('Breaking change');
+  assert.equal(run('major').status, 0);
+  assert.equal(readVersion(repo), `${major + 1}.0.0`);
+  assert.deepEqual(git('ls-remote', '--refs', '--tags', 'origin').split('\n').map(l => l.split('refs/tags/')[1]).sort(),
+    [`v${major + 1}.0.0`, `v${major}.${minor + 1}.0`, `v${major}.${minor}.${patch + 1}`].sort());
+});
+
+test('declining or not answering the confirmation changes nothing', t => {
+  const { git, run } = fixture(t);
+  const head = git('rev-parse', 'HEAD');
+  for (const input of ['', 'n\n', 'maybe\n']) {
+    const result = run('patch', { input });
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /Cancelled; nothing was changed/);
+  }
+  assert.equal(git('rev-parse', 'HEAD'), head);
+  assert.equal(git('status', '--porcelain'), '');
+  assert.equal(git('tag', '--list'), '');
+  assert.equal(git('ls-remote', '--tags', 'origin'), '');
+});
+
+test('a bump refuses version files that are behind the remote tags', t => {
+  const { repo, git, run, commit } = fixture(t);
+  const [major] = readVersion(repo).split('.').map(Number);
+  git('tag', `v${major + 5}.0.0`);
+  git('push', '-q', 'origin', `refs/tags/v${major + 5}.0.0`);
+  git('tag', '-d', `v${major + 5}.0.0`);
+  commit('After the stray tag');
+  assert.match(run('patch').stderr, new RegExp(`origin already has v${major + 5}\\.0\\.0`));
+  assert.equal(git('tag', '--list'), '');
+  assert.equal(run(`v${major + 5}.0.1`).status, 0, 'an explicit version still works and fixes the files');
+  assert.equal(readVersion(repo), `${major + 5}.0.1`);
+});
+
+test('unknown bump names never create a tag', t => {
+  const { git, run } = fixture(t);
+  for (const arg of ['Patch', 'micro', 'release']) assert.match(run(arg).stderr, /Usage/);
+  assert.equal(git('tag', '--list'), '');
+});
+
+test('version.mjs shows the version and checks it against a tag', t => {
+  const { repo, run, version } = fixture(t);
+  const current = readVersion(repo);
+  assert.match(version().stdout, new RegExp(`Not released yet[\\s\\S]*make release-patch → v`));
+  assert.equal(run('patch').status, 0);
+  const next = readVersion(repo);
+  const shown = version();
+  assert.equal(shown.status, 0, shown.stderr);
+  assert.match(shown.stdout, new RegExp(`Last release tag: v${next.replaceAll('.', '\\.')}, 0 commits since`));
+  assert.equal(version('--check').status, 0);
+  assert.equal(version('--check', `v${next}`, '--ref', `v${next}`).status, 0);
+  assert.equal(version('--check', `v${next}`).status, 0);
+  const old = version('--check', `v${next}`, '--ref', 'HEAD~1');
+  assert.equal(old.status, 1);
+  assert.match(old.stderr, new RegExp(`version files say ${current.replaceAll('.', '\\.')}`));
+  assert.equal(version('--check', 'v99.0.0').status, 1);
 });

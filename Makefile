@@ -7,10 +7,10 @@ SIGN_IDENTITY ?=
 
 .DEFAULT_GOAL := help
 .PHONY: help build test race vet fmt check clean \
-	init serve start stop restart status logs release release-test
+	init serve start stop restart status logs version release release-patch release-minor release-major release-test
 
 help: ## List targets
-	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z_-]+:.*## / {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
+	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z_-]+:.*## / {printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
 ## --- mobd ---
 
@@ -51,8 +51,20 @@ status: build ## Show mobd status and address
 logs: build ## Follow the mobd log
 	$(BIN) logs
 
+version: ## Show the version, the last release tag and the next versions
+	node .github/release/version.mjs
+
+release-patch: ## Release the next patch version: commit, tag and push
+	node .github/release/tag.mjs patch
+
+release-minor: ## Release the next minor version: commit, tag and push
+	node .github/release/tag.mjs minor
+
+release-major: ## Release the next major version: commit, tag and push
+	node .github/release/tag.mjs major
+
 release: export RELEASE_TAG = $(VERSION)
-release: ## Create and push a release tag (VERSION=vX.Y.Z)
+release: ## Release an explicit version (VERSION=vX.Y.Z)
 	node .github/release/tag.mjs "$$RELEASE_TAG"
 
 release-test: ## Test release tagging, R2 publishing and installer
