@@ -14,7 +14,7 @@ not the task API address. See [security](security.md) for the current access con
 On a macOS 13+ Apple Silicon office Mac, as the normal logged-in user:
 
 ```bash
-curl -fsSL https://mob-releases.0xd.app/mobd/install.sh | sh
+curl -fsSL https://dl.mymob.dev/mobd/install.sh | sh
 export PATH="$HOME/.local/bin:$PATH"
 mobd --version
 mobd init

@@ -4,14 +4,14 @@
 桌面应用在 [mob](https://github.com/xrdavies/mob) 独立发布，Tauri updater 配置也只在
 桌面仓库。两端可共享 R2 桶和下载域名；本仓库仅维护 `mobd/`，无需桌面构建产物。
 
-公开下载根地址为 **https://mob-releases.0xd.app**。
-最新稳定版本以 [latest.json](https://mob-releases.0xd.app/mobd/latest.json) 为准。
+公开下载根地址为 **https://dl.mymob.dev**。
+最新稳定版本以 [latest.json](https://dl.mymob.dev/mobd/latest.json) 为准。
 普通用户直接看[安装和升级](#4-安装和升级)；以下 GitHub/Cloudflare 配置面向维护者。
 
 ## 1. 准备 Cloudflare R2
 
 1. 创建专用发布桶，例如 `mob-releases`。桶内只存放允许公开下载的文件。
-2. 在桶的 **Settings → Custom Domains** 绑定下载域名 `mob-releases.0xd.app`，
+2. 在桶的 **Settings → Custom Domains** 绑定下载域名 `dl.mymob.dev`（旧域名 `mob-releases.0xd.app` 保持绑定：0.3.1 之前的发布清单和已安装的旧版桌面端仍使用它），
    确认域名状态为 Active。桶名和账户 ID 使用该桶的实际值，不从域名猜测。
 3. 创建限定到该桶的 **Object Read & Write** R2 API 凭据，保存 Access Key ID
    和 Secret Access Key。上传使用 S3 API；最终用户不需要任何令牌。
@@ -56,7 +56,7 @@
 
 | 名称 | 内容 |
 | --- | --- |
-| `DOWNLOAD_BASE_URL` | `https://mob-releases.0xd.app`；不能附加 `/mobd` 路径、认证信息或查询参数 |
+| `DOWNLOAD_BASE_URL` | `https://dl.mymob.dev`；不能附加 `/mobd` 路径、认证信息或查询参数 |
 | `R2_ACCOUNT_ID` | Cloudflare 的 32 位账户 ID |
 | `R2_BUCKET` | 发布桶名称，如 `mob-releases` |
 
@@ -145,7 +145,7 @@ GitHub Release 发布后，分发不需要重新构建或签名，按以下步�
 2. 点击 **Run workflow**，Branch 选择 `main`，`tag` 填写要分发的已发布版本，如 `v0.1.0`；
    前提是该版本已完成上一节的构建和 GitHub Release 发布。
 3. 点击绿色 **Run workflow**，等待 `publish` job 成功。
-4. 检查 `https://mob-releases.0xd.app/mobd/latest.json` 的版本和安装脚本是否可下载。
+4. 检查 `https://dl.mymob.dev/mobd/latest.json` 的版本和安装脚本是否可下载。
 
 安装了 GitHub CLI 的维护者也可以执行：
 
@@ -168,7 +168,7 @@ gh workflow run publish-r2.yml --repo xrdavies/mobd --ref main \
 
 此模式先核对 R2 当前 stable 清单和归档校验和，再更新并验证 `mobd/install.sh`。
 它不修改任何版本目录、二进制、Release 附件或版本清单。安装入口是
-`https://mob-releases.0xd.app/mobd/install.sh`；版本目录内的脚本固定不变。
+`https://dl.mymob.dev/mobd/install.sh`；版本目录内的脚本固定不变。
 普通新版本发布保持 `installer_only` 未勾选。
 
 默认 `GITHUB_TOKEN` 发布的 Release 事件不会触发另一工作流，遇到这种情况需要手动
@@ -189,7 +189,7 @@ mobd/
 
 官网 `mob-site` 构建时读取 `mobd/releases.json`：配置了 `SITE_DISPATCH_TOKEN` 时 R2 发布后立即重建，否则最多一小时内的定时构建会显示新版本。桌面端和服务端无需同时发布，也无需相同版本号。
 
-等 R2 工作流成功后，打开 `https://mob-releases.0xd.app/mobd/latest.json` 确认版本，
+等 R2 工作流成功后，打开 `https://dl.mymob.dev/mobd/latest.json` 确认版本，
 并按下一节的安装步骤验证下载和签名。
 
 ### 失败与重试
@@ -221,13 +221,13 @@ mobd/
 在 macOS 13+ 的 Apple Silicon Mac 上，以普通登录用户执行：
 
 ```sh
-curl -fsSL https://mob-releases.0xd.app/mobd/install.sh | sh
+curl -fsSL https://dl.mymob.dev/mobd/install.sh | sh
 ```
 
 也可以先查看脚本，或指定版本及安装目录：
 
 ```sh
-curl -fsSL https://mob-releases.0xd.app/mobd/install.sh -o install.sh
+curl -fsSL https://dl.mymob.dev/mobd/install.sh -o install.sh
 less install.sh
 sh install.sh --version 0.1.0 --install-dir "$HOME/.local/bin"
 ```
@@ -273,4 +273,4 @@ Codex/Claude 的安装和登录、辅助功能和屏幕录制权限是办公室�
 - [ ] Release 正文已改为面向用户的英文说明。
 - [ ] 发布后无 GitHub 登录也能下载安装；旧配置和会话保留。
 - [ ] 校验失败、服务运行中、重复发布和升级行为符合预期。
-- [ ] 官网（https://mob.0xd.app/download/）显示 mobd 新版本；`mob/latest.json` 未被修改。
+- [ ] 官网（https://mymob.dev/download/）显示 mobd 新版本；`mob/latest.json` 未被修改。

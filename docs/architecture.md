@@ -5,7 +5,7 @@ MOB splits **control** (what the agent should do) from **view** (what the human 
 This repository owns the office daemon, `mobd mcp`, the API and release tooling.
 The desktop client lives in [xrdavies/mob](https://github.com/xrdavies/mob).
 Signed and notarized macOS Apple Silicon binaries are distributed through
-`https://mob-releases.0xd.app/mobd/`; see [installation and releases](releases.md).
+`https://dl.mymob.dev/mobd/`; see [installation and releases](releases.md).
 
 ## Components
 

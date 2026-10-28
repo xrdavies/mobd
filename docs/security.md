@@ -58,7 +58,7 @@ fails startup.
 
 ## Distributed binaries
 
-The [installer](https://mob-releases.0xd.app/mobd/install.sh) downloads over HTTPS,
+The [installer](https://dl.mymob.dev/mobd/install.sh) downloads over HTTPS,
 checks the archive SHA-256, exact regular-file entries, Developer ID / Team ID,
 program identifier and binary version before replacing the executable. CI signs
 and notarizes it. Installation runs as the logged-in user without sudo, preserves

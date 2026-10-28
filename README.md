@@ -26,12 +26,12 @@ Release; test its archive, then publish the stable Release on GitHub to distribu
 Install on macOS 13+ with Apple Silicon, as your normal user:
 
 ```bash
-curl -fsSL https://mob-releases.0xd.app/mobd/install.sh | sh
+curl -fsSL https://dl.mymob.dev/mobd/install.sh | sh
 export PATH="$HOME/.local/bin:$PATH"
 ```
 
 Add the `export PATH=…` line to `~/.zshrc` to make it available in new terminals.
-The installer downloads the latest stable version from [the public manifest](https://mob-releases.0xd.app/mobd/latest.json),
+The installer downloads the latest stable version from [the public manifest](https://dl.mymob.dev/mobd/latest.json),
 checks SHA-256 and the Apple signing identity, and installs only `mobd` into
 `~/.local/bin`. The archive also includes `LICENSE` and `README.md`.
 No sudo, Go, Node.js, Python or source checkout is needed to install the binary.
