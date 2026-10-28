@@ -48,7 +48,7 @@ const usage = `Usage: mobd <command> [options]
   clients    list | revoke CLIENT_ID | delete CLIENT_ID (local management)
   connections  List authenticated active requests and streams
   auth       reset --yes: invalidate all clients and invitations
-  desktops   list | close SESSION | wake SESSION | logs SESSION | doctor (Linux desktops)
+  desktops   list | close SESSION | wake SESSION | logs SESSION | seed SESSION | doctor (Linux desktops)
   uninstall  Close every desktop, stop mobd and remove its service; keeps settings and data
   mcp        Run the built-in MCP server over stdio
   --version  Print version

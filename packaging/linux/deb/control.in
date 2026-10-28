@@ -9,7 +9,7 @@ Depends: libc6 (>= 2.35), libgstreamer1.0-0, libgstreamer-plugins-base1.0-0, gst
 Recommends: fonts-dejavu-core, fonts-noto-cjk, xdg-utils, gstreamer1.0-libav
 Suggests: chromium | firefox-esr | google-chrome-stable
 Description: office agent daemon for the mob apps
- mobd runs Codex and Claude Code turns for the mob desktop and mobile apps.
+ mobd runs Codex, Claude Code and Pi turns for the Mob desktop and mobile apps.
  On Linux every conversation gets its own virtual desktop (Xvfb, openbox)
  that the agent drives and the apps watch live; idle desktops sleep in the
  cgroup freezer.
