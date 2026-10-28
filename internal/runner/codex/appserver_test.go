@@ -212,3 +212,10 @@ func TestAppServerSteerAndInterrupt(t *testing.T) {
 		t.Fatalf("interrupt took %v: %s", time.Since(begin), sent)
 	}
 }
+
+// Resuming loads the conversation's whole stored thread, which takes long for a big one.
+func TestResumeWaitsLongerThanOtherRequests(t *testing.T) {
+	if replyTimeout("thread/resume") < 5*time.Minute || replyTimeout("turn/start") != 30*time.Second {
+		t.Fatal(replyTimeout("thread/resume"), replyTimeout("turn/start"))
+	}
+}

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"os/exec"
 	"strings"
@@ -199,7 +200,10 @@ func (at *appTurn) begin() error {
 	if at.t.ResumeID != "" {
 		method, thread["threadId"] = "thread/resume", at.t.ResumeID
 	}
+	began := time.Now()
 	res, err := at.call(method, thread)
+	// The size of a long conversation's resume shows here (mobd log), e.g. when it gets slow.
+	log.Printf("codex %s %s: %s, %.1f MB reply", method, at.t.SessionID, time.Since(began).Round(time.Millisecond), float64(len(res))/(1<<20))
 	if err != nil {
 		return fmt.Errorf("Codex %s: %w", method, err)
 	}
@@ -257,6 +261,15 @@ func (at *appTurn) send(msg any) {
 	_, _ = at.w.Write(append(data, '\n'))
 }
 
+// replyTimeout is how long a request waits for Codex's answer. Resuming a long conversation
+// makes Codex load its whole stored thread (hundreds of MB after a few days), so it gets longer.
+func replyTimeout(method string) time.Duration {
+	if method == "thread/resume" {
+		return 5 * time.Minute
+	}
+	return 30 * time.Second
+}
+
 // call sends a request and waits for its response.
 func (at *appTurn) call(method string, params any) (json.RawMessage, error) {
 	at.mu.Lock()
@@ -272,8 +285,8 @@ func (at *appTurn) call(method string, params any) (json.RawMessage, error) {
 			return nil, errors.New(msg.Error.Message)
 		}
 		return msg.Result, nil
-	case <-time.After(30 * time.Second):
-		return nil, fmt.Errorf("no response to %s", method)
+	case <-time.After(replyTimeout(method)):
+		return nil, fmt.Errorf("no response to %s within %s", method, replyTimeout(method))
 	}
 }
 

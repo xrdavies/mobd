@@ -4,10 +4,12 @@ package cli
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"os/exec"
 	"strings"
 	"sync"
@@ -42,8 +44,16 @@ type Command struct {
 	Started func(pid int)
 }
 
-// MaxLine bounds one stdout/stderr line (agents print large JSON events).
-const MaxLine = 8 * 1024 * 1024
+// MaxLine bounds one stdout/stderr line. Agents print large JSON events: Codex answers
+// thread/resume with the conversation's stored turns in one line, which grows with the
+// conversation (tens of MB after a few days of screenshots and build logs).
+const MaxLine = 512 << 20
+
+// maxLine is MaxLine; tests lower it.
+var maxLine = MaxLine
+
+// largeLine is the size from which a line is logged (the limit before MaxLine was raised).
+const largeLine = 8 << 20
 
 // Run starts the command and blocks until it exits and its output is drained.
 func Run(ctx context.Context, c Command, p Parser, emit runner.EmitFunc) error {
@@ -104,7 +114,7 @@ func Run(ctx context.Context, c Command, p Parser, emit runner.EmitFunc) error {
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		err := Lines(stdout, p.Line)
+		err := Lines(stdout, c.Name, p.Line)
 		if err == nil {
 			err = p.Finish()
 		}
@@ -115,7 +125,7 @@ func Run(ctx context.Context, c Command, p Parser, emit runner.EmitFunc) error {
 	}()
 	go func() {
 		defer wg.Done()
-		err := Lines(stderr, func(line string) error {
+		err := Lines(stderr, c.Name, func(line string) error {
 			return emit(task.Event{Type: "log", Message: "[stderr] " + line})
 		})
 		if err != nil {
@@ -141,16 +151,44 @@ func Run(ctx context.Context, c Command, p Parser, emit runner.EmitFunc) error {
 	return emit(task.Event{Type: "log", Message: c.Name + " exited successfully"})
 }
 
-// Lines calls consume for each line of r.
-func Lines(r io.Reader, consume func(string) error) error {
-	sc := bufio.NewScanner(r)
-	sc.Buffer(make([]byte, 0, 64*1024), MaxLine)
-	for sc.Scan() {
-		if err := consume(sc.Text()); err != nil {
+// Lines calls consume for each line of r (without "\n" or "\r\n"). name labels the log line
+// for a large line and the error for one over MaxLine.
+func Lines(r io.Reader, name string, consume func(string) error) error {
+	br := bufio.NewReaderSize(r, 64*1024)
+	var buf []byte
+	for {
+		chunk, err := br.ReadSlice('\n')
+		if len(buf)+len(chunk) > maxLine {
+			return fmt.Errorf("%s printed a line over %d MB, more than mobd reads; "+
+				"if this conversation's history is very large, start a new chat", name, maxLine>>20)
+		}
+		buf = append(buf, chunk...)
+		if errors.Is(err, bufio.ErrBufferFull) {
+			continue
+		}
+		if len(buf) > 0 {
+			if len(buf) > largeLine {
+				start := buf[:min(len(buf), 120)]
+				log.Printf("%s: read a %.1f MB output line: %s…", name, float64(len(buf))/(1<<20), bytes.ToValidUTF8(start, nil))
+			}
+			line := bytes.TrimSuffix(bytes.TrimSuffix(buf, []byte("\n")), []byte("\r"))
+			if cerr := consume(string(line)); cerr != nil {
+				return cerr
+			}
+		}
+		if err == io.EOF {
+			return nil
+		}
+		if err != nil {
 			return err
 		}
+		// Keep the usual small buffer; drop one grown for a large line.
+		if cap(buf) > 1<<20 {
+			buf = nil
+		} else {
+			buf = buf[:0]
+		}
 	}
-	return sc.Err()
 }
 
 // Missing is the error for an agent binary that is not installed. mobd keeps

@@ -80,7 +80,7 @@ func newParser(emit runner.EmitFunc, save runner.ImageSaver) *parser {
 // streamJSON parses a whole Codex output stream (tests and replays).
 func streamJSON(r io.Reader, emit runner.EmitFunc, save runner.ImageSaver) error {
 	p := newParser(emit, save)
-	if err := cli.Lines(r, p.Line); err != nil {
+	if err := cli.Lines(r, "codex", p.Line); err != nil {
 		return err
 	}
 	return p.Finish()
