@@ -1,5 +1,7 @@
 # mobd
 
+**Mob** is mob programming with your AI agents: they work on your office computer, you steer from your phone or laptop. mobd is the office side; the apps are [Mob Desktop](https://github.com/xrdavies/mob), [Mob for iPhone](https://github.com/xrdavies/mob-ios) and [Mob for Android](https://github.com/xrdavies/mob-android). The name comes from [mob programming](https://en.wikipedia.org/wiki/Mob_programming), where a team works on one computer together: one at the keyboard, the others steering. In Mob the team is you and your agents.
+
 Office control plane: HTTP task API + Codex, Claude Code and Pi runners. The same binary provides the desktop actuation MCP server (`mobd mcp`), launched by the agent for each task.
 
 Desktop clients connect over HTTP/SSE and the live desktop stream (WebRTC, with a WebSocket fallback). The desktop app lives in
