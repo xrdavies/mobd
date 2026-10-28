@@ -19,9 +19,3 @@ func (s *Server) originAllowed(r *http.Request) bool {
 	u, err := url.Parse(origin)
 	return err == nil && u.Host == r.Host
 }
-
-// vncGone answers the removed VNC relay: the live desktop is /stream (WebRTC, or /stream/ws), which
-// apps with the `stream` health feature use.
-func vncGone(w http.ResponseWriter, _ *http.Request) {
-	writeErr(w, http.StatusGone, "the VNC relay was removed; update the app to use the live desktop stream")
-}

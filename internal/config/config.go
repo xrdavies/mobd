@@ -23,26 +23,23 @@ type Config struct {
 	// firewall or tailnet rule can name it; 0 picks a random port per session.
 	StreamPort int `json:"streamPort"`
 	// StreamUDP is the socket bound to StreamPort by serve.
-	StreamUDP     net.PacketConn `json:"-"`
-	CodexBin      string         `json:"codexBin"`
-	CodexWorkDir  string         `json:"workdir"`
-	MobMCPCommand string         `json:"mcpCommand"`
-	MobMCPArgs    []string       `json:"mcpArgs"`
-	SharedSecret  string         `json:"sharedSecret,omitempty"`
-	// Removed with the VNC relay (the live desktop is /stream now); accepted so older configs load.
-	RemovedVNCViewURL    string        `json:"vncViewUrl,omitempty"`
-	StatePath            string        `json:"statePath"`
-	CORSOrigins          []string      `json:"corsOrigins"`
-	MaxRunning           int           `json:"maxRunning"`
-	DataDir              string        `json:"dataDir"`
-	CodexMode            string        `json:"codexMode"`
-	Runners              []string      `json:"runners"`
-	ClaudeBin            string        `json:"claudeBin"`
-	ClaudeWorkDir        string        `json:"claudeWorkdir"`
-	ClaudeSettingSources string        `json:"claudeSettingSources"`
-	PiBin                string        `json:"piBin"`
-	QuestionTimeout      time.Duration `json:"-"`
-	RemovedVNCAddr       string        `json:"vncAddr,omitempty"`
+	StreamUDP            net.PacketConn `json:"-"`
+	CodexBin             string         `json:"codexBin"`
+	CodexWorkDir         string         `json:"workdir"`
+	MobMCPCommand        string         `json:"mcpCommand"`
+	MobMCPArgs           []string       `json:"mcpArgs"`
+	SharedSecret         string         `json:"sharedSecret,omitempty"`
+	StatePath            string         `json:"statePath"`
+	CORSOrigins          []string       `json:"corsOrigins"`
+	MaxRunning           int            `json:"maxRunning"`
+	DataDir              string         `json:"dataDir"`
+	CodexMode            string         `json:"codexMode"`
+	Runners              []string       `json:"runners"`
+	ClaudeBin            string         `json:"claudeBin"`
+	ClaudeWorkDir        string         `json:"claudeWorkdir"`
+	ClaudeSettingSources string         `json:"claudeSettingSources"`
+	PiBin                string         `json:"piBin"`
+	QuestionTimeout      time.Duration  `json:"-"`
 
 	// Desktops (desktop.go). Linux only, except desktopMode; inert until the Linux desktop manager.
 	DesktopMode           string        `json:"desktopMode"`

@@ -2,7 +2,6 @@ package api
 
 import (
 	"context"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -46,27 +45,10 @@ func getStatus(t *testing.T, url string) int {
 	return resp.StatusCode
 }
 
-func TestVNCRoutesAreGone(t *testing.T) {
-	_, srv, credential := ticketServer(t)
-	for _, r := range []struct{ method, path string }{{"GET", "/vnc"}, {"POST", "/vnc/ticket"}} {
-		req, _ := http.NewRequest(r.method, srv.URL+r.path, nil)
-		req.Header.Set("Authorization", "Bearer "+credential.Token)
-		resp, err := http.DefaultClient.Do(req)
-		if err != nil {
-			t.Fatal(err)
-		}
-		body, _ := io.ReadAll(resp.Body)
-		resp.Body.Close()
-		if resp.StatusCode != http.StatusGone || !strings.Contains(string(body), "live desktop stream") {
-			t.Fatalf("%s %s: %d %s", r.method, r.path, resp.StatusCode, body)
-		}
-	}
-}
-
 func TestTicketIsOnlyForTheStreamWebSocket(t *testing.T) {
 	s, srv, credential := ticketServer(t)
 	ticket := issueTicket(t, s, credential.ClientID)
-	for _, path := range []string{"/health", "/events", "/screen", "/sessions", "/vnc"} {
+	for _, path := range []string{"/health", "/events", "/screen", "/sessions"} {
 		if code := getStatus(t, srv.URL+path+"?ticket="+ticket); code != 401 {
 			t.Fatalf("%s accepted a ticket: %d", path, code)
 		}

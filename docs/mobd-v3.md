@@ -189,7 +189,6 @@ Invitation redemption and preview are documented in [pairing](pairing.md).
 | POST | `/desktops/{sessionId}/seed` | Makes the conversation's browser profiles the seed for new conversations → **204**; **409** `browser_running`, `no_profile` |
 | DELETE | `/stream/{id}` | Ends the client's live desktop session |
 | GET | `/stream/ws` | `?session=` (and `?ticket=` for webviews): the same session over a WebSocket where UDP cannot pass. 403 for unknown origins, 404 unknown session, 409 if WebRTC already carries it |
-| GET, POST | `/vnc`, `/vnc/ticket` | Not supported: **410** asking the client to update |
 
 ### Health
 

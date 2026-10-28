@@ -180,9 +180,6 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /desktops/{id}/seed", s.handleSeedDesktop)
 	mux.HandleFunc("POST /uploads", s.handleUpload)
 	mux.HandleFunc("GET /artifacts/{id}", s.handleArtifact)
-	// The VNC relay was replaced by the live desktop stream; old clients get a readable error.
-	mux.HandleFunc("GET /vnc", vncGone)
-	mux.HandleFunc("POST /vnc/ticket", vncGone)
 	mux.HandleFunc("POST /stream", s.handleStreamOpen)
 	mux.HandleFunc("DELETE /stream/{id}", s.handleStreamClose)
 	mux.HandleFunc("GET /stream/ws", s.handleStreamWS)

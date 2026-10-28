@@ -8,6 +8,5 @@
   "codexMode": "app-server",
   "claudeBin": "claude",
   "claudeSettingSources": "project",
-  "piBin": "pi",
-  "vncAddr": "127.0.0.1:5900"
+  "piBin": "pi"
 }

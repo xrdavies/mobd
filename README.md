@@ -401,8 +401,6 @@ Conversation desktops (Linux; accepted and validated everywhere):
 | `diskWarnPercent`, `diskWarnBytes` / `diskFloorBytes` | `MOBD_DISK_WARN_PERCENT`, `MOBD_DISK_WARN_BYTES` / `MOBD_DISK_FLOOR_BYTES` | `10`, `5G` / `1G` | Free space (the lower of percent and bytes) to warn / floor for new desktops |
 | `desktopBrowserSeed` | `MOBD_DESKTOP_BROWSER_SEED` | `<dataDir>/seed` | Browser profiles (`chrome/`, `firefox/`) new conversations start from |
 
-`vncAddr` and `vncViewUrl` in older configs are accepted and ignored.
-
 
 ## Conversations and runner lifecycle
 

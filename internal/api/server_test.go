@@ -901,7 +901,7 @@ func TestHealthReadiness(t *testing.T) {
 		t.Fatalf("health %+v", body)
 	}
 	if !c["codex"].OK || !strings.Contains(c["codex"].Detail, "codex-cli 9.9.9") || c["actuation"].OK ||
-		c["vnc"] != (check{}) || c["accessibility"].OK != perms.Accessibility || c["screenRecording"].OK || c["screenRecording"].Detail == "" ||
+		c["accessibility"].OK != perms.Accessibility || c["screenRecording"].OK || c["screenRecording"].Detail == "" ||
 		!c["display"].OK || !strings.Contains(c["display"].Detail, "locked") {
 		t.Fatalf("checks %+v", c)
 	}
