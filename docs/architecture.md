@@ -1,6 +1,6 @@
 # Architecture
 
-MOB splits **control** (what the agent should do) from **view** (what the human sees) and from **actuation** (how the agent drives the office Mac UI).
+MOB splits **control** (what the agent should do) from **view** (what the human sees) and from **actuation** (how the agent drives the office computer UI).
 
 This repository owns the office daemon, `mobd mcp`, the API and release tooling.
 The desktop client lives in [xrdavies/mob](https://github.com/xrdavies/mob).
@@ -34,7 +34,7 @@ The HTTP API is implemented in **Go** as `mobd` (see the [API reference](mobd-v3
 
 ### Office runners
 
-Process(es) on the office Mac that:
+Process(es) on the office computer that:
 
 - receive a task from the control plane
 - start or resume a **Codex** or **Claude Code** session with the configured MCP tools
@@ -46,7 +46,7 @@ configuration, capabilities and the adapter contract.
 
 ### Actuation (local MCP)
 
-How the agent opens apps and operates the GUI on the office Mac.
+How the agent opens apps and operates the GUI on the office computer.
 
 The `mob-mcp` tool set is built into the `mobd` binary and served by `mobd mcp`
 over stdio. The agent launches it as a separate process for each task.

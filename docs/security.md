@@ -22,8 +22,8 @@ for the live-view connection.
 
 ## View vs actuation
 
-- **Humans:** the apps' small live view only watches; mouse, keyboard and touch input go to the office Mac only in the large view's explicit Control mode. This is client behavior: mobd accepts input from any paired client's live session and does not enforce view-only access.
-- **Agent:** desktop tools run through **local MCP** (`mobd mcp`) on the office Mac, independently of the human live view.
+- **Humans:** the apps' small live view only watches; mouse, keyboard and touch input go to the office computer only in the large view's explicit Control mode. This is client behavior: mobd accepts input from any paired client's live session and does not enforce view-only access.
+- **Agent:** desktop tools run through **local MCP** (`mobd mcp`) on the office computer, independently of the human live view.
 
 Keeping these channels apart limits accidental remote control and makes auditing clearer.
 

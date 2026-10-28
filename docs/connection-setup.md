@@ -1,6 +1,6 @@
 # mobd 连接配置
 
-本手册以办公室 Mac 运行 mobd 为前提，说明客户端（mob、mob-ios、mob-android）如何连接。
+本手册以办公室电脑运行 mobd 为前提，说明客户端（mob、mob-ios、mob-android）如何连接。
 所有方式共用 mobd 的强制配对认证：首次配对，之后用设备凭据访问，没有匿名模式。
 先选一种入口，完成网络验证，再按[配对与验收](#配对与验收)添加客户端。
 
@@ -20,10 +20,10 @@ mobd，并把地址保存到 `~/.mobd/remote.json`；之后 `mobd link` 不带 `
 | 方式 | 适用场景 | Tailscale 安装位置 | 客户端入口示例 | 实时桌面 |
 | --- | --- | --- | --- | --- |
 | [内网直连](#内网直连) | 同一局域网，或已有 VPN 能访问办公室 IP | 不需要 | `http://192.168.1.20:8080` | WebRTC |
-| [Tailscale Serve](#tailscale-serve) | 两端都能安装 Tailscale，入口仅在 tailnet 内可见 | 办公室 Mac、客户端 | `https://office-mac.example-tailnet.ts.net` | WebRTC |
-| [Tailscale Funnel](#tailscale-funnel) | 从外网访问，不维护公网服务器 | 办公室 Mac | `https://office-mac.example-tailnet.ts.net` | WebSocket 回退 |
+| [Tailscale Serve](#tailscale-serve) | 两端都能安装 Tailscale，入口仅在 tailnet 内可见 | 办公室电脑、客户端 | `https://office.example-tailnet.ts.net` | WebRTC |
+| [Tailscale Funnel](#tailscale-funnel) | 从外网访问，不维护公网服务器 | 办公室电脑 | `https://office.example-tailnet.ts.net` | WebSocket 回退 |
 | [Cloudflare Tunnel](#cloudflare-tunnel) | 从外网访问，手机不装 VPN，使用自己的域名 | 不需要（办公室运行 cloudflared） | `https://mob.example.com` | WebSocket 回退 |
-| [自建中继](#自建中继) | 使用自己的公网服务器和域名 | 办公室 Mac、公网服务器 | `https://office.example.com` | WebSocket 回退 |
+| [自建中继](#自建中继) | 使用自己的公网服务器和域名 | 办公室电脑、公网服务器 | `https://office.example.com` | WebSocket 回退 |
 | [SSH 跳板机](#ssh-跳板机) | 无法安装 VPN，但两端能 SSH 到同一台可信服务器 | 不需要 | `http://127.0.0.1:18080` | WebSocket 回退 |
 
 mobd 在同一端口提供 HTTP API、SSE、实时桌面信令（`POST /stream`）和 WebSocket 回退
@@ -53,13 +53,13 @@ curl -i --connect-timeout 5 --max-time 10 http://127.0.0.1:8080/health
 无参数重启还会复用已保存参数；以 `mobd status` 显示的地址为准。
 本手册均假设端口为 8080，使用其他端口时需同步修改转发目标。
 
-办公室 Mac 需要保持联网、唤醒和用户登录，桌面操作依赖该用户会话；配置电源设置避免自动睡眠导致失联。
+办公室电脑需要保持联网和唤醒；macOS 上还需要用户登录，桌面操作依赖该用户会话（Linux 每个对话有自己的虚拟桌面，无需登录）；配置电源设置避免自动睡眠导致失联。
 若要登录后恢复 mobd，未启动时运行 `mobd start --login`，已启动时运行 `mobd restart --login`。
 Tailscale 的后台服务不会替你启动 mobd。
 
 ## 内网直连
 
-1. 在办公室 Mac 的“系统设置 → 网络 → 当前连接 → 详细信息”查看实际局域网 IP，
+1. 查看办公室电脑的实际局域网 IP（macOS：“系统设置 → 网络 → 当前连接 → 详细信息”；Linux：`ip -4 addr`），
    例如 `192.168.1.20`。客户端需能路由到该地址；访客 Wi-Fi 或 AP 隔离可能阻止设备互访。
    从家庭网络直接填写办公室私有 IP 不会自动穿透 NAT，需要已有 VPN 或其他方式。
 2. 确认 mobd 监听 `0.0.0.0:8080`。已有配置若为 `127.0.0.1:8080`，修改 `listen` 后重启。
@@ -84,10 +84,10 @@ Tailscale 的后台服务不会替你启动 mobd。
    命令会提示 HTTP 风险，但照常输出二维码、链接和有效期。随后完成[配对与验收](#配对与验收)。
 
 `0.0.0.0` 是监听地址，`127.0.0.1` 是设备自身地址，都不能作为其他设备的局域网入口。
-建议在路由器上为办公室 Mac 保留 DHCP 地址；地址变化后需核验并更新客户端入口。
+建议在路由器上为办公室电脑保留 DHCP 地址；地址变化后需核验并更新客户端入口。
 
 普通内网 HTTP 不加密邀请、长期凭据和业务内容，能监听链路的人可能取得它们。
-配对认证仍然必需。已有公司 VPN 能访问办公室 Mac 时同样适用本节，可达性由公司网络策略决定。
+配对认证仍然必需。已有公司 VPN 能访问办公室电脑时同样适用本节，可达性由公司网络策略决定。
 
 ## 办公室安装 Tailscale
 
@@ -103,7 +103,7 @@ sudo tailscale up
 sudo tailscale status
 ```
 
-打开 `tailscale up` 输出的登录链接，登录自己的账号，将办公室 Mac 加入 tailnet。
+打开 `tailscale up` 输出的登录链接，登录自己的账号，将办公室电脑加入 tailnet。
 办公室网络必须允许 Tailscale 出站连接；无需为 mobd 开放公网入站端口。连接不通时用
 `sudo tailscale netcheck` 诊断，并参考官方[防火墙要求](https://tailscale.com/docs/reference/faq/firewall-ports)。
 Tailscale 尽量点对点连接，UDP 不通时经其加密中继（DERP）转发，
@@ -124,7 +124,7 @@ flowchart LR
 
 ### 2. 限制访问范围
 
-在 Tailscale 管理控制台的访问控制中，将访问限定到需要使用 mobd 的可信设备和办公室 Mac 的 TCP 443 与 UDP 9527（实时桌面）。
+在 Tailscale 管理控制台的访问控制中，将访问限定到需要使用 mobd 的可信设备和办公室电脑的 TCP 443 与 UDP 9527（实时桌面）。
 mobd 不根据 Tailscale 身份头自动配对或隔离用户数据。以下是**专用两机 tailnet** 的最小示例，
 将 IP 替换为两端 `tailscale ip -4` 的实际输出（`src` 为客户端，`dst` 为办公室）：
 
@@ -159,18 +159,18 @@ sudo tailscale serve status
 
 首次使用按提示启用 tailnet HTTPS 证书，确认 MagicDNS 已开启。输出应为
 **Available within your tailnet**，且 `funnel status` 没有将该端口公开。
-复制实际地址，例如 `https://office-mac.example-tailnet.ts.net`，不要追加 `:8080` 或路径前缀。
+复制实际地址，例如 `https://office.example-tailnet.ts.net`，不要追加 `:8080` 或路径前缀。
 `--bg` 保存配置，Tailscale 重启后恢复，但不会启动 mobd。
 参见 [Serve 命令](https://tailscale.com/docs/reference/tailscale-cli/serve)。
 
 在客户端电脑验证（预期 **401**），然后生成邀请并完成[配对与验收](#配对与验收)：
 
 ```bash
-curl -i --connect-timeout 10 --max-time 15 https://office-mac.example-tailnet.ts.net/health
+curl -i --connect-timeout 10 --max-time 15 https://office.example-tailnet.ts.net/health
 ```
 
 ```bash
-mobd link --url https://office-mac.example-tailnet.ts.net
+mobd link --url https://office.example-tailnet.ts.net
 ```
 
 关闭入口：`sudo tailscale serve --bg --https=443 off`。它不停止 mobd，也不撤销凭据；
@@ -206,7 +206,7 @@ sudo tailscale funnel status
 成功输出包含 `Available on the internet` 和实际地址，例如：
 
 ```text
-https://office-mac.example-tailnet.ts.net
+https://office.example-tailnet.ts.net
 |-- / proxy http://127.0.0.1:8080
 ```
 
@@ -215,7 +215,7 @@ https://office-mac.example-tailnet.ts.net
 客户端使用输出的 HTTPS 域名，不添加 `:8080` 或路径前缀。生成邀请，再完成[配对与验收](#配对与验收)：
 
 ```bash
-mobd link --url https://office-mac.example-tailnet.ts.net
+mobd link --url https://office.example-tailnet.ts.net
 ```
 
 `--bg` 保存发布配置，Tailscale 重启后恢复；电脑离线或 mobd 停止时仍不可访问。
@@ -357,7 +357,7 @@ sudo tailscale ip -4
 在**公网服务器**测试到办公室的这一段连接：
 
 ```bash
-curl -i --connect-timeout 10 --max-time 15 https://office-mac.example-tailnet.ts.net/health
+curl -i --connect-timeout 10 --max-time 15 https://office.example-tailnet.ts.net/health
 ```
 
 预期 **401**。只有这一步通过后再配置公网代理；DNS 失败检查服务器的 Tailscale DNS 设置，
@@ -374,7 +374,7 @@ curl -i --connect-timeout 10 --max-time 15 https://office-mac.example-tailnet.ts
 
 ```caddyfile
 office.example.com {
-    reverse_proxy https://office-mac.example-tailnet.ts.net {
+    reverse_proxy https://office.example-tailnet.ts.net {
         header_up Host {upstream_hostport}
     }
 }
@@ -455,7 +455,7 @@ SSH 不会自动重连，mobd 也不管理这些进程；长期使用需用服�
 | --- | --- |
 | 办公室局域网直连 | `http://192.168.1.20:8080` |
 | Tailscale 节点直连（mobd 监听可达接口） | `http://100.101.102.104:8080` 或 `http://office-mac:8080` |
-| Tailscale Serve / Funnel | `https://office-mac.example-tailnet.ts.net` |
+| Tailscale Serve / Funnel | `https://office.example-tailnet.ts.net` |
 | Cloudflare Tunnel | `https://mob.example.com` |
 | 自建中继 | `https://office.example.com` |
 | SSH 转发 | `http://127.0.0.1:18080` |

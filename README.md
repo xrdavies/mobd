@@ -59,7 +59,7 @@ You can also grant them in System Settings → Privacy & Security. The live desk
 streamed by mobd itself (H.264 over WebRTC); Screen Sharing is not needed. For direct LAN/VPN access,
 configure `listen` for that interface; loopback is enough behind Tailscale Serve,
 a gateway or an SSH tunnel. `mobd init` sets `listen` to `0.0.0.0:8080` (all IPv4 interfaces).
-The download domain serves files; clients connect to your office Mac's mobd URL.
+The download domain serves files; clients connect to your office computer's mobd URL.
 Follow the [office smoke checklist](docs/office-smoke-checklist.md) to verify the setup.
 
 To upgrade, finish active tasks, run `mobd stop`, rerun the installer, then run
