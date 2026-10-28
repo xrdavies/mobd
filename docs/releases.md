@@ -11,7 +11,7 @@
 ## 1. 准备 Cloudflare R2
 
 1. 创建专用发布桶，例如 `mob-releases`。桶内只存放允许公开下载的文件。
-2. 在桶的 **Settings → Custom Domains** 绑定下载域名 `dl.mymob.dev`（旧域名 `mob-releases.0xd.app` 保持绑定：0.3.1 之前的发布清单和已安装的旧版桌面端仍使用它），
+2. 在桶的 **Settings → Custom Domains** 绑定下载域名 `dl.mymob.dev`，
    确认域名状态为 Active。桶名和账户 ID 使用该桶的实际值，不从域名猜测。
 3. 创建限定到该桶的 **Object Read & Write** R2 API 凭据，保存 Access Key ID
    和 Secret Access Key。上传使用 S3 API；最终用户不需要任何令牌。
