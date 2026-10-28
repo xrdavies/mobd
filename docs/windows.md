@@ -25,7 +25,7 @@ do not change, so Mob Desktop and Mob Mobile need no Windows-specific work.
 | Service manager (`mobd start/stop/status`) | ❌ `New()` returns "not supported; use mobd serve" | `internal/service/new_other.go` |
 | Desktop backend (screenshots, input, live view) | ❌ `unsupported`; `/screen` and `/stream` answer 501 | `internal/desktop/backend_other.go` |
 | Agent launch through `.cmd` shims | ❓ untested | `internal/runner/*` |
-| `mobd remote` (Tailscale, Cloudflare) | ❌ macOS/Linux commands (`sudo`, Homebrew) | `cmd/mobd/remote.go` |
+| `mobd remote` (Tailscale, Cloudflare) | ❌ macOS/Linux commands (`sudo`, Homebrew, apt) | `cmd/mobd/remote.go` |
 | Installer, release, tests on Windows | ❌ none; CI only builds | |
 
 ## Stages

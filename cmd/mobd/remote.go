@@ -401,15 +401,8 @@ func (c *remoteCLI) setupCloudflare(token, hostname string) error {
 	}
 	cf, err := c.sh.LookPath("cloudflared")
 	if err != nil {
-		brew, berr := c.sh.LookPath("brew")
-		if berr != nil {
-			return errors.New("cloudflared is not installed: install it (https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/), then run this again")
-		}
-		if ok, err := c.confirm("brew install cloudflared"); err != nil || !ok {
-			return errors.Join(err, errors.New("cancelled"))
-		}
-		if err := c.sh.Run(brew, "install", "cloudflared"); err != nil {
-			return fmt.Errorf("brew install cloudflared: %w", err)
+		if err := c.installCloudflared(); err != nil {
+			return err
 		}
 		if cf, err = c.sh.LookPath("cloudflared"); err != nil {
 			return errors.New("cloudflared still not found after installing it")
@@ -428,6 +421,38 @@ func (c *remoteCLI) setupCloudflare(token, hostname string) error {
 		return fmt.Errorf("%v\n%s", err, c.hint("cloudflare"))
 	}
 	return c.finish(remoteState{Method: "cloudflare", URL: base})
+}
+
+// cloudflaredApt adds Cloudflare's apt repository and installs cloudflared, as
+// https://pkg.cloudflare.com documents it for Debian and Ubuntu.
+const cloudflaredApt = `mkdir -p --mode=0755 /usr/share/keyrings && ` +
+	`curl -fsSL https://pkg.cloudflare.com/cloudflare-main.gpg -o /usr/share/keyrings/cloudflare-main.gpg && ` +
+	`echo 'deb [signed-by=/usr/share/keyrings/cloudflare-main.gpg] https://pkg.cloudflare.com/cloudflared any main' ` +
+	`> /etc/apt/sources.list.d/cloudflared.list && apt-get update && apt-get install -y cloudflared`
+
+// installCloudflared installs cloudflared with Homebrew (macOS), else Cloudflare's apt repository
+// (Debian, Ubuntu), asking first; other systems get the download page.
+func (c *remoteCLI) installCloudflared() error {
+	if brew, err := c.sh.LookPath("brew"); err == nil {
+		if ok, err := c.confirm("brew install cloudflared"); err != nil || !ok {
+			return errors.Join(err, errors.New("cancelled"))
+		}
+		if err := c.sh.Run(brew, "install", "cloudflared"); err != nil {
+			return fmt.Errorf("brew install cloudflared: %w", err)
+		}
+		return nil
+	}
+	if _, err := c.sh.LookPath("apt-get"); err == nil {
+		fmt.Fprintln(c.out, "cloudflared comes from Cloudflare's apt repository (pkg.cloudflare.com):")
+		if ok, err := c.confirm("sudo sh -c \"" + cloudflaredApt + "\""); err != nil || !ok {
+			return errors.Join(err, errors.New("cancelled"))
+		}
+		if err := c.sh.Run("sudo", "sh", "-c", cloudflaredApt); err != nil {
+			return fmt.Errorf("installing cloudflared from Cloudflare's apt repository: %w", err)
+		}
+		return nil
+	}
+	return errors.New("cloudflared is not installed: install it (https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/), then run this again")
 }
 
 func (c *remoteCLI) finish(st remoteState) error {

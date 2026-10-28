@@ -260,11 +260,20 @@ mobd 无需修改：API、SSE（每 15 秒心跳，低于 Cloudflare 100 秒空�
 ### 2. 办公室安装并运行 cloudflared
 
 ```bash
+# macOS
 brew install cloudflared
+# Debian / Ubuntu：Cloudflare 的 apt 源（https://pkg.cloudflare.com）
+sudo mkdir -p --mode=0755 /usr/share/keyrings
+curl -fsSL https://pkg.cloudflare.com/cloudflare-main.gpg | sudo tee /usr/share/keyrings/cloudflare-main.gpg >/dev/null
+echo 'deb [signed-by=/usr/share/keyrings/cloudflare-main.gpg] https://pkg.cloudflare.com/cloudflared any main' | sudo tee /etc/apt/sources.list.d/cloudflared.list
+sudo apt-get update && sudo apt-get install cloudflared
+
 sudo cloudflared service install <控制台给出的 token>
 ```
 
-`service install` 注册为系统服务，开机后自动连接；它不会启动 mobd（见[共用准备](#共用准备)）。
+`mobd remote setup` 在 macOS 用 Homebrew、在 Debian/Ubuntu 用上面的 apt 源安装 cloudflared（先显示命令并询问）；
+其他系统请按 [Cloudflare 下载页](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/) 安装。
+`service install` 注册为系统服务（macOS launchd，Linux systemd），开机后自动连接；它不会启动 mobd（见[共用准备](#共用准备)）。
 token 等同于隧道的凭据，不要提交到仓库或发给他人；泄露时在控制台重新生成。
 控制台中隧道状态应变为 **Healthy**。
 

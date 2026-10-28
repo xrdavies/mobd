@@ -160,10 +160,35 @@ func TestCloudflareSetupInstallsTheTunnelAndChecksTheHostname(t *testing.T) {
 type installingShell struct{ *fakeShell }
 
 func (s *installingShell) Run(name string, args ...string) error {
-	if name == "/opt/homebrew/bin/brew" {
+	if name == "/opt/homebrew/bin/brew" || (name == "sudo" && len(args) > 0 && args[0] == "sh") {
 		s.paths["cloudflared"] = "/opt/homebrew/bin/cloudflared"
 	}
 	return s.fakeShell.Run(name, args...)
+}
+
+// Without Homebrew (Debian, Ubuntu), cloudflared comes from Cloudflare's apt repository.
+func TestCloudflareSetupInstallsFromAptWithoutHomebrew(t *testing.T) {
+	sh := &fakeShell{paths: map[string]string{"apt-get": "/usr/bin/apt-get"}}
+	c, out, _ := testRemote(t, sh, "mob.example.com\ny\ny\n")
+	token := "eyJhIjoiMTIzIiwidCI6IjQ1NiIsInMiOiI3ODkifQ"
+	c.secret = func(string) (string, error) { return token, nil }
+	c.sh = &installingShell{fakeShell: sh}
+	if err := c.setup("cloudflare", "", ""); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if len(sh.ran) != 2 || sh.ran[0] != "run: sudo sh -c "+cloudflaredApt ||
+		sh.ran[1] != "run: sudo /opt/homebrew/bin/cloudflared service install "+token {
+		t.Fatalf("ran %q", sh.ran)
+	}
+	if !strings.Contains(cloudflaredApt, "https://pkg.cloudflare.com/cloudflared any main") || !strings.Contains(out.String(), "pkg.cloudflare.com") {
+		t.Fatalf("apt source: %s", out)
+	}
+	// Neither Homebrew nor apt: point to the download page.
+	c2, _, _ := testRemote(t, &fakeShell{}, "mob.example.com\n")
+	c2.secret = c.secret
+	if err := c2.setup("cloudflare", "", ""); err == nil || !strings.Contains(err.Error(), "developers.cloudflare.com") {
+		t.Fatalf("no installer: %v", err)
+	}
 }
 
 func TestStatusChecksTheAddressAndOffRemovesIt(t *testing.T) {
