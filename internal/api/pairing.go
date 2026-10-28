@@ -17,7 +17,7 @@ import (
 
 // pairingClosed answers /pair while no invitation is open: pairing is off, and the request
 // is refused before its body is read.
-const pairingClosed = "pairing is off: no invitation is open. Run mobd link on the office Mac to create one."
+const pairingClosed = "pairing is off: no invitation is open. Run mobd link on the office computer to create one."
 
 // pairingOff answers /pair when no invitation is open, reporting whether it did.
 func (s *Server) pairingOff(w http.ResponseWriter, r *http.Request) bool {
