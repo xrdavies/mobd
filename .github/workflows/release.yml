@@ -136,7 +136,10 @@ jobs:
       - name: Build dependencies
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq dpkg-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
+          # The 22.04 runner image ships libunwind-14-dev (LLVM), which conflicts with libunwind-dev,
+          # a dependency of libgstreamer1.0-dev: apt then fails with "held broken packages".
+          sudo apt-get remove -y -qq libunwind-14-dev || true
+          sudo apt-get install -y dpkg-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
             gstreamer1.0-plugins-base gstreamer1.0-plugins-bad gstreamer1.0-libav xvfb xterm x11-xkb-utils
       - name: Test, build and package
         env:
