@@ -15,7 +15,8 @@ a visible folder without spaces, outside the folders macOS protects. The screen 
 path so it can be copied into a conversation. Agents can read uploaded files there and copy
 files from other locations into it. The directory is machine-wide, shared by paired clients
 and agents, and independent of conversation deletion. Agent prompt changes are deferred.
-Only regular files immediately in this directory are listed; archive folders before transfer.
+Uploading a folder creates the same folders here. Listings show regular files and folders;
+symbolic links are neither listed nor followed.
 Names starting with `.` are never listed or accepted (`.uploads`, Finder's `.DS_Store`).
 
 First release: foreground transfers, including recovery after a network interruption or
@@ -56,6 +57,28 @@ until canceled. Published files are never automatically removed.
 * Persist the remote name, machine/address, ETag, checksum and local partial file. Resume
   from the actual local file length. Verify the final SHA-256 before exposing it for Save.
   A changed remote file requires a fresh download; never combine different versions.
+
+## Folders
+
+Advertised as `fileFolders` in `/health.features`; without it, clients upload single files only.
+
+* Folder upload: one tus upload per file, with base64 `relativePath` metadata such as
+  `reports/2024/q1.pdf`. Each segment must be a valid file name (no `..`, no hidden names), checked
+  at creation and again at completion. Completion creates the folders (mode 0700) only after the
+  checksum passes; the receipt's `name` is the path actually published, with the same no-overwrite
+  suffix as a single file.
+* `POST /file-folders` `{"path": "reports/empty"}`: create an empty folder of the upload. Repeating it
+  succeeds; a file in the way returns 409.
+* `GET /files?path=reports/2024`: list that folder. The response adds `path` and
+  `folders: [{"name", "modified"}]`; `files` stays direct children only, so older clients still work.
+* `GET`, `HEAD /files/{path}`: download by path, with `/` between encoded segments.
+* `POST /files/{path}/rename` `{"newName": "..."}`: rename a file or folder in place, never replacing
+  anything (409). Moving between folders is not supported.
+* `DELETE /files/{path}`: delete a file, or a folder with everything in it. Clients confirm first.
+  Symbolic links return 404 and stay; a link inside a deleted folder is removed, not its target.
+
+A symbolic link anywhere in a path returns 404 (or 409 when publishing), so a link placed in the
+shared folder cannot expose or write to anything outside it.
 
 ## Boundaries and compatibility
 

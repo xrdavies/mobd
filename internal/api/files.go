@@ -37,6 +37,11 @@ type sharedFile struct {
 	Modified time.Time `json:"modified"`
 }
 
+type sharedFolder struct {
+	Name     string    `json:"name"`
+	Modified time.Time `json:"modified"`
+}
+
 type fileReceipt struct {
 	Name   string `json:"name"`
 	Size   int64  `json:"size"`
@@ -91,7 +96,14 @@ func newFileService(dir string) *fileService {
 			if !validFileName(m["filename"]) || len(m["filename"]) > 200 || !fileDigest.MatchString(m["sha256"]) || e.Upload.SizeIsDeferred {
 				return tus.HTTPResponse{}, tus.FileInfoChanges{}, tus.NewError("INVALID_FILE", "A safe filename, SHA-256 and known size are required", 400)
 			}
-			return tus.HTTPResponse{}, tus.FileInfoChanges{MetaData: tus.MetaData{"filename": m["filename"], "sha256": m["sha256"]}}, nil
+			kept := tus.MetaData{"filename": m["filename"], "sha256": m["sha256"]}
+			if rel, ok := m["relativePath"]; ok {
+				if !validRelativePath(rel) {
+					return tus.HTTPResponse{}, tus.FileInfoChanges{}, tus.NewError("INVALID_FILE", "A safe relative path is required", 400)
+				}
+				kept["relativePath"] = rel
+			}
+			return tus.HTTPResponse{}, tus.FileInfoChanges{MetaData: kept}, nil
 		},
 	})
 	return f
@@ -114,28 +126,53 @@ func validFileName(name string) bool {
 	return !(len(stem) == 4 && (strings.HasPrefix(stem, "COM") || strings.HasPrefix(stem, "LPT")) && stem[3] >= '1' && stem[3] <= '9')
 }
 
-// validRelativePath validates a relative path for folder uploads.
-// It ensures no path traversal, no absolute paths, and all segments are valid filenames.
-func validRelativePath(path string) bool {
-	if path == "" {
+// validRelativePath accepts a slash-separated path inside the shared folder. Every segment must be
+// a valid file name, which also refuses "", ".", ".." and hidden names such as .uploads.
+func validRelativePath(rel string) bool {
+	if len(rel) > 1024 {
 		return false
 	}
-	// Reject absolute paths
-	if strings.HasPrefix(path, "/") || strings.HasPrefix(path, "\\") {
-		return false
-	}
-	// Reject paths with .. or other traversal attempts
-	if strings.Contains(path, "..") {
-		return false
-	}
-	// Split and validate each segment
-	segments := strings.Split(filepath.ToSlash(path), "/")
-	for _, seg := range segments {
-		if seg == "" || seg == "." || !validFileName(seg) {
+	for _, segment := range strings.Split(rel, "/") {
+		if !validFileName(segment) {
 			return false
 		}
 	}
 	return true
+}
+
+// lstatInside returns rel's own info after checking no folder on the way is a symbolic link: the
+// root keeps links from leaving the shared folder, this keeps paths from being aliased inside it.
+func lstatInside(root *os.Root, rel string) (os.FileInfo, error) {
+	segments := strings.Split(rel, "/")
+	for i := 1; i < len(segments); i++ {
+		info, err := root.Lstat(strings.Join(segments[:i], "/"))
+		if err != nil {
+			return nil, err
+		}
+		if !info.IsDir() {
+			return nil, os.ErrNotExist
+		}
+	}
+	return root.Lstat(rel)
+}
+
+// makeFolders creates rel and its parents; an existing file or link on the way is an error.
+func makeFolders(root *os.Root, rel string) error {
+	segments := strings.Split(rel, "/")
+	for i := 1; i <= len(segments); i++ {
+		path := strings.Join(segments[:i], "/")
+		if err := root.Mkdir(path, 0700); err != nil && !errors.Is(err, os.ErrExist) {
+			return err
+		}
+		info, err := root.Lstat(path)
+		if err != nil {
+			return err
+		}
+		if !info.IsDir() {
+			return fmt.Errorf("%s is not a folder", path)
+		}
+	}
+	return nil
 }
 
 func (f *fileService) ready(w http.ResponseWriter) bool {
@@ -210,7 +247,20 @@ func (f *fileService) list(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer root.Close()
-	dir, err := root.Open(".")
+	rel := r.URL.Query().Get("path")
+	opened := "."
+	if rel != "" {
+		if !validRelativePath(rel) {
+			writeErr(w, 400, "Invalid path")
+			return
+		}
+		if info, err := lstatInside(root, rel); err != nil || !info.IsDir() {
+			http.NotFound(w, r)
+			return
+		}
+		opened = rel
+	}
+	dir, err := root.Open(opened)
 	if err != nil {
 		writeErr(w, 500, err.Error())
 		return
@@ -221,9 +271,18 @@ func (f *fileService) list(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 500, err.Error())
 		return
 	}
-	files := []sharedFile{}
+	files, folders := []sharedFile{}, []sharedFolder{}
 	for _, e := range entries {
-		if !validFileName(e.Name()) || !e.Type().IsRegular() {
+		if !validFileName(e.Name()) {
+			continue
+		}
+		if e.IsDir() {
+			if info, err := e.Info(); err == nil {
+				folders = append(folders, sharedFolder{e.Name(), info.ModTime().UTC()})
+			}
+			continue
+		}
+		if !e.Type().IsRegular() {
 			continue
 		}
 		info, err := e.Info()
@@ -232,7 +291,8 @@ func (f *fileService) list(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	sort.Slice(files, func(i, j int) bool { return files[i].Name < files[j].Name })
-	writeJSON(w, 200, map[string]any{"directory": f.dir, "maxUploadSize": maxFileSize, "files": files})
+	sort.Slice(folders, func(i, j int) bool { return folders[i].Name < folders[j].Name })
+	writeJSON(w, 200, map[string]any{"directory": f.dir, "path": rel, "maxUploadSize": maxFileSize, "files": files, "folders": folders})
 }
 
 func (f *fileService) complete(w http.ResponseWriter, r *http.Request) {
@@ -306,37 +366,30 @@ func (f *fileService) complete(w http.ResponseWriter, r *http.Request) {
 	}
 	defer root.Close()
 
-	// Check for relativePath metadata for folder uploads
-	relativePath := info.MetaData["relativePath"]
-	var targetPath string
-	var name string
-
-	if relativePath != "" && validRelativePath(relativePath) {
-		// Folder upload: use the relative path
-		targetPath = relativePath
-		name = filepath.Base(targetPath)
-		// Create intermediate directories
-		dir := filepath.Dir(targetPath)
-		if dir != "." && dir != "" {
-			dirPath := filepath.Join(f.dir, dir)
-			if err := os.MkdirAll(dirPath, 0755); err != nil {
-				writeErr(w, 500, "Failed to create directories: "+err.Error())
-				return
-			}
-		}
-	} else {
-		// Regular flat upload: use filename metadata
-		name = info.MetaData["filename"]
-		if !validFileName(name) {
-			writeErr(w, 400, "Invalid filename")
+	// A folder upload names its place in the shared folder; the checksum has passed, so a failed
+	// upload leaves no folders behind.
+	name := info.MetaData["filename"]
+	if rel, ok := info.MetaData["relativePath"]; ok {
+		if !validRelativePath(rel) {
+			writeErr(w, 400, "Invalid path")
 			return
 		}
-		targetPath = name
+		name = rel
+	} else if !validFileName(name) {
+		writeErr(w, 400, "Invalid filename")
+		return
 	}
-
+	folder, base := "", name
+	if i := strings.LastIndex(name, "/"); i >= 0 {
+		folder, base = name[:i+1], name[i+1:]
+		if err := makeFolders(root, name[:i]); err != nil {
+			writeErr(w, 409, "Cannot create the folder: a file with that name exists")
+			return
+		}
+	}
 	source := uploadsDir + "/" + id
 	for attempt := 0; attempt < 2; attempt++ {
-		err = root.Link(source, targetPath)
+		err = root.Link(source, name)
 		if err == nil {
 			break
 		}
@@ -345,19 +398,13 @@ func (f *fileService) complete(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		a, _ := root.Stat(source)
-		b, _ := root.Lstat(targetPath)
+		b, _ := root.Lstat(name)
 		if a != nil && b != nil && os.SameFile(a, b) {
 			err = nil
 			break
 		} // retry after publication but before receipt
-		if relativePath != "" {
-			// For folder uploads, don't rename on conflict, just fail
-			break
-		}
-		ext := filepath.Ext(info.MetaData["filename"])
-		stem := strings.TrimSuffix(info.MetaData["filename"], ext)
-		name = stem + " (" + id + ")" + ext
-		targetPath = name
+		ext := filepath.Ext(base)
+		name = folder + strings.TrimSuffix(base, ext) + " (" + id + ")" + ext
 	}
 	if err != nil {
 		writeErr(w, 409, "Destination exists; cancel and upload with another name")
@@ -404,8 +451,8 @@ func (f *fileService) download(w http.ResponseWriter, r *http.Request) {
 	if !f.ready(w) {
 		return
 	}
-	name := r.PathValue("name")
-	if !validFileName(name) {
+	name := r.PathValue("path")
+	if !validRelativePath(name) {
 		http.NotFound(w, r)
 		return
 	}
@@ -415,7 +462,7 @@ func (f *fileService) download(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer root.Close()
-	info, err := root.Lstat(name)
+	info, err := lstatInside(root, name)
 	if err != nil || !info.Mode().IsRegular() {
 		http.NotFound(w, r)
 		return
@@ -458,64 +505,128 @@ func (f *fileService) download(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/octet-stream")
-	w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": name}))
+	w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": filepath.Base(name)}))
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("ETag", `"sha256-`+sum+`"`)
 	w.Header().Set("X-Content-SHA256", sum)
-	http.ServeContent(w, r, name, info.ModTime(), file)
+	http.ServeContent(w, r, filepath.Base(name), info.ModTime(), file)
 }
 
+// rename handles POST /files/{path}/rename: a new name in the same folder, for a file or a folder.
 func (f *fileService) rename(w http.ResponseWriter, r *http.Request) {
-	name := r.PathValue("name")
-	if !validFileName(name) {
-		writeErr(w, 400, "Invalid filename")
+	if !f.ready(w) {
+		return
+	}
+	rel, ok := strings.CutSuffix(r.PathValue("path"), "/rename")
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+	if !validRelativePath(rel) {
+		writeErr(w, 400, "Invalid path")
 		return
 	}
 	var req struct {
 		NewName string `json:"newName"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&req); err != nil {
 		writeErr(w, 400, "Invalid JSON")
 		return
 	}
-	if !validFileName(req.NewName) {
-		writeErr(w, 400, "Invalid new filename")
+	if !validFileName(req.NewName) || len(req.NewName) > 200 {
+		writeErr(w, 400, "Invalid new name")
 		return
 	}
-	if strings.HasPrefix(req.NewName, ".") {
-		writeErr(w, 400, "Filename cannot start with a dot")
+	root, err := f.openFiles()
+	if err != nil {
+		writeErr(w, 500, err.Error())
 		return
 	}
-	oldPath := filepath.Join(f.dir, name)
-	newPath := filepath.Join(f.dir, req.NewName)
-	if _, err := os.Stat(oldPath); os.IsNotExist(err) {
-		writeErr(w, 404, "File not found")
+	defer root.Close()
+	info, err := lstatInside(root, rel)
+	if err != nil || !(info.Mode().IsRegular() || info.IsDir()) {
+		http.NotFound(w, r)
 		return
 	}
-	if _, err := os.Stat(newPath); err == nil {
-		writeErr(w, 409, "A file with that name already exists")
+	target := req.NewName
+	if i := strings.LastIndex(rel, "/"); i >= 0 {
+		target = rel[:i+1] + req.NewName
+	}
+	if _, err := root.Lstat(target); err == nil {
+		writeErr(w, 409, "A file or folder with that name already exists")
 		return
 	}
-	if err := os.Rename(oldPath, newPath); err != nil {
+	if info.IsDir() {
+		err = root.Rename(rel, target)
+	} else if err = root.Link(rel, target); err == nil { // Link refuses to replace, unlike Rename
+		err = root.Remove(rel)
+	}
+	if errors.Is(err, os.ErrExist) {
+		writeErr(w, 409, "A file or folder with that name already exists")
+		return
+	}
+	if err != nil {
 		writeErr(w, 500, err.Error())
 		return
 	}
 	w.WriteHeader(204)
 }
 
-func (f *fileService) delete(w http.ResponseWriter, r *http.Request) {
-	name := r.PathValue("name")
-	if !validFileName(name) {
-		writeErr(w, 400, "Invalid filename")
+// remove handles DELETE /files/{path}: a file, or a folder with everything in it. A symbolic link
+// is not shared, so it stays. Clients confirm with the user first.
+func (f *fileService) remove(w http.ResponseWriter, r *http.Request) {
+	if !f.ready(w) {
 		return
 	}
-	path := filepath.Join(f.dir, name)
-	if err := os.Remove(path); err != nil {
-		if os.IsNotExist(err) {
-			writeErr(w, 404, "File not found")
-			return
-		}
+	rel := r.PathValue("path")
+	if !validRelativePath(rel) {
+		writeErr(w, 400, "Invalid path")
+		return
+	}
+	root, err := f.openFiles()
+	if err != nil {
 		writeErr(w, 500, err.Error())
+		return
+	}
+	defer root.Close()
+	info, err := lstatInside(root, rel)
+	if err != nil || !(info.Mode().IsRegular() || info.IsDir()) {
+		http.NotFound(w, r)
+		return
+	}
+	if info.IsDir() {
+		err = root.RemoveAll(rel)
+	} else {
+		err = root.Remove(rel)
+	}
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	w.WriteHeader(204)
+}
+
+// createFolder handles POST /file-folders: empty folders of a folder upload have no file to carry
+// their path. Creating one that exists succeeds, so a retried upload does not fail.
+func (f *fileService) createFolder(w http.ResponseWriter, r *http.Request) {
+	if !f.ready(w) {
+		return
+	}
+	var req struct {
+		Path string `json:"path"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&req); err != nil || !validRelativePath(req.Path) {
+		writeErr(w, 400, "Invalid path")
+		return
+	}
+	root, err := f.openFiles()
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	defer root.Close()
+	if err := makeFolders(root, req.Path); err != nil {
+		writeErr(w, 409, "Cannot create the folder: a file with that name exists")
 		return
 	}
 	w.WriteHeader(204)

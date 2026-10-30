@@ -178,8 +178,11 @@ Invitation redemption and preview are documented in [pairing](pairing.md).
 | GET | `/screen` | Current desktop snapshot. `?format=png\|jpeg` (default jpeg), `?maxWidth=` (default full size), `?quality=1..100` (default 80). With `sessionDesktops`, `?sessionId=` picks the conversation; an asleep desktop answers with its last frame and `X-Mob-Desktop-State: asleep` without waking; **409** `no_desktop` when it has none |
 | POST | `/uploads` | `multipart/form-data` field `file`; PNG/JPEG/GIF/WebP up to 20 MiB → `{id, name, mime, size, url}` |
 | GET | `/artifacts/{id}` | Stored image (screenshots from tool results, uploads). Authenticated, `Cache-Control: no-store` |
-| GET | `/files` | Shared directory path, upload limit and regular file list; see [file transfers](file-transfers.md) |
-| GET, HEAD | `/files/{name}` | Authenticated attachment with SHA-256, ETag, Range and If-Match support |
+| GET | `/files` | Shared directory path, upload limit, files and folders; `?path=` lists a folder; see [file transfers](file-transfers.md) |
+| GET, HEAD | `/files/{path}` | Authenticated attachment with SHA-256, ETag, Range and If-Match support |
+| POST | `/files/{path}/rename` | `{newName}`: rename a file or folder in place, never replacing anything |
+| DELETE | `/files/{path}` | Delete a file, or a folder with its contents |
+| POST | `/file-folders` | `{path}`: create a folder (empty folders of a folder upload) |
 | POST, HEAD, PATCH, DELETE | `/file-uploads/`, `/file-uploads/{id}` | tus 1.0 creation, resume and cancellation; maximum 20 GiB |
 | POST | `/file-uploads/{id}/complete` | Verify checksum and publish without overwriting; idempotent receipt |
 | POST | `/tasks/{id}/questions/{qid}/answer` | Answer a pending question: `{answer}` (questions) or `{approved, answer?}` (approvals) → question; 409 if already settled ([runners.md](runners.md#asking-the-user-ask_user-request_approval)) |
