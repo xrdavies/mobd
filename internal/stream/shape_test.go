@@ -96,8 +96,9 @@ func TestRateControlOnAnImpairedLink(t *testing.T) {
 	shaped := newShapedConn(udp)
 	h := harnessWith(t, func(c *Config) { c.UDP = shaped })
 	v, _ := connect(t, h.m, "desk", Request{Quality: "auto"})
-	perSecond := func(n int) []int64 {
-		var out, offered []int64
+	// Received kbps and the encoder target, once a second.
+	perSecond := func(n int) (out, targets []int64) {
+		var offered []int64
 		last, lastOff := v.bytes.Load(), shaped.offered.Load()
 		for range n {
 			time.Sleep(time.Second)
@@ -105,31 +106,35 @@ func TestRateControlOnAnImpairedLink(t *testing.T) {
 			out = append(out, (b-last)*8/1000)
 			offered = append(offered, (o-lastOff)*8/1000)
 			last, lastOff = b, o
+			targets = append(targets, int64(h.last().kbps.Load()))
 		}
 		t.Logf("offered to the link kbps %v", offered)
-		return out
+		return out, targets
 	}
-	clean := perSecond(5)
+	clean, _ := perSecond(5)
 	t.Logf("clean:  received kbps %v, target %d", clean, h.last().kbps.Load())
 	shaped.set(2000, 0.01, 20*time.Millisecond)
-	impaired := perSecond(15)
-	target := h.last().kbps.Load()
-	t.Logf("2 Mbps / 1%% / 20 ms: received kbps %v, target %d", impaired, target)
+	impaired, targets := perSecond(15)
+	t.Logf("2 Mbps / 1%% / 20 ms: received kbps %v, targets %v", impaired, targets)
 	tail := impaired[7:]
-	var sum int64
+	var sum, targetSum int64
 	for i, k := range tail {
 		if k == 0 {
 			t.Fatalf("picture froze in second %d of the impaired tail: %v", i, tail)
 		}
 		sum += k
+		targetSum += targets[7+i]
 	}
-	if mean := sum / int64(len(tail)); mean < 1000 || mean > 2100 || target > 2400 {
-		t.Fatalf("impaired tail mean %d kbps, target %d: should settle under the 2 Mbps link without collapsing", mean, target)
+	// The target probes up and backs off on a saturated link, so a single reading can sit above
+	// it (a busy CI runner once read 2499); its mean over the tail must not.
+	mean, target := sum/int64(len(tail)), targetSum/int64(len(tail))
+	if mean < 1000 || mean > 2100 || target > 2400 {
+		t.Fatalf("impaired tail mean %d kbps, mean target %d: should settle under the 2 Mbps link without collapsing", mean, target)
 	}
 	shaped.set(0, 0, 0)
-	recovered := perSecond(12)
+	recovered, _ := perSecond(12)
 	t.Logf("cleared: received kbps %v, target %d", recovered, h.last().kbps.Load())
-	if k := h.last().kbps.Load(); k < 2*target || k < 2500 {
+	if k := int64(h.last().kbps.Load()); k < 2*target || k < 2500 {
 		t.Fatalf("did not recover: target %d after clearing (impaired target %d)", k, target)
 	}
 }
