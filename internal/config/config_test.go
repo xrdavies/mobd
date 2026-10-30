@@ -182,6 +182,18 @@ func TestStateAndMCP(t *testing.T) {
 	if cfg.StatePath != path || cfg.DataDir != filepath.Dir(path) || cfg.MobMCPCommand != "/opt/mcp" || !reflect.DeepEqual(cfg.MobMCPArgs, []string{"--flag"}) {
 		t.Fatalf("config: %+v", cfg)
 	}
+	if home, _ := os.UserHomeDir(); cfg.FilesDir != filepath.Join(home, "mob-files") {
+		t.Fatalf("shared folder default: %s", cfg.FilesDir)
+	}
+	shared := filepath.Join(t.TempDir(), "shared")
+	t.Setenv("MOBD_FILES_DIR", shared)
+	if got := loadTest(t, `{}`).FilesDir; got != shared {
+		t.Fatalf("MOBD_FILES_DIR: %s", got)
+	}
+	os.Unsetenv("MOBD_FILES_DIR") // t.Setenv above restores it after the test
+	if got := loadTest(t, `{"filesDir": "`+shared+`"}`).FilesDir; got != shared {
+		t.Fatalf("filesDir: %s", got)
+	}
 	t.Setenv("MOBD_MOB_MCP_COMMAND", "")
 	if !loadTest(t, `{}`).UsesBuiltinMCP() {
 		t.Fatal("empty command must restore builtin MCP")

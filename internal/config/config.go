@@ -23,23 +23,25 @@ type Config struct {
 	// firewall or tailnet rule can name it; 0 picks a random port per session.
 	StreamPort int `json:"streamPort"`
 	// StreamUDP is the socket bound to StreamPort by serve.
-	StreamUDP            net.PacketConn `json:"-"`
-	CodexBin             string         `json:"codexBin"`
-	CodexWorkDir         string         `json:"workdir"`
-	MobMCPCommand        string         `json:"mcpCommand"`
-	MobMCPArgs           []string       `json:"mcpArgs"`
-	SharedSecret         string         `json:"sharedSecret,omitempty"`
-	StatePath            string         `json:"statePath"`
-	CORSOrigins          []string       `json:"corsOrigins"`
-	MaxRunning           int            `json:"maxRunning"`
-	DataDir              string         `json:"dataDir"`
-	CodexMode            string         `json:"codexMode"`
-	Runners              []string       `json:"runners"`
-	ClaudeBin            string         `json:"claudeBin"`
-	ClaudeWorkDir        string         `json:"claudeWorkdir"`
-	ClaudeSettingSources string         `json:"claudeSettingSources"`
-	PiBin                string         `json:"piBin"`
-	QuestionTimeout      time.Duration  `json:"-"`
+	StreamUDP     net.PacketConn `json:"-"`
+	CodexBin      string         `json:"codexBin"`
+	CodexWorkDir  string         `json:"workdir"`
+	MobMCPCommand string         `json:"mcpCommand"`
+	MobMCPArgs    []string       `json:"mcpArgs"`
+	SharedSecret  string         `json:"sharedSecret,omitempty"`
+	StatePath     string         `json:"statePath"`
+	CORSOrigins   []string       `json:"corsOrigins"`
+	MaxRunning    int            `json:"maxRunning"`
+	DataDir       string         `json:"dataDir"`
+	// FilesDir is the folder shared with paired devices: uploads land here, downloads come from here.
+	FilesDir             string        `json:"filesDir"`
+	CodexMode            string        `json:"codexMode"`
+	Runners              []string      `json:"runners"`
+	ClaudeBin            string        `json:"claudeBin"`
+	ClaudeWorkDir        string        `json:"claudeWorkdir"`
+	ClaudeSettingSources string        `json:"claudeSettingSources"`
+	PiBin                string        `json:"piBin"`
+	QuestionTimeout      time.Duration `json:"-"`
 
 	// Desktops (desktop.go). Linux only, except desktopMode; inert until the Linux desktop manager.
 	DesktopMode           string        `json:"desktopMode"`
@@ -179,7 +181,7 @@ func Load(args []string) (Config, string, error) {
 		"MOBD_LISTEN":         &cfg.ListenAddr, "MOBD_CODEX_BIN": &cfg.CodexBin,
 		"MOBD_CODEX_WORKDIR": &cfg.CodexWorkDir, "MOBD_MOB_MCP_COMMAND": &cfg.MobMCPCommand,
 		"MOBD_SHARED_SECRET": &cfg.SharedSecret,
-		"MOBD_STATE_PATH":    &cfg.StatePath, "MOBD_DATA_DIR": &cfg.DataDir,
+		"MOBD_STATE_PATH":    &cfg.StatePath, "MOBD_DATA_DIR": &cfg.DataDir, "MOBD_FILES_DIR": &cfg.FilesDir,
 		"MOBD_CODEX_MODE": &cfg.CodexMode, "MOBD_CLAUDE_BIN": &cfg.ClaudeBin,
 		"MOBD_CLAUDE_WORKDIR": &cfg.ClaudeWorkDir, "MOBD_CLAUDE_SETTING_SOURCES": &cfg.ClaudeSettingSources,
 		"MOBD_PI_BIN": &cfg.PiBin,
@@ -320,6 +322,18 @@ func Load(args []string) (Config, string, error) {
 		cfg.DataDir = filepath.Dir(cfg.StatePath)
 	}
 	cfg.DataDir, err = filepath.Abs(cfg.DataDir)
+	if err != nil {
+		return cfg, path, err
+	}
+	// A visible folder without spaces, outside the folders macOS protects (Documents, Downloads).
+	if cfg.FilesDir == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return cfg, path, err
+		}
+		cfg.FilesDir = filepath.Join(home, "mob-files")
+	}
+	cfg.FilesDir, err = filepath.Abs(cfg.FilesDir)
 	if err != nil {
 		return cfg, path, err
 	}

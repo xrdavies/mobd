@@ -331,7 +331,7 @@ curl -H "Authorization: Bearer $MOBD_TOKEN" -s -X POST localhost:8080/tasks/TASK
 ```
 
 General file exchange uses [tus uploads and HTTP Range downloads](docs/file-transfers.md).
-Clients show the shared `<dataDir>/files/` directory; uploads are checksum-verified before
+Clients show the shared folder (`filesDir`, default `~/mob-files`); uploads are checksum-verified before
 publication and never overwrite an existing file.
 
 Task options, attachments, session management and live updates
@@ -382,6 +382,7 @@ curl -H "Authorization: Bearer $MOBD_TOKEN" -s localhost:8080/artifacts/ARTIFACT
 | `statePath` | `MOBD_STATE_PATH` | macOS: `~/Library/Application Support/mob/state.json`; Linux: `~/.local/share/mob/state.json` (`$XDG_DATA_HOME`); Windows: `%APPDATA%\mob\state.json` | Private conversation snapshot |
 | `maxRunning` | `MOBD_MAX_RUNNING` | `1`; `4` on Linux with a desktop per conversation | Tasks running at once across all sessions; others wait in the FIFO desktop queue |
 | `dataDir` | `MOBD_DATA_DIR` | directory of `MOBD_STATE_PATH` | Root of `artifacts/` (tool screenshots, uploads) and private `auth.json` |
+| `filesDir` | `MOBD_FILES_DIR` | `~/mob-files` | Folder shared with paired devices for file transfers; unfinished uploads in its hidden `.uploads/` |
 | `corsOrigins` | `MOBD_CORS_ORIGINS` | `http://localhost:1420,http://127.0.0.1:1420,tauri://localhost,http://tauri.localhost` | Comma-separated exact origins; a nonempty value replaces the defaults |
 | `questionTimeout` | `MOBD_QUESTION_TIMEOUT` | `30m` | How long a turn waits for your answer to the agent's question or approval request |
 | `runners` | `MOBD_RUNNERS` | `codex,claude` | Enabled runners |

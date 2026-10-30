@@ -86,7 +86,7 @@ func New(cfg config.Config, store *task.Store, auth *pairing.Store, desktops des
 		tokens: make(map[string]string), waiters: make(map[string]chan struct{}),
 		reservations: make(map[string]desktop.Reservation), starting: make(map[string]bool),
 	}
-	s.files = newFileService(dataDir(cfg))
+	s.files = newFileService(filesDir(cfg))
 	// settings.json is created on the first start and gets an entry for each newly enabled agent.
 	var enabled []string
 	for _, r := range runners {
@@ -135,6 +135,14 @@ func New(cfg config.Config, store *task.Store, auth *pairing.Store, desktops des
 	// a waiting turn through.
 	desktops.Subscribe(s.onDesktopEvent)
 	return s
+}
+
+// filesDir is the shared folder; configs built in tests keep it inside their data directory.
+func filesDir(cfg config.Config) string {
+	if cfg.FilesDir != "" {
+		return cfg.FilesDir
+	}
+	return filepath.Join(dataDir(cfg), "files")
 }
 
 // dataDir falls back to a private temp directory for configs built in tests.

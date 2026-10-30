@@ -58,20 +58,25 @@ type cachedDigest struct {
 	sum  string
 }
 
+// uploadsDir holds unfinished uploads inside the shared folder: the same file system, so
+// publishing is an atomic link, and hidden from the listing like any dot name.
+const uploadsDir = ".uploads"
+
+// newFileService serves dir, the folder shared with paired devices.
 func newFileService(dir string) *fileService {
 	f := &fileService{dir: dir, digests: make(map[string]cachedDigest)}
-	for _, name := range []string{"files", "file-uploads"} {
-		if err := os.MkdirAll(filepath.Join(dir, name), 0700); err != nil {
+	for _, path := range []string{dir, filepath.Join(dir, uploadsDir)} {
+		if err := os.MkdirAll(path, 0700); err != nil {
 			f.err = err
 			return f
 		}
-		info, err := os.Lstat(filepath.Join(dir, name))
+		info, err := os.Lstat(path)
 		if err != nil || !info.IsDir() {
-			f.err = fmt.Errorf("%s must be a directory, not a symbolic link", name)
+			f.err = fmt.Errorf("%s must be a directory, not a symbolic link", path)
 			return f
 		}
 	}
-	f.store = filestore.New(filepath.Join(dir, "file-uploads"))
+	f.store = filestore.New(filepath.Join(dir, uploadsDir))
 	f.store.FileModePerm, f.store.DirModePerm = 0600, 0700
 	f.locker = filelocker.New(f.store.Path)
 	composer := tus.NewStoreComposer()
@@ -93,7 +98,8 @@ func newFileService(dir string) *fileService {
 }
 
 func validFileName(name string) bool {
-	if name == "" || name == "." || name == ".." || !utf8.ValidString(name) || len(name) > 240 || strings.TrimRight(name, ". ") != name {
+	// Dot names are hidden: .uploads, and what Finder or editors leave behind (.DS_Store).
+	if name == "" || strings.HasPrefix(name, ".") || !utf8.ValidString(name) || len(name) > 240 || strings.TrimRight(name, ". ") != name {
 		return false
 	}
 	for _, c := range name {
@@ -138,19 +144,14 @@ func (w uploadResponse) WriteHeader(status int) {
 func (w uploadResponse) Unwrap() http.ResponseWriter { return w.ResponseWriter }
 
 func (f *fileService) openFiles() (*os.Root, error) {
-	parent, err := os.OpenRoot(f.dir)
-	if err != nil {
-		return nil, err
-	}
-	defer parent.Close()
-	info, err := parent.Lstat("files")
+	info, err := os.Lstat(f.dir)
 	if err != nil {
 		return nil, err
 	}
 	if !info.IsDir() {
 		return nil, errors.New("File directory must not be a symbolic link")
 	}
-	root, err := parent.OpenRoot("files")
+	root, err := os.OpenRoot(f.dir)
 	if err != nil {
 		return nil, err
 	}
@@ -207,7 +208,7 @@ func (f *fileService) list(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	sort.Slice(files, func(i, j int) bool { return files[i].Name < files[j].Name })
-	writeJSON(w, 200, map[string]any{"directory": filepath.Join(f.dir, "files"), "maxUploadSize": maxFileSize, "files": files})
+	writeJSON(w, 200, map[string]any{"directory": f.dir, "maxUploadSize": maxFileSize, "files": files})
 }
 
 func (f *fileService) complete(w http.ResponseWriter, r *http.Request) {
@@ -274,25 +275,20 @@ func (f *fileService) complete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Link is atomic and refuses to replace an existing name, including a symlink.
-	root, err := os.OpenRoot(f.dir)
+	root, err := f.openFiles()
 	if err != nil {
-		writeErr(w, 500, err.Error())
+		writeErr(w, 500, "File directory is unavailable or is a symbolic link")
 		return
 	}
 	defer root.Close()
 	name := info.MetaData["filename"]
-	directory, err := root.Lstat("files")
-	if err != nil || !directory.IsDir() {
-		writeErr(w, 500, "File directory is unavailable or is a symbolic link")
-		return
-	}
 	if !validFileName(name) {
 		writeErr(w, 400, "Invalid filename")
 		return
 	}
-	source := "file-uploads/" + id
+	source := uploadsDir + "/" + id
 	for attempt := 0; attempt < 2; attempt++ {
-		err = root.Link(source, "files/"+name)
+		err = root.Link(source, name)
 		if err == nil {
 			break
 		}
@@ -301,7 +297,7 @@ func (f *fileService) complete(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		a, _ := root.Stat(source)
-		b, _ := root.Lstat("files/" + name)
+		b, _ := root.Lstat(name)
 		if a != nil && b != nil && os.SameFile(a, b) {
 			err = nil
 			break

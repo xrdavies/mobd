@@ -10,11 +10,13 @@ file to download and save using the operating system's file picker. Show bytes t
 pause/continue, failure/retry, and cancel. Transfers and their staged files survive app
 restarts. A retry continues the existing transfer; it does not silently overwrite a file.
 
-The shared remote directory is `<mobd dataDir>/files/`; the screen displays its absolute
+The shared remote directory is mobd's `filesDir`, by default `~/mob-files` (`MOBD_FILES_DIR`):
+a visible folder without spaces, outside the folders macOS protects. The screen displays its absolute
 path so it can be copied into a conversation. Agents can read uploaded files there and copy
 files from other locations into it. The directory is machine-wide, shared by paired clients
 and agents, and independent of conversation deletion. Agent prompt changes are deferred.
 Only regular files immediately in this directory are listed; archive folders before transfer.
+Names starting with `.` are never listed or accepted (`.uploads`, Finder's `.DS_Store`).
 
 First release: foreground transfers, including recovery after a network interruption or
 app restart. Mobile apps pause when backgrounded. Continuous background transfer, folder
@@ -36,7 +38,8 @@ attachments (`POST /uploads`) remain unchanged.
   This step is idempotent: persist the upload URL before calling it, and retry after a lost
   response. A completed byte transfer is not reported as success until publication succeeds.
 
-Partial uploads live in `<dataDir>/file-uploads/`, outside the shared directory. Publish
+Partial uploads live in `<filesDir>/.uploads/`: hidden from the listing, and on the same file
+system as the shared folder, so publication is an atomic link. Publish
 without overwriting: keep the requested name if available, otherwise add the upload ID
 before its extension. Publication must be atomic. Cancel removes the partial upload; pause
 keeps it. There is no timed expiry in this release, so abandoned uploads retain disk space

@@ -80,7 +80,7 @@ func TestFileTransferResumePublishAndDownload(t *testing.T) {
 		t.Fatalf("partial visible: %s", listing.Body.String())
 	}
 	// Reconstruct the file service to lose every in-memory upload/offset cache.
-	s.files = newFileService(s.cfg.DataDir)
+	s.files = newFileService(filesDir(s.cfg))
 	h = authenticatedHandler(t, s)
 	if w := fileRequest(t, h, "HEAD", location, nil, nil); w.Code != 200 || w.Header().Get("Upload-Offset") != "10000" {
 		t.Fatalf("resume: %d %v", w.Code, w.Header())
@@ -180,5 +180,45 @@ func TestFileTransferValidationAuthenticationAndCORS(t *testing.T) {
 	}
 	if w := fileRequest(t, s.Handler(), "OPTIONS", "/file-uploads/", nil, map[string]string{"Origin": "https://untrusted.invalid"}); w.Code != 403 {
 		t.Fatalf("CORS origin allowed: %d", w.Code)
+	}
+}
+
+func TestSharedFolderHidesDotNamesAndKeepsPartialsInUploads(t *testing.T) {
+	s := testServer(t, "")
+	h := authenticatedHandler(t, s)
+	dir := filesDir(s.cfg)
+	// Finder leaves .DS_Store in a visible folder; dot names are never listed or accepted.
+	if err := os.WriteFile(filepath.Join(dir, ".DS_Store"), []byte("finder"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{".DS_Store", ".uploads", ".hidden.txt", "."} {
+		if validFileName(name) {
+			t.Fatalf("accepted %q", name)
+		}
+	}
+	data := []byte("visible")
+	location := createFileUpload(t, h, "notes.txt", data)
+	appendFileUpload(t, h, location, 0, data[:3])
+	id := strings.TrimPrefix(location, "/file-uploads/")
+	if _, err := os.Stat(filepath.Join(dir, uploadsDir, id)); err != nil {
+		t.Fatalf("partial not in %s: %v", uploadsDir, err)
+	}
+	appendFileUpload(t, h, location, 3, data[3:])
+	finishFileUpload(t, h, location)
+	var listing struct {
+		Directory string `json:"directory"`
+		Files     []struct {
+			Name string `json:"name"`
+		} `json:"files"`
+	}
+	w := fileRequest(t, h, "GET", "/files", nil, nil)
+	if err := json.Unmarshal(w.Body.Bytes(), &listing); err != nil {
+		t.Fatal(err)
+	}
+	if listing.Directory != dir || len(listing.Files) != 1 || listing.Files[0].Name != "notes.txt" {
+		t.Fatalf("listing: %s", w.Body.String())
+	}
+	if w := fileRequest(t, h, "GET", "/files/.DS_Store", nil, nil); w.Code != 404 {
+		t.Fatalf("dot file served: %d", w.Code)
 	}
 }

@@ -305,7 +305,8 @@ JSON keys, environment variables and defaults.
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `MOBD_MAX_RUNNING` | `1` | Tasks allowed to run at once (one desktop → 1) |
-| `MOBD_DATA_DIR` | directory of `MOBD_STATE_PATH` | Root for `artifacts/` (images), `files/` (shared files) and `file-uploads/` (tus staging) |
+| `MOBD_DATA_DIR` | directory of `MOBD_STATE_PATH` | Root for `artifacts/` (images) |
+| `MOBD_FILES_DIR` | `~/mob-files` | Folder shared with paired devices; tus staging in its hidden `.uploads/` |
 | `MOBD_QUESTION_TIMEOUT` | `30m` | How long a turn waits for an answer to `ask_user` / `request_approval` |
 
 ## Internal structure
