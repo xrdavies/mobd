@@ -10,11 +10,15 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/xrdavies/mobd/internal/config"
 )
 
 const label = "com.xrdavies.mobd"
+
+// unloadTimeout bounds the wait for launchd after bootout; mobd itself stops within seconds.
+var unloadTimeout = 10 * time.Second
 
 // launchd manages the current user's macOS LaunchAgent.
 type launchd struct {
@@ -95,6 +99,15 @@ func (m *launchd) Stop() error {
 	if m.loaded() {
 		if out, err := m.run("bootout", m.target); err != nil {
 			return fmt.Errorf("launchctl bootout: %w: %s", err, out)
+		}
+		// bootout returns while launchd is still removing the service, and bootstrapping it
+		// again until that finishes fails: mobd restart would leave mobd stopped.
+		deadline := time.Now().Add(unloadTimeout)
+		for m.loaded() {
+			if time.Now().After(deadline) {
+				return errors.New("mobd is still unloading; check mobd status and try again")
+			}
+			time.Sleep(100 * time.Millisecond)
 		}
 	}
 	for _, path := range []string{m.plist, filepath.Join(m.dir, "mobd.plist")} {

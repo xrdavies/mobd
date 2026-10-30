@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/xrdavies/mobd/internal/config"
 	"github.com/xrdavies/mobd/internal/control"
@@ -60,12 +61,57 @@ func TestStopFailurePreservesLogin(t *testing.T) {
 	if _, err := os.Stat(plist); err != nil {
 		t.Fatal("login config deleted after failed stop")
 	}
-	m.run = func(...string) ([]byte, error) { return nil, nil }
+	m.run = unloadingLaunchctl(0)
 	if err := m.Stop(); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(plist); !os.IsNotExist(err) {
 		t.Fatal("login config not removed")
+	}
+}
+
+// unloadingLaunchctl reports the service as loaded for checks more print calls after bootout.
+func unloadingLaunchctl(checks int) func(...string) ([]byte, error) {
+	booted := false
+	return func(args ...string) ([]byte, error) {
+		switch {
+		case args[0] == "bootout":
+			booted = true
+		case !booted:
+		case checks > 0:
+			checks--
+		default:
+			return nil, errors.New("not loaded")
+		}
+		return nil, nil
+	}
+}
+
+func TestStopWaitsForLaunchdToUnload(t *testing.T) {
+	m := launchd{dir: t.TempDir(), plist: filepath.Join(t.TempDir(), "mobd.plist"), target: "gui/123/test", run: unloadingLaunchctl(3)}
+	if err := m.Stop(); err != nil {
+		t.Fatal(err)
+	}
+	if m.loaded() {
+		t.Fatal("Stop returned while the service was still loaded")
+	}
+}
+
+func TestStopReportsAServiceThatStaysLoaded(t *testing.T) {
+	previous := unloadTimeout
+	unloadTimeout = 150 * time.Millisecond
+	defer func() { unloadTimeout = previous }()
+	dir := t.TempDir()
+	plist := filepath.Join(dir, "mobd.plist")
+	if err := writePrivate(plist, []byte("config")); err != nil {
+		t.Fatal(err)
+	}
+	m := launchd{dir: dir, plist: plist, target: "gui/123/test", run: func(...string) ([]byte, error) { return nil, nil }}
+	if err := m.Stop(); err == nil {
+		t.Fatal("a service that stayed loaded was reported as stopped")
+	}
+	if _, err := os.Stat(plist); err != nil {
+		t.Fatal("login config deleted while the service is still loaded")
 	}
 }
 
