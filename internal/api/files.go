@@ -411,3 +411,59 @@ func (f *fileService) download(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Content-SHA256", sum)
 	http.ServeContent(w, r, name, info.ModTime(), file)
 }
+
+func (f *fileService) rename(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	if !validFileName(name) {
+		writeErr(w, 400, "Invalid filename")
+		return
+	}
+	var req struct {
+		NewName string `json:"newName"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, 400, "Invalid JSON")
+		return
+	}
+	if !validFileName(req.NewName) {
+		writeErr(w, 400, "Invalid new filename")
+		return
+	}
+	if strings.HasPrefix(req.NewName, ".") {
+		writeErr(w, 400, "Filename cannot start with a dot")
+		return
+	}
+	oldPath := filepath.Join(f.dir, name)
+	newPath := filepath.Join(f.dir, req.NewName)
+	if _, err := os.Stat(oldPath); os.IsNotExist(err) {
+		writeErr(w, 404, "File not found")
+		return
+	}
+	if _, err := os.Stat(newPath); err == nil {
+		writeErr(w, 409, "A file with that name already exists")
+		return
+	}
+	if err := os.Rename(oldPath, newPath); err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	w.WriteHeader(204)
+}
+
+func (f *fileService) delete(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	if !validFileName(name) {
+		writeErr(w, 400, "Invalid filename")
+		return
+	}
+	path := filepath.Join(f.dir, name)
+	if err := os.Remove(path); err != nil {
+		if os.IsNotExist(err) {
+			writeErr(w, 404, "File not found")
+			return
+		}
+		writeErr(w, 500, err.Error())
+		return
+	}
+	w.WriteHeader(204)
+}

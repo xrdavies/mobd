@@ -193,6 +193,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /artifacts/{id}", s.handleArtifact)
 	mux.HandleFunc("GET /files", s.files.list)
 	mux.HandleFunc("GET /files/{name}", s.files.download)
+	mux.HandleFunc("POST /files/{name}/rename", s.files.rename)
+	mux.HandleFunc("DELETE /files/{name}", s.files.delete)
 	mux.HandleFunc("POST /file-uploads/{id}/complete", s.files.complete)
 	mux.Handle("/file-uploads/", http.HandlerFunc(s.files.upload))
 	mux.HandleFunc("POST /stream", s.handleStreamOpen)
