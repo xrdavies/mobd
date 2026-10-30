@@ -114,6 +114,30 @@ func validFileName(name string) bool {
 	return !(len(stem) == 4 && (strings.HasPrefix(stem, "COM") || strings.HasPrefix(stem, "LPT")) && stem[3] >= '1' && stem[3] <= '9')
 }
 
+// validRelativePath validates a relative path for folder uploads.
+// It ensures no path traversal, no absolute paths, and all segments are valid filenames.
+func validRelativePath(path string) bool {
+	if path == "" {
+		return false
+	}
+	// Reject absolute paths
+	if strings.HasPrefix(path, "/") || strings.HasPrefix(path, "\\") {
+		return false
+	}
+	// Reject paths with .. or other traversal attempts
+	if strings.Contains(path, "..") {
+		return false
+	}
+	// Split and validate each segment
+	segments := strings.Split(filepath.ToSlash(path), "/")
+	for _, seg := range segments {
+		if seg == "" || seg == "." || !validFileName(seg) {
+			return false
+		}
+	}
+	return true
+}
+
 func (f *fileService) ready(w http.ResponseWriter) bool {
 	if f.err != nil {
 		writeErr(w, 503, "File storage unavailable: "+f.err.Error())
@@ -281,14 +305,38 @@ func (f *fileService) complete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer root.Close()
-	name := info.MetaData["filename"]
-	if !validFileName(name) {
-		writeErr(w, 400, "Invalid filename")
-		return
+
+	// Check for relativePath metadata for folder uploads
+	relativePath := info.MetaData["relativePath"]
+	var targetPath string
+	var name string
+
+	if relativePath != "" && validRelativePath(relativePath) {
+		// Folder upload: use the relative path
+		targetPath = relativePath
+		name = filepath.Base(targetPath)
+		// Create intermediate directories
+		dir := filepath.Dir(targetPath)
+		if dir != "." && dir != "" {
+			dirPath := filepath.Join(f.dir, dir)
+			if err := os.MkdirAll(dirPath, 0755); err != nil {
+				writeErr(w, 500, "Failed to create directories: "+err.Error())
+				return
+			}
+		}
+	} else {
+		// Regular flat upload: use filename metadata
+		name = info.MetaData["filename"]
+		if !validFileName(name) {
+			writeErr(w, 400, "Invalid filename")
+			return
+		}
+		targetPath = name
 	}
+
 	source := uploadsDir + "/" + id
 	for attempt := 0; attempt < 2; attempt++ {
-		err = root.Link(source, name)
+		err = root.Link(source, targetPath)
 		if err == nil {
 			break
 		}
@@ -297,14 +345,19 @@ func (f *fileService) complete(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		a, _ := root.Stat(source)
-		b, _ := root.Lstat(name)
+		b, _ := root.Lstat(targetPath)
 		if a != nil && b != nil && os.SameFile(a, b) {
 			err = nil
 			break
 		} // retry after publication but before receipt
+		if relativePath != "" {
+			// For folder uploads, don't rename on conflict, just fail
+			break
+		}
 		ext := filepath.Ext(info.MetaData["filename"])
 		stem := strings.TrimSuffix(info.MetaData["filename"], ext)
 		name = stem + " (" + id + ")" + ext
+		targetPath = name
 	}
 	if err != nil {
 		writeErr(w, 409, "Destination exists; cancel and upload with another name")
