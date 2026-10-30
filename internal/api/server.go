@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -36,6 +37,7 @@ type Server struct {
 	hub       *hub
 	artifacts *artifact.Store
 	health    healthCache
+	files     *fileService
 
 	streams *stream.Manager
 	// desktops gives each session its desktop: the shared one, or its own on Linux.
@@ -84,6 +86,7 @@ func New(cfg config.Config, store *task.Store, auth *pairing.Store, desktops des
 		tokens: make(map[string]string), waiters: make(map[string]chan struct{}),
 		reservations: make(map[string]desktop.Reservation), starting: make(map[string]bool),
 	}
+	s.files = newFileService(dataDir(cfg))
 	// settings.json is created on the first start and gets an entry for each newly enabled agent.
 	var enabled []string
 	for _, r := range runners {
@@ -180,6 +183,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /desktops/{id}/seed", s.handleSeedDesktop)
 	mux.HandleFunc("POST /uploads", s.handleUpload)
 	mux.HandleFunc("GET /artifacts/{id}", s.handleArtifact)
+	mux.HandleFunc("GET /files", s.files.list)
+	mux.HandleFunc("GET /files/{name}", s.files.download)
+	mux.HandleFunc("POST /file-uploads/{id}/complete", s.files.complete)
+	mux.Handle("/file-uploads/", http.HandlerFunc(s.files.upload))
 	mux.HandleFunc("POST /stream", s.handleStreamOpen)
 	mux.HandleFunc("DELETE /stream/{id}", s.handleStreamClose)
 	mux.HandleFunc("GET /stream/ws", s.handleStreamWS)
@@ -213,17 +220,25 @@ func (s *Server) withCORS(next http.Handler) http.Handler {
 		origin := r.Header.Get("Origin")
 		if _, ok := allowed[origin]; ok {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
-			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS")
-			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, If-None-Match")
-			w.Header().Set("Access-Control-Expose-Headers", "ETag")
+			w.Header().Set("Access-Control-Allow-Methods", "GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, If-None-Match, If-Match, If-Range, Range, Tus-Resumable, Upload-Length, Upload-Offset, Upload-Metadata, X-HTTP-Method-Override")
+			w.Header().Set("Access-Control-Expose-Headers", "ETag, Location, Tus-Resumable, Tus-Version, Tus-Extension, Tus-Max-Size, Upload-Offset, Upload-Length, Content-Length, Content-Range, Content-Disposition, Accept-Ranges, X-Content-SHA256")
 		}
 		if r.Method == http.MethodOptions {
 			if origin == "" {
+				if strings.HasPrefix(r.URL.Path, "/file-uploads/") {
+					s.files.options(w)
+					return
+				}
 				w.WriteHeader(http.StatusNoContent)
 				return
 			}
 			if _, ok := allowed[origin]; !ok {
 				writeErr(w, http.StatusForbidden, "origin not allowed")
+				return
+			}
+			if strings.HasPrefix(r.URL.Path, "/file-uploads/") {
+				s.files.options(w)
 				return
 			}
 			w.WriteHeader(http.StatusNoContent)
