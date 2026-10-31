@@ -71,7 +71,7 @@ func (s *session) audioResult(req Request) *AudioResult {
 	case !hasAudioSource(s.source):
 		return unavailable("This office computer cannot share its sound yet.")
 	case req.Offer == "":
-		return unavailable("Sound needs a direct connection; it is not available over the WebSocket yet.")
+		return unavailable("Sound plays only over a direct (WebRTC) connection; this connection carries the picture only.")
 	case !strings.Contains(req.Offer, "m=audio"):
 		return unavailable("The app did not ask for an audio track.")
 	}
@@ -136,7 +136,7 @@ func (s *session) setAudio(on bool) {
 		return
 	}
 	if s.chosen() != "webrtc" {
-		reply("unavailable", "Sound needs a direct connection; it is not available over the WebSocket yet.")
+		reply("unavailable", "Sound plays only over a direct (WebRTC) connection; this connection carries the picture only.")
 		return
 	}
 	s.audioMu.Lock()

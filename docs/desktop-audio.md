@@ -1,6 +1,6 @@
 # Remote desktop audio
 
-Status: stage 1 (macOS, WebRTC) implemented on `feat/remote-audio`; stages 2 and 3 planned.
+Status: stage 1 (macOS, WebRTC) implemented on `feat/remote-audio`; stage 2 (Linux) planned.
 
 A user watching the live view on Mob Desktop, iPhone, iPad or Android hears the office computer's
 sound: a game's effects and music, a video, an alert. One direction only: nothing is recorded or
@@ -16,11 +16,12 @@ changes the office computer's own volume or output.
 | Stage | Office computer | Transport | Status |
 | --- | --- | --- | --- |
 | 1 | macOS | WebRTC | Implemented on `feat/remote-audio` |
-| 2 | macOS | WebSocket fallback | Planned |
-| 3 | Linux, a sound output per conversation desktop | WebRTC, then WebSocket | Planned |
+| 2 | Linux, a sound output per conversation desktop | WebRTC | Planned |
 
 Each stage ships on its own. Clients learn per stream whether sound is available (below), so a
 client never needs every combination to work before it offers sound where it can.
+
+Sound is WebRTC only, by decision: there is no sound over the WebSocket fallback (see below).
 
 ## Capture and encoding (macOS)
 
@@ -43,7 +44,7 @@ Recording permission mobd already has; there is no new prompt.
 - **Failure:** capture ending on its own (permission revoked, display gone) ends sound for its
   viewers with a reason; video keeps running.
 
-Linux (stage 3): each conversation desktop already has its own processes (Xvfb, dbus, openbox)
+Linux (stage 2): each conversation desktop already has its own processes (Xvfb, dbus, openbox)
 and an environment for the agent's apps. Add a PulseAudio (or PipeWire-pulse) server per desktop
 with a null sink, put its address (`PULSE_SERVER`) in that environment, capture the sink's
 monitor with the existing GStreamer integration and `opusenc`, and tie its start, sleep and
@@ -54,7 +55,7 @@ processes of one user.
 ## API
 
 `/health` lists `streamAudio` when the backend can capture sound (macOS, shared desktop). The
-stage-3 Linux backend adds it per desktop. There is no API version change; every field is
+stage-2 Linux backend adds it per desktop. There is no API version change; every field is
 optional.
 
 `POST /stream` takes `"audio": true` to ask for sound. The client's offer must then contain a
@@ -65,7 +66,7 @@ receive-only audio section offering Opus. The answer gains `audio`:
 ```
 
 or `{"status":"unavailable","reason":"<sentence for the user>"}` when the backend cannot capture,
-the offer has no audio section, or there is no offer (WebSocket only, until stage 2). Without
+the offer has no audio section, or there is no offer (WebSocket only). Without
 `audio: true` the answer has no `audio` field and no audio track, as before.
 
 `ready` means the Opus track is negotiated. Sound starts only when the client asks:
@@ -94,18 +95,18 @@ registered with stereo before the default codecs.
 Each packet's RTP duration is the gap since the previous packet, so dropped packets leave a gap
 instead of shifting later sound. The receiver's jitter buffer and decoder do the rest.
 
-## WebSocket (stage 2, planned)
+## No sound over the WebSocket
 
-Binary type `2` next to video's `1`: byte 0 = `2`, bytes 1–8 = capture PTS in microseconds (big
-endian, the video's host clock), bytes 9 onward = one raw 20 ms Opus packet (at most 4096 bytes).
-Unknown types are ignored, never handed to the video decoder. Audio is queued ahead of the next
-video frame, with the same 200 ms bound; under pressure old audio is dropped.
+Decided 2026-11-01: when the WebSocket carries the live view (no UDP path: Cloudflare Tunnel,
+Funnel, Mob relay today, networks that block UDP, the Linux webview without GStreamer's WebRTC),
+there is no sound. The answer says `unavailable` with that reason, and the apps show it.
 
-Clients play audio as it arrives with a small buffer (target 60 ms) and show video as they do
-today. They do not retime video against the audio clock: for controlling a remote desktop, low
-delay matters more than lip sync, and the desktop app's MSE path deliberately compresses idle
-time. Decoders: WebCodecs `AudioDecoder` where available (desktop), AudioConverter (iOS), MediaCodec
-(Android).
+TCP delivers in order: a lost packet stalls everything until it is resent, and audio queued
+behind a video frame waits for it. A picture that lags is acceptable for watching and controlling
+a desktop; sound that stutters or drops out is not. Rather than ship sound clearly worse than the
+picture, Mob offers sound only where WebRTC carries the session. The way to sound on those
+networks is a better path for WebRTC (STUN and TURN in Mob relay, planned there), not audio over
+TCP.
 
 ## Clients
 
@@ -135,4 +136,4 @@ video, CPU of the capture. Bluetooth output adds its own delay; report it separa
 
 - [ScreenCaptureKit](https://developer.apple.com/documentation/screencapturekit): `capturesAudio`, `excludesCurrentProcessAudio`.
 - [Pion WebRTC](https://github.com/pion/webrtc), [RFC 7587](https://www.rfc-editor.org/rfc/rfc7587) (Opus RTP, `stereo`/`sprop-stereo`).
-- [PulseAudio modules](https://www.freedesktop.org/wiki/Software/PulseAudio/Documentation/User/Modules/), [GStreamer opusenc](https://gstreamer.freedesktop.org/documentation/opus/opusenc.html) (stage 3).
+- [PulseAudio modules](https://www.freedesktop.org/wiki/Software/PulseAudio/Documentation/User/Modules/), [GStreamer opusenc](https://gstreamer.freedesktop.org/documentation/opus/opusenc.html) (stage 2).
