@@ -99,6 +99,24 @@ func OpenStore(path string) (*Store, error) {
 		}
 		session.ActiveTaskID, session.Waiting = "", false
 	}
+	// State from before turn numbers: number each conversation's turns in their saved order, and
+	// give revision 1 to conversations saved without one, so clients can always sync from it.
+	turns := make(map[string]int64)
+	for _, id := range s.data.Order {
+		t := s.data.Tasks[id]
+		turns[t.SessionID]++
+		if t.Seq != turns[t.SessionID] {
+			t.Seq, migrated = turns[t.SessionID], true
+		}
+	}
+	for id, session := range s.data.Sessions {
+		if session.Turns != turns[id] {
+			session.Turns, migrated = turns[id], true
+		}
+		if session.Rev == 0 && turns[id] > 0 {
+			session.Rev, migrated = 1, true
+		}
+	}
 	recovered := false
 	for _, id := range s.data.Order {
 		t := s.data.Tasks[id]
