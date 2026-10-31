@@ -31,7 +31,7 @@ import (
 )
 
 // version is set from the release tag with -ldflags.
-var version = "0.3.3"
+var version = "0.4.0"
 
 const usage = `Usage: mobd <command> [options]
   init       Create ~/.mobd/config.json (never overwrite)
