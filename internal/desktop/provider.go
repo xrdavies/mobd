@@ -261,4 +261,12 @@ func (s sharedSource) StartStream(ctx context.Context, opts StreamOptions) (Stre
 func (s sharedSource) Hold(reason string) (func(), error) { return s.b.KeepAwake(reason) }
 func (s sharedSource) NewInput() *Input                   { return On(s.b).NewInput() }
 func (sharedSource) Done() <-chan struct{}                { return nil }
-func (sharedSource) Err() error                           { return nil }
+
+// StartAudio captures the computer's playback where the backend can (macOS).
+func (s sharedSource) StartAudio(ctx context.Context) (AudioStream, error) {
+	if a, ok := s.b.(AudioSource); ok {
+		return a.StartAudio(ctx)
+	}
+	return nil, ErrUnsupported
+}
+func (sharedSource) Err() error { return nil }

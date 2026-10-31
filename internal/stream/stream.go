@@ -55,6 +55,9 @@ type Request struct {
 	MaxWidth  int    `json:"maxWidth"`
 	MaxHeight int    `json:"maxHeight"`
 	Quality   string `json:"quality"`
+	// Audio asks for the desktop's sound: an Opus track in the answer, started and stopped with
+	// the "audio" control message (docs/desktop-audio.md). Needs an offer with an audio section.
+	Audio bool `json:"audio,omitempty"`
 }
 
 // Answer is returned to the client; Width and Height are the encoded size.
@@ -66,6 +69,8 @@ type Answer struct {
 	Width    int             `json:"width"`
 	Height   int             `json:"height"`
 	Display  desktop.Display `json:"display"`
+	// Audio answers Request.Audio; absent when it was not asked for.
+	Audio *AudioResult `json:"audio,omitempty"`
 }
 
 // profile bounds a quality setting: the largest size and frame rate, the bitrate ceiling and where
@@ -98,6 +103,8 @@ type Config struct {
 	Loopback bool
 	// UDP, when set, carries every session's media (tests use it to impair the link).
 	UDP net.PacketConn
+	// Audio captures the desktop's sound for the legacy single-desktop configuration (tests).
+	Audio func(context.Context) (desktop.AudioStream, error)
 }
 
 // Manager owns the live sessions, at most one per client.
@@ -113,6 +120,10 @@ type Manager struct {
 
 func NewManager(cfg Config) (*Manager, error) {
 	m := &webrtc.MediaEngine{}
+	// Opus first, with stereo: the defaults then keep this registration of payload type 111.
+	if err := m.RegisterCodec(webrtc.RTPCodecParameters{RTPCodecCapability: opus, PayloadType: 111}, webrtc.RTPCodecTypeAudio); err != nil {
+		return nil, err
+	}
 	if err := m.RegisterDefaultCodecs(); err != nil {
 		return nil, err
 	}
@@ -188,16 +199,20 @@ func (m *Manager) Open(clientID string, req Request) (Answer, error) {
 	t := s.rate.current()
 	s.applied = t
 	s.targetKbps.Store(int32(t.kbps))
+	audio := s.audioResult(req)
 	answer, err := s.start(req.Offer, desktop.StreamOptions{Width: t.width, Height: t.height, FPS: t.fps, Kbps: t.kbps})
 	if err != nil {
 		s.close()
 		return Answer{}, err
 	}
+	if audio != nil && audio.Status == "ready" && s.audioTrack == nil {
+		audio = &AudioResult{Status: "unavailable", Reason: "the audio track could not be added"}
+	}
 	m.mu.Lock()
 	m.byClient[clientID] = s
 	m.mu.Unlock()
 	log.Printf("stream %s opened for client %.8s at %dx%d %d kbps (%s, up to %dx%d)", s.id, clientID, t.width, t.height, t.kbps, req.Quality, w, h)
-	return Answer{Session: s.id, Answer: answer, Width: t.width, Height: t.height, Display: disp}, nil
+	return Answer{Session: s.id, Answer: answer, Width: t.width, Height: t.height, Display: disp, Audio: audio}, nil
 }
 
 // Close ends the client's session with this id; it reports whether there was one.
@@ -259,6 +274,11 @@ type session struct {
 	connectedOnce  sync.Once
 	lastKeyRequest time.Time
 	keyMu          sync.Mutex
+
+	audioWanted bool                           // the request asked for sound and it can be offered
+	audioTrack  *webrtc.TrackLocalStaticSample // the Opus track, when negotiated
+	audioMu     sync.Mutex
+	audio       desktop.AudioStream // the running capture while sound is on
 
 	mu        sync.Mutex
 	transport string                         // "webrtc" or "ws" once one connects
@@ -373,6 +393,11 @@ func (s *session) startWebRTC(offer string, fps int) (string, error) {
 	if s.ctl != nil {
 		pc.OnDataChannel(s.ctl.attach)
 	}
+	if s.audioWanted {
+		if err := s.addAudio(pc); err != nil {
+			log.Printf("stream %s: no audio track: %v", s.id, err)
+		}
+	}
 	var last time.Duration
 	sink := func(u desktop.AccessUnit) error {
 		d := time.Second / time.Duration(fps)
@@ -431,7 +456,7 @@ func (s *session) startWebRTC(offer string, fps int) (string, error) {
 	case <-time.After(5 * time.Second):
 	}
 	go s.readRTCP(sender)
-	return pc.LocalDescription().SDP, nil
+	return stereoOpus(pc.LocalDescription().SDP), nil
 }
 
 // forward writes access units to the connected transport until the desktop stream ends; units
@@ -580,6 +605,7 @@ func (s *session) close() {
 		if s.src != nil {
 			s.src.Close()
 		}
+		s.stopAudio()
 		if s.ctl != nil {
 			s.ctl.input.Release() // no key or button stays down after the client leaves
 		}

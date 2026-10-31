@@ -38,6 +38,8 @@ type message struct {
 	// resize: the client's new view in pixels, as in Request.
 	MaxWidth  int `json:"maxWidth,omitempty"`
 	MaxHeight int `json:"maxHeight,omitempty"`
+	// audio: turns the desktop's sound on or off (docs/desktop-audio.md).
+	On bool `json:"on,omitempty"`
 }
 
 const (
@@ -102,6 +104,8 @@ func (c *controller) handle(data []byte) {
 		c.s.src.Keyframe()
 	case "resize":
 		err = c.s.resize(m.MaxWidth, m.MaxHeight)
+	case "audio":
+		c.s.setAudio(m.On)
 	default:
 		err = errors.New("unknown message type " + m.T)
 	}

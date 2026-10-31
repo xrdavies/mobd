@@ -1,3 +1,4 @@
+#pragma once
 // Native screen snapshots for the macOS backend (snapshot_darwin.m).
 
 enum {
