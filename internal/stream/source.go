@@ -28,6 +28,14 @@ type desktopSource struct{ desktop.Source }
 
 func (d desktopSource) NewInput() Input { return d.Source.NewInput() }
 
+// StartAudio captures the desktop's playback where it can; ErrUnsupported otherwise.
+func (d desktopSource) StartAudio(ctx context.Context) (desktop.AudioStream, error) {
+	if a, ok := d.Source.(desktop.AudioSource); ok {
+		return a.StartAudio(ctx)
+	}
+	return nil, desktop.ErrUnsupported
+}
+
 // legacySource builds a Source from Config's single-desktop functions (used when Config.Source
 // is nil, as in tests).
 type legacySource struct{ cfg *Config }
@@ -47,6 +55,12 @@ func (l legacySource) NewInput() Input {
 		return nil
 	}
 	return l.cfg.NewInput()
+}
+func (l legacySource) StartAudio(ctx context.Context) (desktop.AudioStream, error) {
+	if l.cfg.Audio == nil {
+		return nil, desktop.ErrUnsupported
+	}
+	return l.cfg.Audio(ctx)
 }
 func (legacySource) Done() <-chan struct{} { return nil }
 func (legacySource) Err() error            { return nil }

@@ -1,7 +1,10 @@
 // Command stream-probe is a development client for mobd's live desktop: it opens a WebRTC session
 // with a paired device token and reports what arrives. It decodes nothing.
 //
-//	stream-probe -url http://office-mac:8080 -token TOKEN [-seconds 20] [-max-width 1280] [-quality low]
+//	stream-probe -url http://office-mac:8080 -token TOKEN [-seconds 20] [-max-width 1280] [-quality low] [-audio]
+//
+// With -audio it asks for the desktop's sound, turns it on, and counts Opus packets: per second,
+// and how many carry sound rather than near-silence (more than 100 bytes at 96 kbit/s).
 package main
 
 import (
@@ -37,6 +40,7 @@ func main() {
 	useWS := flag.Bool("ws", false, "use the WebSocket fallback instead of WebRTC")
 	session := flag.String("session", "", "conversation ID whose desktop to watch (Linux: each conversation has its own)")
 	resolve := flag.String("resolve", "", "connect to this IP instead of resolving the host (e.g. Funnel's public address)")
+	audio := flag.Bool("audio", false, "ask for the desktop's sound and turn it on")
 	flag.Parse()
 	if *resolve != "" {
 		// Like curl --resolve: keeps the host name for TLS, dials the given address.
@@ -63,6 +67,11 @@ func main() {
 	if _, err := pc.AddTransceiverFromKind(webrtc.RTPCodecTypeVideo, webrtc.RTPTransceiverInit{Direction: webrtc.RTPTransceiverDirectionRecvonly}); err != nil {
 		log.Fatal(err)
 	}
+	if *audio {
+		if _, err := pc.AddTransceiverFromKind(webrtc.RTPCodecTypeAudio, webrtc.RTPTransceiverInit{Direction: webrtc.RTPTransceiverDirectionRecvonly}); err != nil {
+			log.Fatal(err)
+		}
+	}
 	// The control channel carries cursor positions and error reports; the probe sends no input.
 	control, err := pc.CreateDataChannel("control", nil)
 	if err != nil {
@@ -81,10 +90,27 @@ func main() {
 		}
 	})
 	var packets, bytesIn, frames atomic.Int64
+	var audioPackets, audioLoud, audioBytes, soundOn, firstSound atomic.Int64
 	var ssrc atomic.Uint32
 	start := time.Now()
 	var firstFrame atomic.Int64
 	pc.OnTrack(func(t *webrtc.TrackRemote, _ *webrtc.RTPReceiver) {
+		if t.Kind() == webrtc.RTPCodecTypeAudio {
+			log.Printf("audio track: %s/%d/%d %s", t.Codec().MimeType, t.Codec().ClockRate, t.Codec().Channels, t.Codec().SDPFmtpLine)
+			for {
+				p, _, err := t.ReadRTP()
+				if err != nil {
+					return
+				}
+				if audioPackets.Add(1) == 1 && soundOn.Load() > 0 {
+					firstSound.Store(int64(time.Since(start)) - soundOn.Load())
+				}
+				audioBytes.Add(int64(len(p.Payload)))
+				if len(p.Payload) > 100 {
+					audioLoud.Add(1)
+				}
+			}
+		}
 		ssrc.Store(uint32(t.SSRC()))
 		for {
 			p, _, err := t.ReadRTP()
@@ -112,7 +138,7 @@ func main() {
 	_ = pc.SetLocalDescription(offer)
 	<-gathered
 
-	body, _ := json.Marshal(map[string]any{"offer": pc.LocalDescription().SDP, "maxWidth": *maxWidth, "quality": *quality, "sessionId": *session})
+	body, _ := json.Marshal(map[string]any{"offer": pc.LocalDescription().SDP, "maxWidth": *maxWidth, "quality": *quality, "sessionId": *session, "audio": *audio})
 	req, _ := http.NewRequest("POST", base+"/stream", bytes.NewReader(body))
 	req.Header.Set("Authorization", "Bearer "+*token)
 	req.Header.Set("Content-Type", "application/json")
@@ -128,9 +154,13 @@ func main() {
 	var answer struct {
 		Session, Answer string
 		Width, Height   int
+		Audio           json.RawMessage
 	}
 	_ = json.Unmarshal(raw, &answer)
 	log.Printf("session %s, %dx%d, answered in %s", answer.Session, answer.Width, answer.Height, time.Since(start).Round(time.Millisecond))
+	if *audio {
+		log.Printf("audio: %s", answer.Audio)
+	}
 	if err := pc.SetRemoteDescription(webrtc.SessionDescription{Type: webrtc.SDPTypeAnswer, SDP: answer.Answer}); err != nil {
 		log.Fatal(err)
 	}
@@ -138,6 +168,17 @@ func main() {
 	case <-connected:
 	case <-time.After(15 * time.Second):
 		log.Fatal("not connected within 15 s")
+	}
+
+	if *audio {
+		for control.ReadyState() != webrtc.DataChannelStateOpen {
+			time.Sleep(50 * time.Millisecond)
+		}
+		soundOn.Store(int64(time.Since(start)))
+		if err := control.SendText(`{"t":"audio","on":true}`); err != nil {
+			log.Fatalf("sound on: %v", err)
+		}
+		log.Printf("sound on requested")
 	}
 
 	if *click != "" {
@@ -164,7 +205,7 @@ func main() {
 	}
 	tick := time.NewTicker(time.Second)
 	defer tick.Stop()
-	var lastBytes, lastFrames int64
+	var lastBytes, lastFrames, lastAudio, lastLoud, lastAudioBytes int64
 	nextPLI := time.Now().Add(*pliEvery)
 	for i := 0; i < *seconds; i++ {
 		<-tick.C
@@ -175,7 +216,13 @@ func main() {
 				path = fmt.Sprintf("rtt %.0fms", p.CurrentRoundTripTime*1000)
 			}
 		}
-		fmt.Printf("t=%2ds %5d kbps %3d fps  packets %d  cursor updates %d  %s\n", i+1, (b-lastBytes)*8/1000, f-lastFrames, packets.Load(), cursors.Load(), path)
+		sound := ""
+		if *audio {
+			a, l, ab := audioPackets.Load(), audioLoud.Load(), audioBytes.Load()
+			sound = fmt.Sprintf("  audio %2d pkt/s %3d kbps, %2d with sound", a-lastAudio, (ab-lastAudioBytes)*8/1000, l-lastLoud)
+			lastAudio, lastLoud, lastAudioBytes = a, l, ab
+		}
+		fmt.Printf("t=%2ds %5d kbps %3d fps  packets %d  cursor updates %d%s  %s\n", i+1, (b-lastBytes)*8/1000, f-lastFrames, packets.Load(), cursors.Load(), sound, path)
 		lastBytes, lastFrames = b, f
 		if *pliEvery > 0 && time.Now().After(nextPLI) {
 			_ = pc.WriteRTCP([]rtcp.Packet{&rtcp.PictureLossIndication{MediaSSRC: ssrc.Load()}})
@@ -183,6 +230,9 @@ func main() {
 		}
 	}
 	fmt.Printf("first frame after %s; %d frames, %d KB\n", time.Duration(firstFrame.Load()).Round(time.Millisecond), frames.Load(), bytesIn.Load()/1024)
+	if *audio {
+		fmt.Printf("audio: %d packets, %d with sound, first %s after sound on\n", audioPackets.Load(), audioLoud.Load(), time.Duration(firstSound.Load()).Round(time.Millisecond))
+	}
 
 	del, _ := http.NewRequest("DELETE", base+"/stream/"+answer.Session, nil)
 	del.Header.Set("Authorization", "Bearer "+*token)

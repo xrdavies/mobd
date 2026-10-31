@@ -26,7 +26,17 @@ func (s *Server) features() []string {
 	if s.desktops.PerSession() {
 		return append(slices.Clone(baseFeatures), "sessionDesktops")
 	}
+	// The shared desktop's sound, where the backend captures it (macOS; docs/desktop-audio.md).
+	if audioBackend() {
+		return append(slices.Clone(baseFeatures), "streamAudio")
+	}
 	return baseFeatures
+}
+
+// audioBackend reports whether this OS's backend captures desktop sound; swapped in tests.
+var audioBackend = func() bool {
+	_, ok := desktop.Current().(desktop.AudioSource)
+	return ok
 }
 
 // backendName is the desktop backend's name; swapped in tests.
