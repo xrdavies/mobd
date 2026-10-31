@@ -1,137 +1,118 @@
-# Conversation history pagination and incremental sync
+# Conversation history: paging, bounded sync and local copies
 
-Status: draft
+Status: in progress on `feat/conversation-history`
 
 ## Problem
 
-`GET /sessions/{id}` currently returns the complete conversation on the first
-open. `?since=<rev>` makes later refreshes incremental, but it does not bound
-the first response. Long conversations therefore make the initial response,
-JSON decoding, and client memory grow with the complete history.
+`GET /sessions/{id}` returns the whole conversation on first open, and `?since=<rev>` returns it
+again whenever `since` is 0 or ahead of mobd's revision. Long conversations make the first
+response, JSON decoding and client memory grow with the complete history, and clients keep no
+copy across restarts, so every launch starts over.
 
-The protocol needs two independent forms of incremental work:
+The fix has two parts:
 
-1. history pages for older turns;
-2. revision sync for changes to a conversation already held by a client.
+1. mobd serves history in pages of whole turns, and changes since a revision with a bound.
+2. Clients keep a local copy of each conversation (see the client plans in mob, mob-ios and
+   mob-android), show it at once, and sync it in the background.
 
-The two cursors must not share a meaning. A history cursor identifies a place
-in the ordered turn history. A revision identifies a state change in the
-conversation.
+## Turn order: `seq`
 
-## API draft
+Each turn gets `seq`, its 1-based position in the conversation, assigned when it is created and
+saved with it. `Session.turns` is the number of turns, so the newest has `seq == turns`. Turns are
+only removed with their conversation, so `seq` never changes and has no gaps. State written before
+`seq` is numbered on load in the existing turn order. Conversations saved with `rev: 0` get
+`rev: 1` on load, so `rev` is never 0 for a conversation with turns.
 
-Keep the existing revision endpoint and add a page endpoint:
+Clients sort by `seq` and use it to tell whether a turn lies inside the range they hold.
+
+## API
 
 ```text
-GET /sessions/{id}/history?limit=50
-GET /sessions/{id}/history?before=<opaque-cursor>&limit=50
+GET /sessions/{id}/history?limit=20                  newest page
+GET /sessions/{id}/history?before=<cursor>&limit=20  the page before the cursor
+GET /sessions/{id}/history?since=<rev>&limit=50      changes after a revision
 ```
 
-The first request returns the newest page. `before` returns turns older than
-the turn represented by the cursor. Pages are ordered oldest to newest for
-the client, even when the store reads them backwards to find the newest page.
+`limit` defaults to 20 and must be 1–50. `before` and `since` together are a `400`.
+A missing conversation is a `404`.
+
+### Pages
+
+A page is a range of whole turns, oldest first, each with all its messages, steps and questions.
+It holds at most `limit` turns and stops early once it reaches about 2 MB of JSON, but always
+contains at least one turn.
 
 ```json
 {
-  "session": {
-    "id": "…",
-    "title": "…",
-    "status": "…",
-    "messages": []
-  },
-  "tasks": [],
+  "session": { "id": "…", "title": "…", "turns": 120, "rev": 731, "messages": [] },
+  "tasks": [ { "id": "…", "seq": 101, "rev": 640 } ],
   "activities": [],
   "questions": [],
-  "snapshotRev": 128,
-  "before": "opaque-cursor",
-  "hasMore": true
+  "rev": 731,
+  "hasMore": true,
+  "before": "opaque-cursor"
 }
 ```
 
-The page is divided by turn/task, not by individual messages or activities.
-Each selected task carries all of its messages, steps and questions so the
-existing client merge-by-task-ID logic remains valid. The cursor must be
-opaque, include the session identity, and use a stable task order key rather
-than a timestamp alone. The server should reject an invalid or foreign cursor
-with `400`.
+`session.messages` holds only the messages of the returned turns. `before` is present when
+`hasMore` is true and names the oldest returned turn; pass it back for the next older page.
+Cursors are opaque, bound to the conversation (another conversation's cursor is a `400`), and
+stay valid when new turns are added.
 
-`GET /sessions/{id}?since=<rev>` keeps its current meaning. It returns the
-current session metadata, every task whose `task.rev` is newer than `since`,
-every queued or running task, and the complete data for those tasks. The
-response still contains `rev` and `full`. The endpoint remains the authority
-for advancing a client's revision baseline.
+`rev` is the revision the page was read at, in the same snapshot. The newest page sets a client's
+first sync baseline. Older pages never move the baseline: they cover a range, not every change.
 
-The first history page may establish the client's initial `syncRev` from
-`snapshotRev`, because it is the client's first baseline. Later history page
-requests must not advance `syncRev`: they contain only a range, not every
-change since the client's previous revision. A subsequent `since` request
-reconciles changes that happened while the user was paging.
+### Changes since a revision
 
-## Store implementation
+`since` returns every turn changed after that revision, plus every queued or running turn, with
+all their messages, steps and questions, and the current session metadata:
 
-Add a `HistoryPage` store operation instead of calling `Session` and slicing
-the result. It should:
+```json
+{ "session": { … }, "tasks": [], "activities": [], "questions": [], "rev": 740, "reset": false }
+```
 
-1. take the store read lock and capture one consistent snapshot;
-2. select at most `limit` task IDs from the session's stable order, before the
-   cursor when present;
-3. copy only those tasks, their activities, questions and messages;
-4. return the session metadata, the snapshot revision and the next cursor.
+The answer is bounded like a page. When it cannot be answered within the bound, or `since` is 0
+or ahead of mobd's revision (state restored from an older copy), mobd answers `"reset": true`
+with the session metadata and no turns: the client drops its copy of that conversation's turns
+and loads the newest page again. A title-only change returns the session with no turns.
 
-The response must be ordered consistently and must not expose internal order
-indexes. The current `SessionSince` behavior remains useful because a missed
-sequence of revisions can be recovered by returning the current complete
-state of each changed task; a per-revision event log is not required for
-correctness.
+`GET /sessions/{id}` and its `?since=` keep their current meaning for clients without this
+feature. mobd advertises `sessionHistory` in `/health.features`.
 
-Every session mutation must increment the session revision and assign that
-revision to the affected task while holding the same consistency boundary as
-the persisted snapshot. Turns are not deleted independently; a deleted
-conversation continues to return `404`.
+## Store
 
-The first implementation can scan the session's task order and stop after the
-requested page. If data shows that many other sessions make that scan costly,
-add a per-session task-order index. Do not clone the full `Session.Messages`
-slice before applying the page limit.
+`HistoryPage` and `HistorySince` read one snapshot under the store's read lock. A page walks the
+turn order from the newest end and stops after `limit` turns of the conversation, without copying
+the full message list. Every change to a conversation already raises its revision and the changed
+turn's `rev` in the same commit, which is what `since` relies on.
 
-## Client contract
+The scan over the global turn order is linear in all turns. If it shows up with many large
+conversations, add a per-conversation index.
 
-Clients maintain two independent pieces of state:
+## Client contract (summary)
 
-- `syncRev`: the last revision fully reconciled by a `since` response;
-- `historyCursor`: the oldest page currently loaded in the timeline.
+Clients keep, per conversation: the turns they hold (by task ID, with `seq` and `rev`), the
+oldest `seq` held, whether older turns exist, and `syncRev`.
 
-History pages merge by task ID. A revision response replaces every returned
-task and its related messages, activities and questions, while retaining
-unchanged tasks. A changed task may be older than the visible page; retain its
-latest value in the local task map so a later history page cannot overwrite it
-with stale data.
-
-Live task SSE remains a low-latency transport. On reconnect, event cursor gaps,
-or periodic refresh, clients call the revision endpoint and merge its result.
-If a request fails, the client keeps the previous `syncRev` and retries.
-
-## Compatibility and limits
-
-Existing clients may continue to use the current full snapshot behavior until
-they support the history endpoint. The server can advertise a
-`sessionHistoryPaging` feature in `/health`; clients that do not see it fall
-back to the existing request. A page limit should be capped server-side (the
-initial target is 50 turns) so a client cannot request an unbounded response.
-
-Pagination bounds the number of turns, but one individual turn can still be
-large. If real data produces very large single replies, content chunking is a
-separate follow-up; it should not be mixed into task-level history paging.
+- Merge by task ID and keep the copy with the higher `rev`.
+- Show only turns from the oldest held `seq` up. A changed turn older than that is not shown and
+  not added to the end; it is stored, or dropped and fetched again with its page.
+- A `reset` answer drops the conversation's turns and loads the newest page.
+- Live task SSE stays the low-latency path. On reconnect, a cursor gap, returning to the
+  foreground, or opening a saved conversation, clients call `since` and merge it.
+- If a request fails, the client keeps its `syncRev` and cursor and retries.
 
 ## Verification
 
-- The newest page contains exactly the requested number of turns and has a
-  stable cursor.
-- Consecutive pages contain no duplicate or missing turns.
-- Appending a new turn does not invalidate an older cursor.
-- Updating an old turn appears in `since` even when that page is not loaded.
-- Title-only changes advance `rev` without returning unrelated turns.
-- Queued and running turns continue to appear in revision responses.
-- Invalid, foreign and exhausted cursors return the documented result.
-- A client can page, lose its SSE connection, reconcile with `since`, and
-  keep one ordered timeline.
+- Pages: newest page, consecutive pages without duplicates or gaps, the size bound with at least
+  one turn, `limit` bounds, foreign and invalid cursors, a cursor still valid after a new turn.
+- `since`: only changed turns plus queued and running ones, title-only changes, `reset` on 0,
+  ahead of mobd, and over the bound.
+- Load: legacy state gets `seq`, `turns` and `rev` without changing the turn order.
+- `/health` advertises `sessionHistory`; the route needs authentication.
+
+## Follow-ups (not in this change)
+
+mobd keeps all history in memory and rewrites `state.json` on every change. Paging bounds what
+clients receive, not mobd's own cost; that needs its own change. One very large turn is still sent
+whole; splitting a turn's content is separate from turn paging.

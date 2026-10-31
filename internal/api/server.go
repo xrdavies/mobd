@@ -173,6 +173,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /healthz", s.handleHealth)
 	mux.HandleFunc("GET /sessions", s.handleListSessions)
 	mux.HandleFunc("GET /sessions/{id}", s.handleGetSession)
+	mux.HandleFunc("GET /sessions/{id}/history", s.handleSessionHistory)
 	mux.HandleFunc("PATCH /sessions/{id}", s.handlePatchSession)
 	mux.HandleFunc("DELETE /sessions/{id}", s.handleDeleteSession)
 	mux.HandleFunc("POST /tasks", s.handleCreateTask)
