@@ -4,6 +4,9 @@ mobd captures, encodes and streams the office desktop itself. Clients (mob, mob-
 mob-android) show it in their live view and can send mouse, keyboard and touch input.
 Screen Sharing is not used.
 
+System audio is not implemented. The [remote audio draft](desktop-audio.md)
+covers capture, Opus, both transports and the three client families.
+
 - **Capture:** ScreenCaptureKit, scaled to the size the client shows; an unchanged screen sends nothing.
 - **Encode:** VideoToolbox H.264 (constrained baseline, no B-frames, keyframe on request, no periodic
   keyframes while idle).
@@ -183,4 +186,5 @@ first-picture time, bitrate and frame rate. `-ws` uses the WebSocket fallback; `
 - **Windows backend:** the logged-in user's desktop (DXGI, Media Foundation, SendInput); stage 2
   of the plan in [Windows](windows.md).
 - **macOS login window:** a privileged helper to reach the screen before any user signs in.
-- Not planned for now: audio, file transfer, clipboard sync, multi-monitor selection (main display only).
+- **System audio:** [draft design](desktop-audio.md), including WebSocket fallback and A/V sync.
+- Not planned for now: file transfer, clipboard sync, multi-monitor selection (main display only).

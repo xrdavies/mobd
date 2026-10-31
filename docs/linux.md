@@ -463,8 +463,9 @@ as today.
   off. Later options: Xorg with a real GPU driver headless, or VirtualGL.
 - **Desktop size per conversation:** fixed `desktopSize` for everyone in v1, also when watched from
   a portrait phone. A per-conversation size (a new desktop) can come later.
-- **Audio:** none. Apps find no sound server and stay silent. A PipeWire/PulseAudio null sink per
-  desktop could come later.
+- **Audio:** none. Apps find no managed sound server and stay silent. The
+  [remote audio draft](desktop-audio.md) proposes per-desktop virtual outputs,
+  monitor capture and streaming over both existing transports.
 
 ## Networking, packaging, testing
 
