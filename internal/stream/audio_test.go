@@ -167,6 +167,10 @@ func TestSoundIsOfferedInStereoAndTurnsOnAndOff(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("capture still running after the session closed")
 	}
+	time.Sleep(100 * time.Millisecond)
+	if s := v.state(); s != "on" {
+		t.Fatalf("closing reported sound state %q", s)
+	}
 }
 
 func TestSoundUnavailableKeepsVideo(t *testing.T) {

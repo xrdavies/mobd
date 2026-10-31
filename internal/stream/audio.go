@@ -182,8 +182,10 @@ func (s *session) forwardAudio(st desktop.AudioStream, reply func(state, message
 		s.audio = nil
 	}
 	s.audioMu.Unlock()
-	if !mine {
-		return // turned off or closed
+	// Turned off, or the session closed (its context ends the capture before close stops it).
+	if !mine || s.ctx.Err() != nil {
+		st.Close()
+		return
 	}
 	st.Close()
 	message := "The sound stopped."
