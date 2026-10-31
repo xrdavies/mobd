@@ -93,10 +93,12 @@ Messages are small JSON objects with a `t` field. Coordinates are **normalized t
 | `scroll` | client | `x`, `y`, `dx`, `dy` in pixels (positive = down/right, like `WheelEvent`) |
 | `keyframe` | client | — |
 | `resize` | client | `maxWidth`, `maxHeight`: refits the running session without reconnecting |
+| `audio` | client | `on`: starts or stops the desktop's sound in a session opened with `audio: true` ([desktop audio](desktop-audio.md)) |
 | `cursor` | mobd | `x`, `y` when the pointer moves (≤ 30/s) |
 | `stats` | mobd | current `kbps`, `width`, `height`, `fps` and link measurements |
 | `error` | mobd | `about` (message type), `message`; at most once a second per type |
 | `ended` | mobd | `message`: why the session stopped (e.g. the display went to sleep) |
+| `audio` | mobd | `state` (`on`, `off`, `unavailable`, `error`) and `message`: the answer to `audio`, or why sound stopped |
 
 Everything held is released when the session ends, so a dropped client leaves no key or button
 down. Input needs Accessibility, like the agent's actions. The cursor *shape* stays in the video:
