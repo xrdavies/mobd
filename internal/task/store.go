@@ -176,6 +176,7 @@ func (s *Store) CreateTurnWith(sessionID, prompt string, opts TurnOptions) (*Tas
 		}
 		session = cloneSession(stored)
 	}
+	session.Turns++
 	if opts.SaveModel {
 		session.Model = opts.Model
 	}
@@ -186,7 +187,7 @@ func (s *Store) CreateTurnWith(sessionID, prompt string, opts TurnOptions) (*Tas
 		ID: newID(), SessionID: session.ID, ResumeID: session.ResumeID,
 		Prompt: prompt, Status: StatusQueued, Runner: session.Runner,
 		Model: opts.Model, Effort: opts.Effort, Attachments: append([]string(nil), opts.Attachments...),
-		CreatedAt: now, UpdatedAt: now, EventID: 1,
+		CreatedAt: now, UpdatedAt: now, EventID: 1, Seq: session.Turns,
 	}
 	session.ActiveTaskID, session.Status, session.UpdatedAt = t.ID, t.Status, now
 	session.Messages = append(session.Messages, Message{

@@ -29,7 +29,9 @@ type Task struct {
 	LegacyThreadID string `json:"threadId,omitempty"`
 	EventID        int64  `json:"eventId"`
 	// Rev is the conversation revision of this turn's last change (see Session.Rev).
-	Rev         int64      `json:"rev,omitempty"`
+	Rev int64 `json:"rev,omitempty"`
+	// Seq is the turn's 1-based position in its conversation; it never changes.
+	Seq         int64      `json:"seq,omitempty"`
 	Prompt      string     `json:"prompt"`
 	Status      Status     `json:"status"`
 	Runner      string     `json:"runner"`
@@ -165,7 +167,9 @@ type Session struct {
 	Effort string `json:"effort,omitempty"`
 	// Rev goes up on every change in the conversation (a turn, its steps, messages or questions,
 	// or the title and flags). Clients pass it back as ?since= to fetch only what changed.
-	Rev      int64     `json:"rev,omitempty"`
+	Rev int64 `json:"rev,omitempty"`
+	// Turns is the number of turns; the newest has Seq == Turns.
+	Turns    int64     `json:"turns,omitempty"`
 	Messages []Message `json:"messages,omitempty"`
 }
 
