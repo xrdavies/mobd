@@ -8,6 +8,10 @@
 最新稳定版本以 [latest.json](https://dl.mymob.dev/mobd/latest.json) 为准。
 普通用户直接看[安装和升级](#4-安装和升级)；以下 GitHub/Cloudflare 配置面向维护者。
 
+USB 重定向仍是[方案草稿](usb-redirection.md)。未来 macOS 导入端需按
+[Apple USB entitlement 申请文档](apple-usb-entitlement.md)取得授权，并验证带 profile 的
+组件打包和签名方式；现有 Developer ID 证书、公证及单文件安装流程不自动满足此要求。
+
 ## 1. 准备 Cloudflare R2
 
 1. 创建专用发布桶，例如 `mob-releases`。桶内只存放允许公开下载的文件。

@@ -434,6 +434,7 @@ CORS covers API responses and SSE, plus `OPTIONS` preflight for `GET`/`POST`/`PA
 - [Connection setup](docs/connection-setup.md), [pairing](docs/pairing.md): networks, client pairing and authentication.
 - [Office smoke checklist](docs/office-smoke-checklist.md), [security](docs/security.md): deployment and verification.
 - [Live desktop streaming](docs/desktop-streaming.md): capture, encoding, WebRTC and WebSocket transports, rate control and input.
+- [USB redirection draft](docs/usb-redirection.md): shared open-source USB/IP plan, platform limits and client responsibilities; not implemented. [Apple entitlement application](docs/apple-usb-entitlement.md): required macOS importer authorization, entry points and materials.
 - [Signing dev builds](docs/dev-signing.md): keep macOS grants across rebuilds.
 - [Linux](docs/linux.md): one virtual desktop per conversation (Xvfb), sleep, memory, browsers, packaging.
 - [Linux design](docs/linux-design.md): packages, interfaces, desktop state machine, API, CLI, and what was built differently.
