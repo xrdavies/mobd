@@ -1,8 +1,12 @@
 # Runners
 
-A **runner** connects mobd to an agent CLI. Codex, Claude Code and Pi are supported.
+A **runner** connects mobd to an agent framework. Codex, Claude Code and Pi are supported.
 Each runner translates its provider's output into shared events used by the API,
 store and App.
+
+An individual Mob agent is a persistent session, not the framework or runner.
+See [agent concepts](agent-concepts.md) for the shared vocabulary and
+[collaboration](agent-collaboration.md) for the proposed messaging contract.
 
 Related: [API reference](mobd-v3.md) and [architecture](architecture.md)
 (desktop tools via `mobd mcp`).

@@ -429,6 +429,7 @@ CORS covers API responses and SSE, plus `OPTIONS` preflight for `GET`/`POST`/`PA
 
 ## Documentation
 
+- [Agent concepts](docs/agent-concepts.md) and [collaboration design](docs/agent-collaboration.md): shared terminology, session addressing, durable messages, request lifecycles and client responsibilities (draft COLLAB-1; not implemented).
 - [Releases and installation](docs/releases.md): signing, GitHub Actions, R2, install and upgrade.
 - [Architecture](docs/architecture.md), [API reference](docs/mobd-v3.md), [runners](docs/runners.md): server behavior and supported capabilities.
 - [Connection setup](docs/connection-setup.md), [pairing](docs/pairing.md): networks, client pairing and authentication.

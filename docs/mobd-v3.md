@@ -8,6 +8,10 @@ This reference covers the office control plane (`cmd/mobd`, `internal/...`).
 See [architecture](architecture.md), [runners](runners.md),
 [installation](releases.md) and [security](security.md).
 
+[Agent concepts](agent-concepts.md) defines the vocabulary and compatibility names.
+[Agent collaboration](agent-collaboration.md) is a separate draft; its proposed
+routes and `agentCollaboration` feature are not implemented API capabilities.
+
 ## Capabilities
 
 1. **Agent timeline:** tool calls, shell commands, reasoning summaries and plans become typed, persisted *activities* the App renders as timeline cards.
