@@ -254,6 +254,10 @@ func main() {
 		resp.Body.Close()
 		log.Printf("DELETE /stream: %s", resp.Status)
 	}
+	// Closing sends TURN its release without waiting for the answer; exiting at once can lose it,
+	// leaving the allocation on the relay until it expires.
+	_ = pc.Close()
+	time.Sleep(500 * time.Millisecond)
 }
 
 // watchWS opens a session without an offer and watches it over GET /stream/ws, acknowledging every
