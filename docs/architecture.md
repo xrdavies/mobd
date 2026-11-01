@@ -66,7 +66,7 @@ The default command is this mobd binary with the `mcp` argument.
 ### Live desktop (stream)
 
 - mobd captures the display with ScreenCaptureKit and encodes H.264 with VideoToolbox, sized to the view the client shows; an unchanged screen sends nothing.
-- `POST /stream` opens a session with a WebRTC offer (Pion): one video track plus `control`, `input` and `pointer` data channels. Where UDP cannot pass, the same session continues over `GET /stream/ws`.
+- `POST /stream` opens a session with a WebRTC offer (Pion): one video track plus `control`, `input` and `pointer` data channels. Through a Mob relay, `GET /stream/ice` gives apps its STUN/TURN servers so WebRTC still works. Where UDP cannot pass at all, the same session continues over `GET /stream/ws`.
 - mobd's own rate control adapts bitrate, size and frame rate from receiver reports (WebRTC) or acknowledgements (WebSocket); clients send `resize` when their view changes.
 - Input arrives as normalized coordinates and web key codes and is posted with CGEvent; held keys and buttons are released when the session ends.
 - One session per client; it closes on credential revocation, deletion, auth reset or daemon shutdown. `/health` lists `stream` and `streamResize` and reports `streamSessions`.
