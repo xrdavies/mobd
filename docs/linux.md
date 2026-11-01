@@ -463,9 +463,9 @@ as today.
   off. Later options: Xorg with a real GPU driver headless, or VirtualGL.
 - **Desktop size per conversation:** fixed `desktopSize` for everyone in v1, also when watched from
   a portrait phone. A per-conversation size (a new desktop) can come later.
-- **Audio:** none. Apps find no managed sound server and stay silent. The
-  [remote audio draft](desktop-audio.md) proposes per-desktop virtual outputs,
-  monitor capture and streaming over both existing transports.
+- **Audio:** each desktop runs its own PulseAudio server with one virtual output, named in the
+  agent's environment; the live view plays it over WebRTC. Optional: without `pulseaudio`
+  desktops are silent. See [desktop audio](desktop-audio.md).
 
 ## Networking, packaging, testing
 
@@ -581,7 +581,7 @@ Rough effort assumes one engineer familiar with the codebase.
 | **3. Streaming** | GStreamer shim, encoder probe and fallback, per-session `POST /stream` and `/screen`, stream-probe in CI. | 1.5–2 weeks |
 | **4. Agent environment and release** | browser wrappers, per-session profiles, seed profile, downloads, `.deb` and tarball, `install.sh`, CI release matrix, `linux-build.md` for other distributions, docs. | 1–1.5 weeks |
 | **4b. Clients** | mob, mob-ios, mob-android: live view per conversation, running/asleep state, Close desktop, archive/delete warnings, memory and disk banners, pausing an unattended view, stopping when hidden or in the background. Each app's docs are updated when this ships. | 1.5–2 weeks |
-| **5. Later** | cursor shape, shared encodes, attach mode, per-session users, GPU, audio. | as needed |
+| **5. Later** | cursor shape, shared encodes, attach mode, per-session users, GPU. | as needed |
 
 Linux first remains the recommendation: phase 0 is mostly Unix code that already works, there are
 no permission prompts or code-signing costs, and every desktop path is testable in CI.

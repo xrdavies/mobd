@@ -50,8 +50,9 @@ func (m *Manager) soundCheck() desktop.DoctorCheck {
 	path, err := m.look("pulseaudio")
 	switch {
 	case err != nil:
+		// mobd starts its own servers; on a PC with PipeWire the package's user service is not needed.
 		return desktop.DoctorCheck{Name: "sound", Warn: true, Detail: "pulseaudio not found: the live view has no sound",
-			Fix: "sudo apt install pulseaudio"}
+			Fix: "sudo apt install pulseaudio gstreamer1.0-pulseaudio (with PipeWire: then systemctl --user mask pulseaudio.socket pulseaudio.service)"}
 	case !gst.CanCaptureAudio():
 		return desktop.DoctorCheck{Name: "sound", Warn: true, Detail: "GStreamer cannot capture PulseAudio or encode Opus: the live view has no sound",
 			Fix: "sudo apt install gstreamer1.0-pulseaudio gstreamer1.0-plugins-base"}

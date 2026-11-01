@@ -1,6 +1,6 @@
 # Remote desktop audio
 
-Status: stage 1 (macOS, WebRTC) implemented on `feat/remote-audio`; stage 2 (Linux) planned.
+Status: implemented for macOS and, on `feat/linux-audio`, for Linux conversation desktops (WebRTC). Windows waits for a Windows desktop backend.
 
 A user watching the live view on Mob Desktop, iPhone, iPad or Android hears the office computer's
 sound: a game's effects and music, a video, an alert. One direction only: nothing is recorded or
@@ -15,8 +15,9 @@ changes the office computer's own volume or output.
 
 | Stage | Office computer | Transport | Status |
 | --- | --- | --- | --- |
-| 1 | macOS | WebRTC | Implemented on `feat/remote-audio` |
-| 2 | Linux, a sound output per conversation desktop | WebRTC | Planned |
+| 1 | macOS | WebRTC | Implemented |
+| 2 | Linux, a sound output per conversation desktop | WebRTC | Implemented on `feat/linux-audio` |
+| Later | Windows (WASAPI loopback) | WebRTC | With the Windows desktop backend ([windows.md](windows.md)) |
 
 Each stage ships on its own. Clients learn per stream whether sound is available (below), so a
 client never needs every combination to work before it offers sound where it can.
@@ -44,18 +45,37 @@ Recording permission mobd already has; there is no new prompt.
 - **Failure:** capture ending on its own (permission revoked, display gone) ends sound for its
   viewers with a reason; video keeps running.
 
-Linux (stage 2): each conversation desktop already has its own processes (Xvfb, dbus, openbox)
-and an environment for the agent's apps. Add a PulseAudio (or PipeWire-pulse) server per desktop
-with a null sink, put its address (`PULSE_SERVER`) in that environment, capture the sink's
-monitor with the existing GStreamer integration and `opusenc`, and tie its start, sleep and
-cleanup to the desktop's lifecycle. `mobd desktops doctor` and the packages gain the sound
-server. Ordinary routing keeps conversations apart; it is not a security boundary between
-processes of one user.
+## Capture and encoding (Linux)
+
+`internal/desktop/manager/sound.go`. Each conversation desktop runs its own sound server next to
+its Xvfb, dbus and openbox, so conversations never hear each other:
+
+- **Server:** `pulseaudio -n` with a generated `default.pa`: a null sink `mob` (48 kHz stereo,
+  the default sink) and a native-protocol socket in the desktop's runtime directory (mode 0700,
+  so no other authentication). It starts in the desktop's `session/` cgroup before openbox, with
+  its runtime, state and cookie in that directory, never `~/.config`. It sleeps and wakes with
+  the desktop (cgroup freezer) and stops with it.
+- **Routing:** the agent's and openbox's environment get `PULSE_SERVER=unix:<socket>`, so apps
+  the agent or the user starts play into that desktop's output. Ordinary routing keeps
+  conversations apart; it is not a security boundary between processes of one user.
+- **Capture:** GStreamer `pulsesrc` on `mob.monitor` → `opusenc` (96 kbit/s, 20 ms, general
+  audio) → appsink, shared by the desktop's viewers through `desktop.AudioHub` as on macOS. PTS
+  counts packets, so a dropped packet leaves a gap. The first packet arrives about 0.4 s after
+  the capture starts.
+- **Failure:** the server exiting is restarted at the same socket, at most 5 times a minute;
+  then the desktop runs silent until it restarts. A server that does not start leaves the
+  desktop working and silent.
+- **Optional:** without `pulseaudio` (or GStreamer's `pulsesrc`/`opusenc`) desktops work as
+  before and `/health` does not list `streamAudio`. `mobd desktops doctor` has a `sound` check
+  with the fix. The `.deb` recommends `gstreamer1.0-pulseaudio` and suggests `pulseaudio` rather
+  than depending on it: on a PC whose own sound is PipeWire, the package's per-user service
+  would compete with it ([linux-build.md](linux-build.md), notes).
 
 ## API
 
-`/health` lists `streamAudio` when the backend can capture sound (macOS, shared desktop). The
-stage-2 Linux backend adds it per desktop. There is no API version change; every field is
+`/health` lists `streamAudio` when the backend can capture sound: macOS, and Linux with
+conversation desktops when PulseAudio and GStreamer's audio capture are installed. On Linux the
+answer to `audio: true` is `unavailable` for a desktop without a running sound server. There is no API version change; every field is
 optional.
 
 `POST /stream` takes `"audio": true` to ask for sound. The client's offer must then contain a
@@ -127,7 +147,15 @@ view plays at a time. Client plans: [desktop](https://github.com/xrdavies/mob/bl
 - `internal/stream/audio_test.go`: a Pion viewer gets a stereo Opus answer, no packets until it
   turns sound on, packets after, capture stopped by off and by closing; unavailable when the
   backend, the offer or the transport cannot carry sound; no `audio` field when not asked for.
+- `internal/desktop/manager/sound_test.go`: the server starts in `session/` with its config, the
+  agent and openbox get `PULSE_SERVER`, restarts and giving up, a desktop without `pulseaudio`.
+- `internal/desktop/manager/sound_e2e_test.go` (`MOBD_DESKTOP_TEST=1`, real desktops): a tone
+  played on one of two desktops is in every packet of its capture (50 a second) and in none of
+  the other's.
 - By hand: the three apps against mobd on this Mac and on the office Mac with a game's sound.
+  On Ubuntu 24.04 (arm64) a Linux mobd whose agent played a tone on its conversation desktop:
+  `stream-probe -session … -audio` received 50 stereo packets a second, all with sound, the
+  first 55 ms after sound on.
 
 Measurements to record for stage 1: time from sound on to first sound, audible delay against
 video, CPU of the capture. Bluetooth output adds its own delay; report it separately.
