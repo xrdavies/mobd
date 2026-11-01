@@ -38,7 +38,8 @@ func (c *ICE) Servers(now time.Time) []ICEServer {
 	var stun, turn []string
 	for _, u := range c.URLs {
 		if strings.HasPrefix(u, "turn:") {
-			turn = append(turn, u)
+			// UDP is TURN's default; WebKit refuses the URL with ?transport=udp.
+			turn = append(turn, strings.TrimSuffix(u, "?transport=udp"))
 		} else {
 			stun = append(stun, u)
 		}

@@ -20,7 +20,7 @@ func TestICEMintsTURNRESTCredentials(t *testing.T) {
 	now := time.Unix(1_800_000_000, 0)
 	c := &ICE{URLs: []string{"stun:relay.example.com:3478", "turn:relay.example.com:3478?transport=udp"}, Entry: "office", Secret: iceSecret}
 	s := c.Servers(now)
-	if len(s) != 2 || s[0].Username != "" || len(s[1].URLs) != 1 || !strings.HasPrefix(s[1].URLs[0], "turn:") {
+	if len(s) != 2 || s[0].Username != "" || len(s[1].URLs) != 1 || s[1].URLs[0] != "turn:relay.example.com:3478" {
 		t.Fatalf("servers %+v", s)
 	}
 	exp, entry, _ := strings.Cut(s[1].Username, ":")
