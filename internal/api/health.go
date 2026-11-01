@@ -23,14 +23,18 @@ var baseFeatures = []string{"queue", "activities", "sessionAdmin", "events", "sc
 // features adds what this server's desktops can do: sessionDesktops where each conversation
 // has its own desktop (Linux).
 func (s *Server) features() []string {
+	f := baseFeatures
 	if s.desktops.PerSession() {
-		return append(slices.Clone(baseFeatures), "sessionDesktops")
+		f = append(slices.Clone(f), "sessionDesktops")
+	} else if audioBackend() {
+		// The shared desktop's sound, where the backend captures it (macOS; docs/desktop-audio.md).
+		f = append(slices.Clone(f), "streamAudio")
 	}
-	// The shared desktop's sound, where the backend captures it (macOS; docs/desktop-audio.md).
-	if audioBackend() {
-		return append(slices.Clone(baseFeatures), "streamAudio")
+	// The relay's STUN/TURN servers at GET /stream/ice (mob-relay docs/media-path.md).
+	if s.cfg.Relay != nil && s.cfg.Relay.TURN != nil {
+		f = append(slices.Clone(f), "streamIce")
 	}
-	return baseFeatures
+	return f
 }
 
 // audioBackend reports whether this OS's backend captures desktop sound; swapped in tests.

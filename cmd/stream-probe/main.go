@@ -41,6 +41,8 @@ func main() {
 	session := flag.String("session", "", "conversation ID whose desktop to watch (Linux: each conversation has its own)")
 	resolve := flag.String("resolve", "", "connect to this IP instead of resolving the host (e.g. Funnel's public address)")
 	audio := flag.Bool("audio", false, "ask for the desktop's sound and turn it on")
+	useICE := flag.Bool("ice", false, "use the STUN/TURN servers from GET /stream/ice (mobd with a relay)")
+	relayOnly := flag.Bool("relay-only", false, "with -ice: allow only relayed (TURN) candidates")
 	flag.Parse()
 	if *resolve != "" {
 		// Like curl --resolve: keeps the host name for TLS, dials the given address.
@@ -59,7 +61,15 @@ func main() {
 		watchWS(strings.TrimRight(*addr, "/"), *token, *seconds, *maxWidth, *quality, *session)
 		return
 	}
-	pc, err := webrtc.NewPeerConnection(webrtc.Configuration{})
+	rtc := webrtc.Configuration{}
+	if *useICE {
+		rtc.ICEServers = fetchICE(base, *token)
+		if *relayOnly {
+			rtc.ICETransportPolicy = webrtc.ICETransportPolicyRelay
+		}
+		log.Printf("ICE: %d server entries%s", len(rtc.ICEServers), map[bool]string{true: ", relay only"}[*relayOnly])
+	}
+	pc, err := webrtc.NewPeerConnection(rtc)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -211,9 +221,13 @@ func main() {
 		<-tick.C
 		b, f := bytesIn.Load(), frames.Load()
 		path := ""
-		for _, s := range pc.GetStats() {
+		stats := pc.GetStats()
+		for _, s := range stats {
 			if p, ok := s.(webrtc.ICECandidatePairStats); ok && p.Nominated {
 				path = fmt.Sprintf("rtt %.0fms", p.CurrentRoundTripTime*1000)
+				if c, ok := stats[p.LocalCandidateID].(webrtc.ICECandidateStats); ok {
+					path += " via " + c.CandidateType.String()
+				}
 			}
 		}
 		sound := ""
@@ -316,4 +330,34 @@ func watchWS(base, token string, seconds, maxWidth int, quality, session string)
 	}
 	fmt.Printf("first frame after %s; %d frames, %d KB\n", time.Duration(firstFrame.Load()).Round(time.Millisecond), frames.Load(), bytesIn.Load()/1024)
 	c.Close(websocket.StatusNormalClosure, "")
+}
+
+// fetchICE reads GET /stream/ice: the relay's STUN servers and TURN with minted credentials.
+func fetchICE(base, token string) []webrtc.ICEServer {
+	req, _ := http.NewRequest("GET", base+"/stream/ice", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var body struct {
+		IceServers []struct {
+			URLs       []string `json:"urls"`
+			Username   string   `json:"username"`
+			Credential string   `json:"credential"`
+		} `json:"iceServers"`
+	}
+	if resp.StatusCode != 200 || json.NewDecoder(resp.Body).Decode(&body) != nil {
+		log.Fatalf("GET /stream/ice: %s", resp.Status)
+	}
+	var out []webrtc.ICEServer
+	for _, s := range body.IceServers {
+		w := webrtc.ICEServer{URLs: s.URLs, Username: s.Username}
+		if s.Credential != "" {
+			w.Credential = s.Credential
+		}
+		out = append(out, w)
+	}
+	return out
 }

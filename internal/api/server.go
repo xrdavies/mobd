@@ -125,6 +125,7 @@ func New(cfg config.Config, store *task.Store, auth *pairing.Store, desktops des
 			return auth.Attach(parent, client, http.MethodPost, "/stream")
 		},
 		UDP: cfg.StreamUDP,
+		ICE: relayICE(cfg),
 	})
 	if err != nil {
 		panic(err)
@@ -202,6 +203,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /stream", s.handleStreamOpen)
 	mux.HandleFunc("DELETE /stream/{id}", s.handleStreamClose)
 	mux.HandleFunc("GET /stream/ws", s.handleStreamWS)
+	mux.HandleFunc("GET /stream/ice", s.handleStreamICE)
 	mux.HandleFunc("POST /tasks/{id}/questions/{qid}/answer", s.handleAnswer)
 	mux.HandleFunc("POST /tasks/{id}/steer", s.handleSteer)
 	public := http.NewServeMux()

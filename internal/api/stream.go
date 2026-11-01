@@ -4,6 +4,9 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"time"
+
+	"github.com/xrdavies/mobd/internal/config"
 
 	"github.com/xrdavies/mobd/internal/desktop"
 	"github.com/xrdavies/mobd/internal/pairing"
@@ -65,6 +68,22 @@ func (s *Server) handleStreamWS(w http.ResponseWriter, r *http.Request) {
 	case errors.Is(err, stream.ErrConflict):
 		writeErr(w, http.StatusConflict, err.Error())
 	}
+}
+
+// handleStreamICE gives a paired app the relay's STUN and TURN servers, with TURN credentials
+// minted for it (empty without a relay). Apps fetch it before their offer (docs/desktop-streaming.md).
+func (s *Server) handleStreamICE(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, http.StatusOK, map[string]any{"iceServers": s.streams.ICEServers(), "ttlSeconds": int(12 * time.Hour / time.Second)})
+}
+
+// relayICE is the stream manager's view of relay.turn.
+func relayICE(cfg config.Config) *stream.ICE {
+	if cfg.Relay == nil || cfg.Relay.TURN == nil {
+		return nil
+	}
+	t := cfg.Relay.TURN
+	return &stream.ICE{URLs: t.URLs, Entry: t.Entry, Secret: t.Secret}
 }
 
 func (s *Server) handleStreamClose(w http.ResponseWriter, r *http.Request) {
