@@ -6,7 +6,7 @@ store and App.
 
 An individual Mob agent is a persistent session, not the framework or runner.
 See [agent concepts](agent-concepts.md) for the shared vocabulary and
-[collaboration](agent-collaboration.md) for the proposed messaging contract.
+[collaboration](agent-collaboration.md) for the proposed communication architecture.
 
 Related: [API reference](mobd-v3.md) and [architecture](architecture.md)
 (desktop tools via `mobd mcp`).

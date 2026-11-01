@@ -9,8 +9,8 @@ See [architecture](architecture.md), [runners](runners.md),
 [installation](releases.md) and [security](security.md).
 
 [Agent concepts](agent-concepts.md) defines the vocabulary and compatibility names.
-[Agent collaboration](agent-collaboration.md) is a separate draft; its proposed
-routes and `agentCollaboration` feature are not implemented API capabilities.
+[Agent collaboration](agent-collaboration.md) is a separate architecture draft;
+its API contract will be defined during implementation.
 
 ## Capabilities
 

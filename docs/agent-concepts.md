@@ -92,10 +92,10 @@ on a new chat chooses an **Agent framework**; the `@` picker chooses an **Agent*
 
 ## Ownership
 
-mobd owns this vocabulary, identity rules and the collaboration contract.
+mobd owns this vocabulary, identity rules and the collaboration architecture.
 Desktop, iOS and Android own the presentation and local cache implementations.
 The website explains released behavior and uses the same terms. Client companion
-plans reference this revision rather than redefining request states or IDs.
+plans reference this revision and share its identity and collaboration model.
 
 Current foundations: [session types](../internal/task/task.go),
 [runner interface](../internal/runner/runner.go),
