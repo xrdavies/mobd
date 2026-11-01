@@ -58,6 +58,9 @@ type Config struct {
 	DiskWarnBytes         Bytes         `json:"diskWarnBytes"`
 	DiskFloorBytes        Bytes         `json:"diskFloorBytes"`
 	DesktopBrowserSeed    string        `json:"desktopBrowserSeed,omitempty"`
+
+	// Relay connects live views through a self-hosted Mob relay with WebRTC (relay.go).
+	Relay *Relay `json:"relay,omitempty"`
 }
 
 // JSON uses Go duration strings so user configs and service snapshots share a format.
@@ -275,6 +278,9 @@ func Load(args []string) (Config, string, error) {
 		return cfg, path, errors.New("questionTimeout must be positive")
 	}
 	if err := validateDesktop(&cfg); err != nil {
+		return cfg, path, err
+	}
+	if err := validateRelay(&cfg); err != nil {
 		return cfg, path, err
 	}
 	if cfg.CodexMode != "app-server" && cfg.CodexMode != "exec" {

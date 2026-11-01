@@ -103,6 +103,8 @@ type Config struct {
 	Loopback bool
 	// UDP, when set, carries every session's media (tests use it to impair the link).
 	UDP net.PacketConn
+	// ICE adds the relay's STUN and TURN servers to every session (nil: host candidates only).
+	ICE *ICE
 	// Audio captures the desktop's sound for the legacy single-desktop configuration (tests).
 	Audio func(context.Context) (desktop.AudioStream, error)
 }
@@ -372,7 +374,8 @@ func (s *session) chosen() string {
 }
 
 func (s *session) startWebRTC(offer string, fps int) (string, error) {
-	pc, err := s.m.api.NewPeerConnection(webrtc.Configuration{}) // host candidates: LAN and Tailscale
+	// Host candidates (LAN, Tailscale), plus the relay's STUN and TURN when configured.
+	pc, err := s.m.api.NewPeerConnection(webrtc.Configuration{ICEServers: webrtcServers(s.m.cfg.ICE.Servers(time.Now()))})
 	if err != nil {
 		return "", err
 	}

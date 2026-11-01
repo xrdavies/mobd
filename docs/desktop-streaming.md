@@ -55,7 +55,8 @@ Content-Type: application/json
 `201 {"session", "answer", "wsTicket", "width", "height", "display"}`. `width`/`height` are the
 encoded size. Without `offer` the session waits for the WebSocket only and `answer` is omitted.
 ICE is gathered before answering (no trickle). Candidates are host-only UDP, so LAN and Tailscale
-addresses work without STUN and the office's public IP is not exposed. All sessions share one UDP
+addresses work without STUN and the office's public IP is not exposed. With a Mob relay
+(`relay.turn`, below) mobd also gathers STUN and TURN candidates. All sessions share one UDP
 socket on every interface, port `streamPort` (default 9527, `MOBD_STREAM_PORT`), so a firewall or
 tailnet rule can allow it; `0` gives each session a random port. mobd fails to start if the port is taken.
 
@@ -168,25 +169,44 @@ screen answers `304`. A sleeping display answers `503` with the reason.
 - Media is DTLS-SRTP (WebRTC) or inside the HTTPS/Tailscale/SSH connection (fallback).
 - Revocation closes the stream session and its channels, like SSE.
 - Input is accepted only from the session's own channels; the agent's actions keep their own path.
-- Host-only ICE; no third-party STUN.
+- Host-only ICE unless a Mob relay is configured; never third-party STUN.
+
+### Through a Mob relay: STUN and TURN
+
+A live view reached through a self-hosted [Mob relay](https://github.com/xrdavies/mob-relay)
+(TCP only for HTTP) still uses WebRTC when the relay runs its STUN/TURN service (mob-relay
+`docs/media-path.md`). mobd's config names it:
+
+```json
+"relay": {"turn": {"urls": ["stun:relay.example.com:3478", "turn:relay.example.com:3478"],
+                   "entry": "office", "secretFile": "~/.mobd/relay-turn"}}
+```
+
+- **Secret:** `secretFile` is the entry's `turnSecretFile` from the relay (the same 64-character
+  key, made by `mobr token`), owned by mobd's user with mode 0600 or 0400. Only UDP TURN.
+- **Credentials:** mobd mints 12-hour TURN REST credentials (username `<expiry>:<entry>`, password
+  base64 HMAC-SHA1 of it) for its own peer connections and for paired apps.
+- **Endpoint:** `GET /stream/ice` (authenticated, `no-store`) answers
+  `{"iceServers":[{"urls":[…]},{"urls":[…],"username":"…","credential":"…"}],"ttlSeconds":43200}`,
+  or `{"iceServers":[]}` without a relay. `/health` lists `streamIce` when configured.
+- **Apps:** they fetch the servers before their offer, so ICE can pick direct, hole-punched or
+  relayed paths; the WebSocket remains the last resort.
+- **Format:** TURN URLs go to apps without `?transport=udp`, which WebKit refuses.
 
 ## Testing
 
 `cmd/stream-probe` is a command-line viewer: `go run ./cmd/stream-probe -url … -token …` reports
 first-picture time, bitrate and frame rate. `-ws` uses the WebSocket fallback; `-quality`,
-`-max-width`, `-pli`, `-click` and `-type` exercise the other paths.
+`-max-width`, `-pli`, `-click` and `-type` exercise the other paths. `-audio` turns sound on and
+counts it; `-ice` uses `GET /stream/ice` and `-relay-only` allows only TURN candidates, and the
+readout names the selected candidate type.
 
 ## Plan (not implemented)
 
-- **`mob-relay`:** a small Go program on [Pion TURN](https://github.com/pion/turn) running on the
-  public gateway, so WebRTC works through the self-hosted gateway (and later our hosted relay).
-  mobd would be configured with the relay URL and a shared secret, issue short-lived per-session
-  TURN credentials (HMAC of `expiry:clientId`) and return them as `iceServers` in `POST /stream`.
-  Clients configure nothing.
 - **Linux backend:** one virtual desktop per conversation (Xvfb, XShm, XTest, GStreamer); see the
   draft plan in [Linux](linux.md).
 - **Windows backend:** the logged-in user's desktop (DXGI, Media Foundation, SendInput); stage 2
   of the plan in [Windows](windows.md).
 - **macOS login window:** a privileged helper to reach the screen before any user signs in.
-- **System audio:** [draft design](desktop-audio.md), including WebSocket fallback and A/V sync.
+- **System audio on Linux:** stage 2 of [desktop audio](desktop-audio.md).
 - Not planned for now: file transfer, clipboard sync, multi-monitor selection (main display only).
