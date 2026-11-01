@@ -188,3 +188,19 @@ func TestDesktopAdmin(t *testing.T) {
 		t.Error(s.DesktopsDir())
 	}
 }
+
+// soundDesktops are conversation desktops with sound (Linux with pulseaudio).
+type soundDesktops struct{ *scripted }
+
+func (soundDesktops) Sound() bool { return true }
+
+func TestHealthListsSoundForConversationDesktops(t *testing.T) {
+	s, _ := dispatchServer(t, &scripted{}, 1, "")
+	if f := s.features(); !slices.Contains(f, "sessionDesktops") || slices.Contains(f, "streamAudio") {
+		t.Errorf("without sound: %v", f)
+	}
+	s.desktops = soundDesktops{&scripted{}}
+	if f := s.features(); !slices.Contains(f, "sessionDesktops") || !slices.Contains(f, "streamAudio") {
+		t.Errorf("with sound: %v", f)
+	}
+}

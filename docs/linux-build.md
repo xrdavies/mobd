@@ -24,6 +24,7 @@ tested in CI; [`mobd desktops doctor`](#4-check) tells you what is still missing
 | Session bus | `dbus-daemon` | `dbus-daemon` | `dbus` | `dbus-1` |
 | Keyboard | `x11-xkb-utils`, `xkb-data` | `setxkbmap`, `xkeyboard-config` | `xorg-setxkbmap`, `xkeyboard-config` | `setxkbmap`, `xkeyboard-config` |
 | Encoder | `gstreamer1.0-plugins-bad` (OpenH264, VA-API) | `gstreamer1-plugins-bad-free`, `openh264` and `gstreamer1-plugin-openh264` (Cisco repository), or VA-API | `gst-plugins-bad`, `gst-plugin-openh264` | `gstreamer-plugins-bad`, `gstreamer-plugin-openh264` |
+| Sound (optional) | `pulseaudio`, `gstreamer1.0-pulseaudio` | `pulseaudio`, `gstreamer1-plugins-good` *(to verify: conflicts with `pipewire-pulseaudio`)* | `pulseaudio`, `gst-plugins-good` *(to verify)* | `pulseaudio`, `gstreamer-plugins-good` *(to verify)* |
 | Fonts | `fonts-dejavu-core`, `fonts-noto-cjk` | `dejavu-sans-fonts`, `google-noto-sans-cjk-fonts` | `ttf-dejavu`, `noto-fonts-cjk` | `dejavu-fonts`, `noto-sans-cjk-fonts` |
 
 A bare Xvfb machine has almost no fonts, so pages render boxes without them. Browsers are optional;
@@ -53,7 +54,7 @@ mobd status
 mobd desktops doctor
 ```
 
-`doctor` checks Xvfb, openbox, dbus-daemon, setxkbmap, cgroup v2 and the freezer, the encoder,
+`doctor` checks Xvfb, openbox, dbus-daemon, setxkbmap, cgroup v2 and the freezer, the encoder, sound,
 browsers (and snaps), memory, disk, systemd-oomd, linger and the locale, and prints how to fix
 what fails. `/health` shows the same in `checks`.
 
@@ -66,6 +67,11 @@ what fails. `/health` shows the same in `checks`.
   be needed *(to verify)*.
 - **systemd-oomd** (Fedora, Ubuntu desktops) may kill a whole desktop scope under memory
   pressure. `doctor` warns when it runs; swap or zram helps more than anything else.
+- **Sound:** each desktop runs its own `pulseaudio` with one virtual output; mobd starts it, so
+  the package's per-user service is not used. On a PC whose own sound is PipeWire (Ubuntu and
+  Fedora desktops), keep PipeWire for your session with
+  `systemctl --user mask pulseaudio.socket pulseaudio.service`. Without `pulseaudio` desktops
+  work silently. Tested on Ubuntu 24.04.
 - **Locale:** desktops and agents get `LANG`/`LC_*` from `/etc/default/locale`, else
   `/etc/locale.conf` (Fedora, Arch), else `C.UTF-8`.
 - **Uninstall:** `mobd uninstall` closes every desktop and removes the service; delete `~/.mobd`

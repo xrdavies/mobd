@@ -6,10 +6,11 @@ typedef struct MobPipe MobPipe;
 int mob_gst_init(void);
 // mob_gst_has reports whether an element factory exists.
 int mob_gst_has(const char *factory);
-// mob_pipe_new builds and starts a pipeline with an appsrc "src" and an appsink "sink"; on
+// mob_pipe_new builds and starts a pipeline with an appsink "sink" and, to be fed, an appsrc "src"; on
 // failure it returns NULL and sets *err (free with mob_free).
 MobPipe *mob_pipe_new(const char *desc, char **err);
 // mob_pipe_push copies one buffer into the appsrc with a PTS in nanoseconds; caps may be NULL.
+// It fails (-1) for a pipeline without an appsrc.
 int mob_pipe_push(MobPipe *p, const void *data, int size, int64_t pts, const char *caps);
 // mob_pipe_pull waits up to timeout ns for a sample: 1 with *data/*size (free with mob_free) and
 // *key set, 0 on timeout, -1 at end of stream.

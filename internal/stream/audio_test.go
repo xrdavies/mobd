@@ -208,3 +208,23 @@ func TestStereoOpusMarksOnlyOpus(t *testing.T) {
 		t.Fatal("not idempotent")
 	}
 }
+
+// soundSource is a conversation desktop that may or may not run a sound server now.
+type soundSource struct {
+	desktop.Source
+	sound bool
+}
+
+func (s soundSource) HasSound() bool { return s.sound }
+func (soundSource) StartAudio(context.Context) (desktop.AudioStream, error) {
+	return newFakeAudio(), nil
+}
+
+func TestConversationDesktopOffersSoundOnlyWithItsServer(t *testing.T) {
+	if hasAudioSource(desktopSource{soundSource{sound: false}}) {
+		t.Error("a desktop without a sound server offered sound")
+	}
+	if !hasAudioSource(desktopSource{soundSource{sound: true}}) {
+		t.Error("a desktop with a sound server did not offer sound")
+	}
+}

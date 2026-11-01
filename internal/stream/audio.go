@@ -86,6 +86,10 @@ func hasAudioSource(src Source) bool {
 		return l.cfg.Audio != nil
 	}
 	if d, ok := src.(desktopSource); ok {
+		// A conversation's desktop on Linux: only when it runs a sound server now.
+		if s, ok := d.Source.(interface{ HasSound() bool }); ok {
+			return s.HasSound()
+		}
 		_, ok := d.Source.(desktop.AudioSource)
 		return ok
 	}

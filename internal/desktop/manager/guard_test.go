@@ -140,7 +140,8 @@ func TestDesktopUsage(t *testing.T) {
 		_ = os.WriteFile(filepath.Join(dir, "smaps_rollup"), []byte("55c4-7ffd ---p 00000000 00:00 0 [rollup]\nRss:  2000 kB\nPss:  1000 kB\n"), 0600)
 	}
 	f.m.sampleMemory()
-	if got := d.Info().MemoryBytes; got != 3*1000<<10 {
+	// Xvfb, dbus, openbox and the sound server.
+	if got := d.Info().MemoryBytes; got != int64(len(d.record().PIDs))*1000<<10 || len(d.record().PIDs) != 4 {
 		t.Errorf("Pss sum %d", got)
 	}
 }

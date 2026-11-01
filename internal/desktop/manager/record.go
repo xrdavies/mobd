@@ -19,29 +19,31 @@ const recordVersion = 1
 // record is desktop.json (docs/linux-design.md, section 3.2). The X cookie is not in it, only
 // the Xauthority path.
 type record struct {
-	Version     int                  `json:"version"`
-	SessionID   string               `json:"sessionId"`
-	State       desktop.DesktopState `json:"state"`
-	Reason      string               `json:"reason"`
-	Display     int                  `json:"display"`
-	Unit        string               `json:"unit"`
-	Cgroup      string               `json:"cgroup"`
-	PIDs        map[string]int       `json:"pids"`
-	RuntimeDir  string               `json:"runtimeDir"`
-	XAuthority  string               `json:"xauthority"`
-	Bus         string               `json:"bus"`
-	Width       int                  `json:"width"`
-	Height      int                  `json:"height"`
-	Scale       int                  `json:"scale"`
-	Layout      string               `json:"layout"`
-	Locale      string               `json:"locale"`
-	BootID      string               `json:"bootId"`
-	MobdVersion string               `json:"mobdVersion"`
-	StartedAt   *time.Time           `json:"startedAt,omitempty"`
-	LastUsedAt  *time.Time           `json:"lastUsedAt,omitempty"`
-	SleptAt     *time.Time           `json:"sleptAt,omitempty"`
-	Turn        *turnRecord          `json:"turn,omitempty"`
-	Crashes     []time.Time          `json:"crashes,omitempty"`
+	Version    int                  `json:"version"`
+	SessionID  string               `json:"sessionId"`
+	State      desktop.DesktopState `json:"state"`
+	Reason     string               `json:"reason"`
+	Display    int                  `json:"display"`
+	Unit       string               `json:"unit"`
+	Cgroup     string               `json:"cgroup"`
+	PIDs       map[string]int       `json:"pids"`
+	RuntimeDir string               `json:"runtimeDir"`
+	XAuthority string               `json:"xauthority"`
+	Bus        string               `json:"bus"`
+	// Sound is the desktop's PulseAudio socket; "" without sound (sound.go).
+	Sound       string      `json:"sound,omitempty"`
+	Width       int         `json:"width"`
+	Height      int         `json:"height"`
+	Scale       int         `json:"scale"`
+	Layout      string      `json:"layout"`
+	Locale      string      `json:"locale"`
+	BootID      string      `json:"bootId"`
+	MobdVersion string      `json:"mobdVersion"`
+	StartedAt   *time.Time  `json:"startedAt,omitempty"`
+	LastUsedAt  *time.Time  `json:"lastUsedAt,omitempty"`
+	SleptAt     *time.Time  `json:"sleptAt,omitempty"`
+	Turn        *turnRecord `json:"turn,omitempty"`
+	Crashes     []time.Time `json:"crashes,omitempty"`
 }
 
 // turnRecord lets a restarted mobd kill a runner orphaned by a crash.

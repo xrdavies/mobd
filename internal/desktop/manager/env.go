@@ -50,6 +50,10 @@ func (d *desk) profile(b string) string { return filepath.Join(d.profiles(), b) 
 // the wrappers first on PATH, the machine's locale.
 func (d *desk) agentEnv(rec record) []string {
 	env := append(rec.env(), "MOB_DESKTOP="+d.dir, "PATH="+d.binDir()+string(os.PathListSeparator)+os.Getenv("PATH"))
+	if rec.Sound != "" {
+		// The desktop's own sound server (sound.go): its apps play into this desktop's output.
+		env = append(env, "PULSE_SERVER=unix:"+rec.Sound)
+	}
 	return append(env, d.m.locale...)
 }
 

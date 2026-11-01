@@ -114,6 +114,7 @@ main() {
   if [ "$os" = linux ]; then
     printf '\nConversation desktops need (Debian, Ubuntu):\n  sudo apt install xvfb openbox dbus-daemon x11-xkb-utils gstreamer1.0-plugins-base gstreamer1.0-plugins-bad fonts-dejavu-core\n'
     printf 'Or install the .deb from the release, which brings them. Check with: mobd desktops doctor\n'
+    printf 'Sound in the live view also needs: sudo apt install pulseaudio gstreamer1.0-pulseaudio\n'
   fi
 }
 

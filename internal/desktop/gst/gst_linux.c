@@ -42,8 +42,9 @@ MobPipe *mob_pipe_new(const char *desc, char **errout) {
 	p->pipe = pipe;
 	p->src = gst_bin_get_by_name(GST_BIN(pipe), "src");
 	p->sink = gst_bin_get_by_name(GST_BIN(pipe), "sink");
-	if (!p->src || !p->sink) {
-		*errout = dupmsg("pipeline lacks appsrc src or appsink sink");
+	// An encoder is fed through appsrc "src"; a capture (audio) has its own source element.
+	if (!p->sink) {
+		*errout = dupmsg("pipeline lacks appsink sink");
 		mob_pipe_free(p);
 		return NULL;
 	}
@@ -57,6 +58,7 @@ MobPipe *mob_pipe_new(const char *desc, char **errout) {
 }
 
 int mob_pipe_push(MobPipe *p, const void *data, int size, int64_t pts, const char *caps) {
+	if (!p->src) return -1;
 	if (caps) {
 		GstCaps *c = gst_caps_from_string(caps);
 		gst_app_src_set_caps(GST_APP_SRC(p->src), c);
@@ -123,7 +125,10 @@ void mob_pipe_force_key(MobPipe *p) {
 	gst_element_send_event(p->sink, gst_video_event_new_upstream_force_key_unit(GST_CLOCK_TIME_NONE, TRUE, 0));
 }
 
-void mob_pipe_eos(MobPipe *p) { gst_app_src_end_of_stream(GST_APP_SRC(p->src)); }
+void mob_pipe_eos(MobPipe *p) {
+	if (p->src) gst_app_src_end_of_stream(GST_APP_SRC(p->src));
+	else gst_element_send_event(p->pipe, gst_event_new_eos());
+}
 
 void mob_pipe_free(MobPipe *p) {
 	if (!p) return;
