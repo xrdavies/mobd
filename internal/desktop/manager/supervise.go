@@ -21,12 +21,12 @@ const (
 	maxWMRestarts = 5
 )
 
-// supervise watches one run of the desktop: Xvfb or dbus-daemon exiting crashes it, openbox
-// exiting restarts openbox. It returns when the run ends.
+// supervise watches one run of the desktop: Xvfb or dbus-daemon exiting crashes it, openbox or
+// the sound server exiting restarts it. It returns when the run ends.
 func (d *desk) supervise(done chan struct{}) {
 	for {
 		d.mu.Lock()
-		xvfb, bus, wm, x := d.procs["xvfb"], d.procs["dbus"], d.procs["openbox"], d.x
+		xvfb, bus, wm, pulse, x := d.procs["xvfb"], d.procs["dbus"], d.procs["openbox"], d.procs["pulse"], d.x
 		d.mu.Unlock()
 		var xdone <-chan struct{}
 		if x != nil {
@@ -47,6 +47,10 @@ func (d *desk) supervise(done chan struct{}) {
 			return
 		case <-exited(wm):
 			if !d.restartWM(done) {
+				return
+			}
+		case <-exited(pulse):
+			if !d.restartSound(done) {
 				return
 			}
 		}

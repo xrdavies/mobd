@@ -92,7 +92,8 @@ func TestRealDesktop(t *testing.T) {
 		t.Errorf("no window manager: %s", wm)
 	}
 	procs, err := os.ReadFile(filepath.Join(cgroup.DefaultRoot, rec.Cgroup, "session", "cgroup.procs"))
-	if err != nil || len(strings.Fields(string(procs))) != 3 {
+	// Xvfb, dbus, openbox, and the sound server where pulseaudio is installed.
+	if err != nil || len(strings.Fields(string(procs))) != len(rec.PIDs) {
 		t.Errorf("session/ processes %q, %v", procs, err)
 	}
 	if b, _ := os.ReadFile(filepath.Join(cgroup.DefaultRoot, rec.Cgroup, "cgroup.procs")); len(b) != 0 {

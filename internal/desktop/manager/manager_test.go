@@ -303,6 +303,8 @@ func (f *fixture) newManager(t *testing.T, sessions SessionLookup) *Manager {
 	}
 	m.xready = func(ctx context.Context, _ int, _ []byte) error { return ready(ctx) }
 	m.busReady = func(ctx context.Context, _ string) error { return ready(ctx) }
+	m.soundReady = func(ctx context.Context, _ string) error { return ready(ctx) }
+	m.soundOK = func() bool { return true }
 	m.kill = f.sp.kill
 	m.killGroup = f.sp.kill
 	m.watch = f.sp.watch

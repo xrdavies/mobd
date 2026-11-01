@@ -22,7 +22,7 @@ func (f *fakeNative) Close()                      { f.once.Do(func() { close(f.c
 func TestAudioHubSharesOneCaptureAndStopsWithTheLastViewer(t *testing.T) {
 	var starts atomic.Int32
 	var native *fakeNative
-	hub := newAudioHub(func() (nativeAudio, error) {
+	hub := NewAudioHub(func() (AudioStream, error) {
 		starts.Add(1)
 		native = &fakeNative{ch: make(chan AudioPacket, 64)}
 		return native, nil
@@ -61,7 +61,7 @@ func TestAudioHubSharesOneCaptureAndStopsWithTheLastViewer(t *testing.T) {
 
 func TestAudioHubEndsViewersWithTheCaptureError(t *testing.T) {
 	native := &fakeNative{ch: make(chan AudioPacket, 1), err: errors.New("permission revoked")}
-	hub := newAudioHub(func() (nativeAudio, error) { return native, nil })
+	hub := NewAudioHub(func() (AudioStream, error) { return native, nil })
 	s, _ := hub.StartAudio(context.Background())
 	native.Close()
 	if _, ok := <-s.Packets(); ok {
@@ -74,7 +74,7 @@ func TestAudioHubEndsViewersWithTheCaptureError(t *testing.T) {
 
 func TestAudioHubDropsOldPacketsForASlowViewer(t *testing.T) {
 	native := &fakeNative{ch: make(chan AudioPacket)}
-	hub := newAudioHub(func() (nativeAudio, error) { return native, nil })
+	hub := NewAudioHub(func() (AudioStream, error) { return native, nil })
 	s, _ := hub.StartAudio(context.Background())
 	defer s.Close()
 	for i := range audioQueue + 5 {
@@ -87,7 +87,7 @@ func TestAudioHubDropsOldPacketsForASlowViewer(t *testing.T) {
 }
 
 func TestStartAudioErrorLeavesNoCapture(t *testing.T) {
-	hub := newAudioHub(func() (nativeAudio, error) { return nil, ErrUnsupported })
+	hub := NewAudioHub(func() (AudioStream, error) { return nil, ErrUnsupported })
 	if _, err := hub.StartAudio(context.Background()); !errors.Is(err, ErrUnsupported) {
 		t.Fatalf("err %v", err)
 	}

@@ -77,9 +77,11 @@ type Manager struct {
 	// Replaced in tests.
 	tmp          string // where X servers keep locks and sockets
 	look         func(string) (string, error)
+	soundOK      func() bool // PulseAudio and GStreamer's audio capture are installed (sound.go)
 	xready       func(ctx context.Context, display int, cookie []byte) error
 	openX        func(ctx context.Context, display int, cookie []byte, scale int, onChange func(), launch func([]string) (int, error)) (xconn, error)
 	busReady     func(ctx context.Context, path string) error
+	soundReady   func(ctx context.Context, socket string) error
 	kill         func(pid int) error
 	killGroup    func(pgid int) error
 	watch        func(ctx context.Context, pid int) (<-chan struct{}, error)
@@ -118,7 +120,7 @@ func New(opts Options) (*Manager, error) {
 	m := &Manager{
 		opts: opts, desks: map[string]*desk{}, reserved: map[*reservation]bool{},
 		events: make(chan desktop.Event, 64), quit: make(chan struct{}),
-		tmp: "/tmp", look: exec.LookPath, busReady: dialReady, kill: killPID,
+		tmp: "/tmp", look: exec.LookPath, busReady: dialReady, soundReady: socketReady, kill: killPID,
 		killGroup: func(pgid int) error { return proc.KillGroup(pgid, syscall.SIGKILL) },
 		watch:     proc.Watch, owns: inCgroup, bootID: bootID,
 		now: time.Now, startTimeout: startTimeout, sleepTick: sleepTick,
@@ -127,6 +129,10 @@ func New(opts Options) (*Manager, error) {
 	}
 	m.xready = func(ctx context.Context, n int, cookie []byte) error { return xHandshake(ctx, m.tmp, n, cookie) }
 	m.openX = m.openX11
+	m.soundOK = sync.OnceValue(func() bool {
+		_, err := m.look("pulseaudio")
+		return err == nil && gst.CanCaptureAudio()
+	})
 	m.locale = machineLocale("/etc/default/locale", "/etc/locale.conf")
 	// Levels are known before the first turn is scheduled.
 	m.sampleMemory()

@@ -33,27 +33,21 @@ type AudioSource interface {
 	StartAudio(ctx context.Context) (AudioStream, error)
 }
 
-// nativeAudio is a running capture: packets until it ends, then Err.
-type nativeAudio interface {
-	Packets() <-chan AudioPacket
-	Err() error
-	Close()
-}
-
 // audioQueue bounds what a slow viewer holds: about 200 ms. Older packets are dropped rather
 // than played late (a gap is better than delay that never catches up).
 const audioQueue = 10
 
 // AudioHub shares one capture between viewers: it starts with the first and stops with the last.
 type AudioHub struct {
-	start func() (nativeAudio, error)
+	start func() (AudioStream, error)
 
 	mu     sync.Mutex
-	native nativeAudio
+	native AudioStream
 	subs   map[*audioSub]struct{}
 }
 
-func newAudioHub(start func() (nativeAudio, error)) *AudioHub {
+// NewAudioHub shares the captures start makes: one at a time, for every viewer.
+func NewAudioHub(start func() (AudioStream, error)) *AudioHub {
 	return &AudioHub{start: start, subs: map[*audioSub]struct{}{}}
 }
 
@@ -99,7 +93,7 @@ func (h *AudioHub) StartAudio(ctx context.Context) (AudioStream, error) {
 }
 
 // fanOut copies each packet to every viewer, dropping a full viewer's oldest packet.
-func (h *AudioHub) fanOut(n nativeAudio) {
+func (h *AudioHub) fanOut(n AudioStream) {
 	for p := range n.Packets() {
 		h.mu.Lock()
 		for s := range h.subs {
@@ -137,7 +131,7 @@ func (h *AudioHub) leave(s *audioSub, err error) {
 	h.mu.Lock()
 	_, ok := h.subs[s]
 	delete(h.subs, s)
-	var stop nativeAudio
+	var stop AudioStream
 	if ok && len(h.subs) == 0 && h.native != nil {
 		stop = h.native
 		h.native = nil

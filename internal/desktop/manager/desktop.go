@@ -42,6 +42,9 @@ type desk struct {
 	procs map[string]*child
 	// wmRestarts are the times openbox was restarted, for the limit of 5 a minute.
 	wmRestarts []time.Time
+	// soundRestarts likewise for the sound server; sound shares its capture between viewers.
+	soundRestarts []time.Time
+	sound         *desktop.AudioHub
 	// stopAfterTurn: the desktop crashed during a turn, whose runner still lives in the scope;
 	// the scope stops when the turn ends.
 	stopAfterTurn bool
@@ -185,7 +188,7 @@ func (d *desk) start(ctx context.Context) (err error) {
 		return d.fail(record{}, err)
 	}
 	logs := map[string]*logFile{}
-	for _, name := range []string{"xvfb", "dbus", "openbox"} {
+	for _, name := range []string{"xvfb", "dbus", "openbox", "sound"} {
 		l, err := openLog(logDir, name)
 		if err != nil {
 			return d.fail(record{}, err)
@@ -332,6 +335,10 @@ func (d *desk) start(ctx context.Context) (err error) {
 		return err
 	}
 	env := childEnv(append(append(display, "DBUS_SESSION_BUS_ADDRESS="+rec.Bus), m.locale...)...)
+
+	// Sound before the window manager: the apps it and the agent start name the server.
+	d.startSound(ctx, &rec, logs["sound"].File, sessionFD)
+	d.commit(rec)
 
 	// Keyboard layout: a wrong layout is worth a log line, not a failed desktop.
 	kb, err := d.spawn("setxkbmap", proc.Spec{

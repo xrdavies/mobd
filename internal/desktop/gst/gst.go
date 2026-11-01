@@ -38,3 +38,21 @@ type Factory struct {
 	Detail string // "VA-API", "NVENC", "software"
 	New    func(EncoderOptions) (Encoder, error)
 }
+
+// AudioFrame is the length of one Opus packet from CaptureAudio.
+const AudioFrame = 20 * time.Millisecond
+
+// AudioPacket is one 20 ms stereo Opus packet. PTS counts packets since the capture started, so
+// a packet dropped later leaves a gap rather than shifting the timeline.
+type AudioPacket struct {
+	Data []byte
+	PTS  time.Duration
+}
+
+// Audio is a running capture: packets until Close or an error (Err).
+type Audio interface {
+	Packets() <-chan AudioPacket
+	Err() error
+	// Close stops the capture; Packets is closed once it returns.
+	Close()
+}

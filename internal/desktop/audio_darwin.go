@@ -18,7 +18,7 @@ import (
 )
 
 // macAudio shares the system audio capture between live views.
-var macAudio = newAudioHub(startMacAudio)
+var macAudio = NewAudioHub(startMacAudio)
 
 // StartAudio joins the capture of the computer's playback (Opus; see AudioPacket).
 func (macOS) StartAudio(ctx context.Context) (AudioStream, error) { return macAudio.StartAudio(ctx) }
@@ -38,7 +38,7 @@ var (
 	nextAudio atomic.Uintptr
 )
 
-func startMacAudio() (nativeAudio, error) {
+func startMacAudio() (AudioStream, error) {
 	a := &macAudioCapture{id: nextAudio.Add(1), ch: make(chan AudioPacket, audioQueue)}
 	audios.Store(a.id, a)
 	var rc C.int

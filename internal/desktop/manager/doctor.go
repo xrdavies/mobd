@@ -33,7 +33,7 @@ func (m *Manager) Doctor(ctx context.Context) []desktop.DoctorCheck {
 			out = append(out, desktop.DoctorCheck{Name: p.check, OK: true, Detail: path})
 		}
 	}
-	out = append(out, m.cgroupCheck(ctx), m.displayCheck(), m.encoderCheck(), m.browserCheck())
+	out = append(out, m.cgroupCheck(ctx), m.displayCheck(), m.encoderCheck(), m.soundCheck(), m.browserCheck())
 	res := m.Resources()
 	mem, disk := desktop.MemoryCheck(res.Memory), desktop.DiskCheck(res.Disk)
 	out = append(out,

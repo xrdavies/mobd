@@ -26,6 +26,10 @@ func (s *Server) features() []string {
 	f := baseFeatures
 	if s.desktops.PerSession() {
 		f = append(slices.Clone(f), "sessionDesktops")
+		// Conversation desktops with their own sound server (Linux; docs/desktop-audio.md).
+		if p, ok := s.desktops.(interface{ Sound() bool }); ok && p.Sound() {
+			f = append(f, "streamAudio")
+		}
 	} else if audioBackend() {
 		// The shared desktop's sound, where the backend captures it (macOS; docs/desktop-audio.md).
 		f = append(slices.Clone(f), "streamAudio")
