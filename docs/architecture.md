@@ -3,6 +3,9 @@
 MOB splits **control** (what the agent should do) from **view** (what the human sees) and from **actuation** (how the agent drives the office computer UI).
 
 This repository owns the office daemon, `mobd mcp`, the API and release tooling.
+The [shared agent vocabulary](agent-concepts.md) distinguishes frameworks,
+agents/sessions and execution turns. The [collaboration design](agent-collaboration.md)
+adds proposed cross-session messaging; it is not part of the implemented behavior below.
 The desktop client lives in [xrdavies/mob](https://github.com/xrdavies/mob).
 Signed and notarized macOS Apple Silicon binaries are distributed through
 `https://dl.mymob.dev/mobd/`; see [installation and releases](releases.md).
