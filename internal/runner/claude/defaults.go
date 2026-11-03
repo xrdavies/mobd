@@ -19,8 +19,8 @@ func (r *Runner) defaults() (model, effort string) {
 	for _, src := range strings.Split(sources, ",") {
 		switch strings.TrimSpace(src) {
 		case "user":
-			if home, err := os.UserHomeDir(); err == nil {
-				files = append(files, filepath.Join(home, ".claude", "settings.json"))
+			if f := userSettings(); f != "" {
+				files = append(files, f)
 			}
 		case "project":
 			files = append(files, filepath.Join(r.cfg.ClaudeWorkDir, ".claude", "settings.json"))
@@ -62,8 +62,32 @@ func (r *Runner) defaults() (model, effort string) {
 			}
 		}
 	}
+	// The personal env reaches Claude also without "user" (connectionSettings), and env beats model.
+	if m := personalModel(); m != "" {
+		model = m
+	}
 	if m := os.Getenv("ANTHROPIC_MODEL"); m != "" {
 		model = m
 	}
 	return model, effort
+}
+
+// personalModel is env.ANTHROPIC_MODEL in the personal settings.
+func personalModel() string {
+	f := userSettings()
+	if f == "" {
+		return ""
+	}
+	data, err := os.ReadFile(f)
+	if err != nil {
+		return ""
+	}
+	var s struct {
+		Env map[string]any `json:"env"`
+	}
+	if json.Unmarshal(data, &s) != nil {
+		return ""
+	}
+	m, _ := s.Env["ANTHROPIC_MODEL"].(string)
+	return m
 }

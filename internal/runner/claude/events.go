@@ -35,6 +35,8 @@ type event struct {
 		ID      string  `json:"id"`
 		Content []block `json:"content"`
 	} `json:"message"`
+	// Error names why an assistant message failed, e.g. "authentication_failed".
+	Error   string  `json:"error"`
 	IsError bool    `json:"is_error"`
 	Result  string  `json:"result"`
 	Cost    float64 `json:"total_cost_usd"`
@@ -57,6 +59,8 @@ type parser struct {
 	replySeen  bool
 	done       bool
 	failure    error
+	// authFailed: Claude found no usable credentials (no model was called).
+	authFailed bool
 	// texts counts text/thinking blocks per message ID for stable message IDs.
 	texts map[string]int
 	// tools holds started tool steps until their result arrives.
@@ -83,6 +87,9 @@ func (p *parser) Line(line string) error {
 	var ev event
 	if err := json.Unmarshal([]byte(line), &ev); err != nil || ev.Type == "" {
 		return fmt.Errorf("invalid Claude JSON event: %s", runner.Clip(line, 200))
+	}
+	if ev.Error == "authentication_failed" {
+		p.authFailed = true
 	}
 	switch ev.Type {
 	case "system":
@@ -127,6 +134,9 @@ func (p *parser) Line(line string) error {
 			msg := strings.TrimSpace(ev.Result)
 			if msg == "" {
 				msg = "Claude turn failed: " + ev.Subtype
+			}
+			if p.authFailed || strings.Contains(msg, "Not logged in") {
+				msg += " (mobd: " + loginHint + ")"
 			}
 			p.failure = errors.New(msg)
 		} else if !p.replySeen && strings.TrimSpace(ev.Result) != "" {

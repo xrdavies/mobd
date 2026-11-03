@@ -90,12 +90,12 @@ func TestBuildArgs(t *testing.T) {
 	cfg := config.Config{MobMCPCommand: "/opt/mobd", MobMCPArgs: []string{"mcp"}, ClaudeSettingSources: "project"}
 	args := New(cfg).buildArgs(&task.Task{Model: "sonnet", Effort: "max", ResumeID: "sess-1"}, runner.Options{
 		Instructions: "ask first", MCPEnv: map[string]string{"MOB_TASK_TOKEN": "tok"}, ToolTimeout: time.Minute,
-	})
+	}, "/data/claude/login-settings.json")
 	joined := strings.Join(args, " ")
 	for _, want := range []string{
 		"-p --input-format stream-json --output-format stream-json --verbose", "--strict-mcp-config",
 		`"mob-mcp":{"args":["mcp"],"command":"/opt/mobd","env":{"MOB_TASK_TOKEN":"tok"}}`,
-		"--setting-sources project", "--permission-mode bypassPermissions", "--append-system-prompt ask first",
+		"--setting-sources project --settings /data/claude/login-settings.json", "--permission-mode bypassPermissions", "--append-system-prompt ask first",
 		"--model sonnet", "--effort max", "--resume sess-1",
 	} {
 		if !strings.Contains(joined, want) {
@@ -103,7 +103,7 @@ func TestBuildArgs(t *testing.T) {
 		}
 	}
 	cfg.ClaudeSettingSources = "all"
-	joined = strings.Join(New(cfg).buildArgs(&task.Task{}, runner.Options{Permissions: "approve"}), " ")
+	joined = strings.Join(New(cfg).buildArgs(&task.Task{}, runner.Options{Permissions: "approve"}, ""), " ")
 	if !strings.Contains(joined, "--permission-mode manual --permission-prompt-tool "+ApproveTool) ||
 		!strings.Contains(joined, "--allowedTools mcp__mob-mcp,Read") || strings.Contains(joined, "--setting-sources") ||
 		strings.Contains(joined, "--resume") {

@@ -11,6 +11,7 @@ import (
 func TestDefaultsFollowTheSettingSourcesMobdLoads(t *testing.T) {
 	home, work := t.TempDir(), t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
 	t.Setenv("ANTHROPIC_MODEL", "")
 	os.MkdirAll(filepath.Join(home, ".claude"), 0700)
 	os.MkdirAll(filepath.Join(work, ".claude"), 0700)
@@ -30,6 +31,11 @@ func TestDefaultsFollowTheSettingSourcesMobdLoads(t *testing.T) {
 	os.WriteFile(filepath.Join(work, ".claude", "settings.local.json"), []byte(`{"model":"sonnet"}`), 0600)
 	if m, e := info("local,project,user"); m != "sonnet" || e != "medium" {
 		t.Fatalf("later sources win: %q %q", m, e)
+	}
+	// The personal env reaches Claude with any sources (mobd#7), so its model counts.
+	os.WriteFile(filepath.Join(home, ".claude", "settings.json"), []byte(`{"model":"opus","env":{"ANTHROPIC_MODEL":"gateway-opus"}}`), 0600)
+	if m, _ := info("project"); m != "gateway-opus" {
+		t.Fatalf("personal env model: %q", m)
 	}
 	t.Setenv("ANTHROPIC_MODEL", "haiku")
 	if m, _ := info("project"); m != "haiku" {

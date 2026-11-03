@@ -45,8 +45,17 @@ func (r *Runner) Info() runner.Info {
 		Images: true, Resume: true, Cost: true}
 }
 
+// Check reports whether Claude Code is installed and finds credentials with mobd's settings.
 func (r *Runner) Check(ctx context.Context) runner.Status {
-	return cli.Version(ctx, "Claude Code", r.cfg.ClaudeBin, "MOBD_CLAUDE_BIN")
+	st := cli.Version(ctx, "Claude Code", r.cfg.ClaudeBin, "MOBD_CLAUDE_BIN")
+	if !st.OK {
+		return st
+	}
+	path, err := exec.LookPath(r.cfg.ClaudeBin)
+	if err != nil {
+		return st
+	}
+	return r.checkLogin(ctx, path, st.Detail)
 }
 
 func (r *Runner) Start(ctx context.Context, t *task.Task, opts runner.Options, emit runner.EmitFunc) error {
@@ -61,18 +70,27 @@ func (r *Runner) Start(ctx context.Context, t *task.Task, opts runner.Options, e
 	if err != nil {
 		return err
 	}
+	settings, err := r.connectionSettings()
+	if err != nil {
+		// Claude may still log in another way (claude /login, the environment).
+		if err := emit(task.Event{Type: "log", Message: "personal Claude login settings not passed on: " + err.Error()}); err != nil {
+			return err
+		}
+		settings = ""
+	}
 	env := append(os.Environ(), opts.Env...)
 	if opts.ToolTimeout > 0 {
 		// Lets ask_user block while the user decides.
 		env = append(env, fmt.Sprintf("MCP_TOOL_TIMEOUT=%d", opts.ToolTimeout.Milliseconds()))
 	}
 	return cli.Run(ctx, cli.Command{
-		Name: "claude", Path: path, Args: r.buildArgs(t, opts), Dir: r.cfg.ClaudeWorkDir, Env: env, Stdin: bytes.NewReader(stdin),
+		Name: "claude", Path: path, Args: r.buildArgs(t, opts, settings), Dir: r.cfg.ClaudeWorkDir, Env: env, Stdin: bytes.NewReader(stdin),
 		Cgroup: opts.Cgroup, OOMScoreAdj: opts.OOMScoreAdj, Started: opts.Started,
 	}, newParser(emit, opts.SaveImage), emit)
 }
 
-func (r *Runner) buildArgs(t *task.Task, opts runner.Options) []string {
+// settings is the --settings file with the personal login settings, or "".
+func (r *Runner) buildArgs(t *task.Task, opts runner.Options, settings string) []string {
 	server := map[string]any{"command": r.cfg.MobMCPCommand, "args": r.cfg.MobMCPArgs}
 	if r.cfg.MobMCPArgs == nil {
 		server["args"] = []string{}
@@ -86,9 +104,7 @@ func (r *Runner) buildArgs(t *task.Task, opts runner.Options) []string {
 		// Only mob's MCP server; the user's own servers and plugins do not apply.
 		"--strict-mcp-config", "--mcp-config", string(mcpConfig),
 	}
-	if src := r.cfg.ClaudeSettingSources; src != "" && src != "all" {
-		args = append(args, "--setting-sources", src)
-	}
+	args = append(args, r.settingArgs(settings)...)
 	if opts.Approve() {
 		args = append(args, "--permission-mode", "manual", "--permission-prompt-tool", ApproveTool,
 			"--allowedTools", strings.Join(safeTools, ","))
