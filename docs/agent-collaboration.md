@@ -31,7 +31,7 @@ flowchart TB
     C <-->|Select agents / follow collaboration| D
 ```
 
-- **Agent identity:** reuse the session ID. Names and short IDs help users find
+- **Agent identity:** reuse the session ID. Handles (`@api`), titles and short IDs help users find
   an agent; the selected reference points to that specific session.
 - **Agents:** decide what to ask and how to use the reply. For a particular task,
   A coordinates its request and B supplies its contribution. These roles can

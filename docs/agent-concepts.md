@@ -38,8 +38,11 @@ agent: it needs an independently registered Mob session to be addressable here.
   `{serverId, sessionId}`. Use the pairing server identity, not a client-local
   machine row ID, a hostname, a URL or a credential. Auth reset creates a new
   server identity; old references must not silently retarget to it.
-- `Session.title` is the editable display name. Rename does not change identity;
-  duplicate names are allowed and require disambiguation when selected.
+- `Session.title` describes the conversation's work and is freely editable;
+  duplicates are allowed. An optional **handle** (`@api`) names the agent itself:
+  unique per mobd, kept while archived, released when deleted, movable to another
+  conversation. Rename and handle changes never change identity. Rules are in the
+  [implementation design](agent-collaboration-design.md#handles).
 - Display a short, unambiguous ID alongside the name. A short prefix is a lookup
   convenience; persisted references always contain the full ID. Do not use the
   list position or a turn ID as an agent number. A separate numeric numbering
@@ -47,10 +50,11 @@ agent: it needs an independently registered Mob session to be addressable here.
 - Preserve the name at sending time for history, while links resolve by ID.
   A deleted target becomes an unavailable reference, never a new same-name agent.
 
-`@name` or `@short-id` selects an agent reference. Selecting a reference does not
+`@handle`, or a title chosen in the picker (shown with its short ID), selects an
+agent reference; archived agents cannot be selected. Selecting a reference does not
 itself send a prompt to that agent. A user can refer to someone's work without
 asking for new work. A collaboration tool call is the attributable dispatch
-action; merely printing `@name` in an agent response has no dispatch effect.
+action; merely printing `@handle` in an agent response has no dispatch effect.
 
 ## Three independent lifecycles
 

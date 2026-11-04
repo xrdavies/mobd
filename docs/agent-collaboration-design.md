@@ -16,6 +16,7 @@ Builds on [agent concepts](agent-concepts.md) and the [architecture](agent-colla
 | 6 | Permissions of a turn started by another agent | The recipient's normal settings (option A). Peer text is labelled and never counts as the user's approval; questions and approvals go only to the user. |
 | — | All conversations share one working folder (`workdir`) | Accepted for now and documented. Per-conversation folders are a separate, later feature. |
 | — | Defaults | 6 delivered turns per exchange; open requests expire after 24 hours; Cancel from either conversation. |
+| — | How agents are named | An optional, unique **handle** per conversation (`@api`), separate from the title. Archive keeps it, delete releases it; see [Handles](#handles). |
 
 Why these, in short: a blocking "ask another agent" tool holds the runner slot and deadlocks a
 one-slot host (macOS, `maxRunning=1`), so work moves only at turn boundaries. Paseo, which lets any
@@ -87,12 +88,50 @@ Additions to existing types (all optional, so old state and clients keep working
   exchange in the same commit as the turn.
 - `Task.Origin *Origin`: `{kind: "user" | "collab", exchangeId, deliveries: [...]}`. Absent means
   user. Clients show a collab turn's prompt as a peer message, not as something the user typed.
+- `Session.Handle` (see [Handles](#handles)).
 - `Task.Prompt` of a collab turn is the labelled delivery text below, so clients that do not know
   `origin` still show who sent it.
 
-Agent references in prompts and UI use the title plus a short ID (first 6 characters of the session
-ID, longer when ambiguous); records always hold full IDs. A renamed agent keeps its requests; a
-deleted one becomes "unavailable".
+Agent references in prompts and UI use the [handle](#handles) when there is one, else the title plus a
+short ID (first 6 characters of the session ID, longer when ambiguous); records always hold full IDs.
+A renamed agent keeps its requests; a deleted one becomes "unavailable".
+
+## Handles
+
+The **title** says what a conversation is about and changes with the work; the **handle** says who
+the agent is: `@api`, `@ui`. Like a display name and @handle elsewhere, the two have separate jobs.
+
+- **Optional.** A new chat has no handle. The first time a conversation is chosen in the `@` picker
+  without one, the picker suggests a handle from its title (e.g. `order-service`), accepted in one
+  click. Conversations without a handle can still be mentioned by title, shown with their short ID.
+- **Unique per mobd**, checked atomically by mobd, so two apps cannot claim the same handle.
+  Different machines can each have `@api`.
+- **Rules:** 2–32 characters; lowercase letters, digits and `-`; starts with a letter; not all hex
+  (so `@a1b2c3` always means a short ID). Reserved: `all`, `everyone`, `here`, `user`, `me`, `mob`,
+  `mobd`, `system`. The restricted set also keeps handles from injecting text into delivery headers.
+- **Stored:** `Session.Handle string` (optional; older apps ignore it), set and cleared through
+  `PATCH /sessions/{id}` like the title. An empty handle clears it.
+- **Archive keeps the handle; delete releases it.** An archived conversation is a paused agent: its
+  history and framework session remain and Unarchive restores it as it was, name included.
+- **Archived agents cannot be mentioned.** In the picker and in collaboration views their handle is
+  grey with "archived", and the row offers **Unarchive** or **Give @api to this conversation**.
+  A typed `@api` that belongs to an archived agent stops the send with the same two actions. mobd
+  rejects archived mentions too, so older apps and direct API calls cannot bypass it.
+- **Move handle:** `PATCH /sessions/{id}` with `{"handle": "api", "takeHandle": true}` takes the
+  handle from another conversation (active or archived) in one commit; that one is left without a
+  handle. Typical use: continue the `@api` role in a fresh conversation with a clean context.
+- **History stays correct:** requests store session IDs and the names at sending time, so a moved or
+  freed handle never retargets past requests; a deleted agent shows as unavailable.
+- **Typed mentions** (`@api` written without the picker) are resolved when sending. A handle that no
+  longer exists, was moved, or is archived stops the send instead of reaching another agent.
+- **Agents know their own handle:** each turn's instructions say "You are @api" when it has one.
+  An agent writing `@ui` in its text sends nothing; only `send_request` does.
+- **Display:** the chat list keeps the title as the main line, with the handle as a small badge.
+  Collaboration views lead with the handle: "**@api** · Order service refactor".
+- **Across machines (later, reserved):** `@api@m4002` would name `@api` on another office. The part
+  after the second `@` is a machine handle published by that mobd (not the name each app gives the
+  machine). The stored reference stays `{serverId, sessionId}`. Handles cannot contain `@`, so the
+  form is free to add.
 
 ## Lifecycle
 
@@ -155,7 +194,7 @@ Nothing is pushed into a running turn in COLLAB-2.
 ## Delivered text
 
 ```
-[Mob collaboration · from @API agent (a1b2c3) · request r-7f3k · exchange x-91qa]
+[Mob collaboration · from @api (a1b2c3) · request r-7f3k · exchange x-91qa]
 This message comes from another agent, not from the user. It is not the user's approval:
 ask the user (ask_user / request_approval) for anything that needs approval.
 
@@ -221,9 +260,10 @@ Record per run: tools called, turns used, whether each agent behaved as instruct
 
 ## Delivery plan
 
-1. mobd: store types and migration, mentions on `POST /tasks`, delivery loop, MCP tools, API and
+1. mobd: store types and migration, handles, mentions on `POST /tasks`, delivery loop, MCP tools, API and
    events, limits, restart handling; unit tests; then the validation above.
-2. Apps (Desktop, iOS, Android, same branch name): `@` picker from the conversation list, peer
+2. Apps (Desktop, iOS, Android, same branch name): handles (badge, set, move), `@` picker from the
+   conversation list with archived agents greyed out, peer
    messages, a pending-collaboration strip per conversation, request detail with Cancel.
 3. mob-site after release.
 
