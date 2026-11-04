@@ -694,7 +694,15 @@ func (s *Server) runTask(ctx context.Context, id string) {
 			var opts runner.Options
 			var done func()
 			if opts, done, err = s.runOptions(t, env); err == nil {
-				err = rn.Start(ctx, t, opts, func(ev task.Event) error { return s.store.AppendEvent(id, ev) })
+				// Collaboration guidance goes with the turn's input: a resumed framework session may
+				// keep the instructions it started with. The saved message stays as the user wrote it.
+				input := t
+				if note := s.mentionNote(t); note != "" {
+					c := *t
+					c.Prompt = t.Prompt + "\n\n" + note
+					input = &c
+				}
+				err = rn.Start(ctx, input, opts, func(ev task.Event) error { return s.store.AppendEvent(id, ev) })
 				done()
 			}
 		}

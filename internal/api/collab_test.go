@@ -113,7 +113,7 @@ func TestCollabToolEndpoint(t *testing.T) {
 	if json.Unmarshal(rr.Body.Bytes(), &r); rr.Code != http.StatusOK || r.To != b {
 		t.Fatalf("send: %d %s", rr.Code, rr.Body.String())
 	}
-	if env, text := s.collabEnv(user); env["MOB_COLLAB"] != "send" || !strings.Contains(text, "send_request") {
+	if env, text := s.collabEnv(user); env["MOB_COLLAB"] != "send" || !strings.Contains(text, "send_request") || !strings.Contains(text, "do not call request_approval") {
 		t.Fatalf("user turn env %v %q", env, text)
 	}
 	// The delivery turn in B was created by the endpoint's scheduling; B cannot send.
@@ -176,5 +176,28 @@ func TestCollabAPIListsAndCancels(t *testing.T) {
 	}
 	if !slices.Contains(baseFeatures, "agentCollaboration") {
 		t.Fatal("feature not advertised")
+	}
+}
+
+func TestMentionNoteGoesWithTheMentioningTurnOnly(t *testing.T) {
+	s := testServer(t, "")
+	idle := func(prompt string) string {
+		tk, _ := s.store.Create(prompt)
+		_, _ = s.store.UpdateStatus(tk.ID, task.StatusSucceeded, "")
+		return tk.SessionID
+	}
+	a, b := idle("ui"), idle("api")
+	h := "api"
+	_, _ = s.store.UpdateSession(b, task.SessionPatch{Handle: &h})
+	user, _ := s.store.CreateTurnWith(a, "ask @api", task.TurnOptions{Mentions: []string{b}})
+	if note := s.mentionNote(user); !strings.Contains(note, "@api (id "+b[:6]) || !strings.Contains(note, "send_request") {
+		t.Fatalf("note %q", note)
+	}
+	if got, _ := s.store.Get(user.ID); got.Prompt != "ask @api" {
+		t.Fatalf("saved prompt changed: %q", got.Prompt)
+	}
+	plain, _ := s.store.CreateTurnWith(b, "hi", task.TurnOptions{})
+	if note := s.mentionNote(plain); note != "" {
+		t.Fatalf("note on a plain turn: %q", note)
 	}
 }
