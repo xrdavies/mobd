@@ -168,6 +168,9 @@ type Session struct {
 	// Rev goes up on every change in the conversation (a turn, its steps, messages or questions,
 	// or the title and flags). Clients pass it back as ?since= to fetch only what changed.
 	Rev int64 `json:"rev,omitempty"`
+	// Handle optionally names the agent (@api); unique per mobd, kept while archived, released
+	// when the conversation is deleted. "" means none.
+	Handle string `json:"handle,omitempty"`
 	// Turns is the number of turns; the newest has Seq == Turns.
 	Turns    int64     `json:"turns,omitempty"`
 	Messages []Message `json:"messages,omitempty"`

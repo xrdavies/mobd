@@ -34,6 +34,10 @@ type SessionPatch struct {
 	// caller validates them against the conversation's runner.
 	Model  *string `json:"model"`
 	Effort *string `json:"effort"`
+	// Handle sets the agent's handle; "" clears it. TakeHandle moves it from the conversation
+	// that has it (active or archived) in the same commit.
+	Handle     *string `json:"handle"`
+	TakeHandle bool    `json:"takeHandle"`
 }
 
 // Change summarizes a committed mutation for live clients. Task changes carry
@@ -402,11 +406,35 @@ func (s *Store) UpdateSession(id string, patch SessionPatch) (*Session, error) {
 	if patch.Effort != nil {
 		session.Effort = *patch.Effort
 	}
+	var previous *Session // the conversation the handle is taken from
+	if patch.Handle != nil && *patch.Handle != session.Handle {
+		h := *patch.Handle
+		if h != "" {
+			if !ValidHandle(h) {
+				return nil, ErrInvalidHandle
+			}
+			if owner := s.handleOwnerLocked(h); owner != nil && owner.ID != id {
+				if !patch.TakeHandle {
+					return nil, ErrHandleTaken
+				}
+				previous = cloneSession(owner)
+				previous.Handle = ""
+				bump(previous, nil)
+			}
+		}
+		session.Handle = h
+	}
 	bump(session, nil)
 	next := s.next()
 	next.Sessions[id] = session
+	if previous != nil {
+		next.Sessions[previous.ID] = previous
+	}
 	if err := s.swap(next); err != nil {
 		return nil, err
+	}
+	if previous != nil {
+		s.notifyLocked(previous, nil)
 	}
 	s.notifyLocked(session, nil)
 	summary := *session

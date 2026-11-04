@@ -382,8 +382,10 @@ func (s *Server) handlePatchSession(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case errors.Is(err, task.ErrNotFound):
 		writeErr(w, http.StatusNotFound, "session not found")
-	case errors.Is(err, task.ErrInvalidTitle):
+	case errors.Is(err, task.ErrInvalidTitle), errors.Is(err, task.ErrInvalidHandle):
 		writeErr(w, http.StatusBadRequest, err.Error())
+	case errors.Is(err, task.ErrHandleTaken):
+		writeErr(w, http.StatusConflict, err.Error())
 	case err != nil:
 		writeErr(w, http.StatusInternalServerError, err.Error())
 	default:
