@@ -67,6 +67,9 @@ type state struct {
 	Questions map[string][]Question `json:"questions,omitempty"`
 	// Exchanges are agent collaborations, keyed by ID (collab.go).
 	Exchanges map[string]*Exchange `json:"exchanges,omitempty"`
+	// Requests between agents, keyed by ID, and the inbox: deliveries not yet given to a turn.
+	Requests   map[string]*Request `json:"requests,omitempty"`
+	Deliveries []*Delivery         `json:"deliveries,omitempty"`
 }
 
 // logLimit bounds memory-only debug lines kept per task for SSE replay.
@@ -805,7 +808,7 @@ func (s *Store) next() state {
 	return state{
 		Tasks: maps.Clone(s.data.Tasks), Sessions: maps.Clone(s.data.Sessions),
 		Order: s.data.Order, Activities: s.data.Activities, Questions: s.data.Questions,
-		Exchanges: s.data.Exchanges,
+		Exchanges: s.data.Exchanges, Requests: s.data.Requests, Deliveries: s.data.Deliveries,
 	}
 }
 

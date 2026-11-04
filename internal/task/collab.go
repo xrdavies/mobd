@@ -36,6 +36,8 @@ type Exchange struct {
 type Origin struct {
 	Kind       string `json:"kind"` // user | collab
 	ExchangeID string `json:"exchangeId,omitempty"`
+	// Requests a collab turn carries: its deliveries were about these.
+	Requests []string `json:"requests,omitempty"`
 }
 
 // mentionsLocked validates mentioned session IDs for a turn in conversation self ("" for a new one):
