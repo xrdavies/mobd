@@ -2,6 +2,8 @@
 
 Status: architecture draft COLLAB-1, 2026-11-02. Not implemented or released.
 Read [agent concepts](agent-concepts.md) for the shared vocabulary.
+The [implementation design](agent-collaboration-design.md) (COLLAB-2) records the decisions
+(one level, mention-based authorization, user first, no automatic retry) and the data model.
 
 ## Decision
 
