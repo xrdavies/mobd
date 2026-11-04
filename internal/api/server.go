@@ -284,8 +284,10 @@ func (s *Server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 		s.mu.Unlock()
 		code := http.StatusInternalServerError
 		switch {
-		case errors.Is(err, task.ErrInvalidPrompt):
+		case errors.Is(err, task.ErrInvalidPrompt), errors.Is(err, task.ErrInvalidMention):
 			code = http.StatusBadRequest
+		case errors.Is(err, task.ErrMentionArchived):
+			code = http.StatusConflict
 		case errors.Is(err, task.ErrNotFound):
 			code = http.StatusNotFound
 		case errors.Is(err, task.ErrSessionBusy), errors.Is(err, task.ErrRunnerMismatch):

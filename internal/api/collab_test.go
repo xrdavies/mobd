@@ -1,0 +1,44 @@
+package api
+
+import (
+	"bytes"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+
+	"github.com/xrdavies/mobd/internal/task"
+)
+
+func TestCreateTaskWithMentions(t *testing.T) {
+	s := testServer(t, "")
+	idle := func(prompt string) string {
+		tk, err := s.store.Create(prompt)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, _ = s.store.UpdateStatus(tk.ID, task.StatusSucceeded, "")
+		return tk.SessionID
+	}
+	a, b := idle("ui"), idle("api")
+	post := func(req task.CreateRequest) *httptest.ResponseRecorder {
+		body, _ := json.Marshal(req)
+		rr := httptest.NewRecorder()
+		authenticatedHandler(t, s).ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/tasks", bytes.NewReader(body)))
+		return rr
+	}
+	if rr := post(task.CreateRequest{SessionID: a, Prompt: "x", Mentions: []string{"missing"}}); rr.Code != http.StatusBadRequest {
+		t.Fatalf("unknown mention: %d %s", rr.Code, rr.Body.String())
+	}
+	yes, no := true, false
+	_, _ = s.store.UpdateSession(b, task.SessionPatch{Archived: &yes})
+	if rr := post(task.CreateRequest{SessionID: a, Prompt: "x", Mentions: []string{b}}); rr.Code != http.StatusConflict {
+		t.Fatalf("archived mention: %d %s", rr.Code, rr.Body.String())
+	}
+	_, _ = s.store.UpdateSession(b, task.SessionPatch{Archived: &no})
+	rr := post(task.CreateRequest{SessionID: a, Prompt: "ask @api", Mentions: []string{b}})
+	var got task.Task
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil || rr.Code >= 300 || got.Origin == nil || got.Origin.ExchangeID == "" {
+		t.Fatalf("with mention: %d %s", rr.Code, rr.Body.String())
+	}
+}

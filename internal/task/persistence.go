@@ -42,6 +42,9 @@ func OpenStore(path string) (*Store, error) {
 	if s.data.Questions == nil {
 		s.data.Questions = make(map[string][]Question)
 	}
+	if s.data.Exchanges == nil {
+		s.data.Exchanges = make(map[string]*Exchange)
+	}
 	for id, questions := range s.data.Questions {
 		if s.data.Tasks[id] == nil {
 			return nil, errors.New("invalid question in conversation state")

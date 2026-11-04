@@ -51,6 +51,8 @@ type Task struct {
 	// QueueReason says what a queued task waits for: "slots", "desktops", "memory", "disk" or
 	// "desktopStarting". Held in memory by the scheduler, never persisted.
 	QueueReason string `json:"queueReason,omitempty"`
+	// Origin is who started the turn; nil is the user without mentions (collab.go).
+	Origin *Origin `json:"origin,omitempty"`
 }
 
 // Usage is the token accounting reported when a turn completes.
@@ -201,6 +203,8 @@ type CreateRequest struct {
 	Model       string   `json:"model,omitempty"`
 	Effort      string   `json:"effort,omitempty"`
 	Attachments []string `json:"attachments,omitempty"`
+	// Mentions are session IDs the user selected with @; they start an agent collaboration.
+	Mentions []string `json:"mentions,omitempty"`
 }
 
 // TurnOptions are per-turn runner settings validated by the API.
@@ -213,6 +217,8 @@ type TurnOptions struct {
 	// SaveModel and SaveEffort store Model and Effort as the conversation's settings (a new
 	// conversation, or a turn that names them).
 	SaveModel, SaveEffort bool
+	// Mentions are validated session IDs from CreateRequest.Mentions.
+	Mentions []string
 }
 
 func (s Status) Terminal() bool {

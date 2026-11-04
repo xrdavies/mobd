@@ -148,7 +148,7 @@ func (s *Server) handleArtifact(w http.ResponseWriter, r *http.Request) {
 // turnOptions resolves the turn's runner and validates its settings against
 // what that runner supports. It returns a problem and HTTP status on failure.
 func (s *Server) turnOptions(req task.CreateRequest) (task.TurnOptions, string, int) {
-	opts := task.TurnOptions{Runner: req.Runner, Model: req.Model, Effort: req.Effort, Attachments: req.Attachments}
+	opts := task.TurnOptions{Runner: req.Runner, Model: req.Model, Effort: req.Effort, Attachments: req.Attachments, Mentions: req.Mentions}
 	var sessionModel, sessionEffort string
 	if req.SessionID != "" {
 		// A conversation's model and effort change only with PATCH /sessions/{id}.
