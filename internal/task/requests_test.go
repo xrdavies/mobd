@@ -3,6 +3,7 @@ package task
 import (
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -215,5 +216,42 @@ func TestRestartInterruptsRequestsBeingHandledAndKeepsTheInbox(t *testing.T) {
 	// Nothing is retried: b has nothing waiting.
 	if inbox := restored.Inbox(b); len(inbox) != 0 {
 		t.Fatalf("retried: %+v", inbox)
+	}
+}
+
+func TestDeletingOrArchivingAnAgentEndsItsRequestsAndNotifies(t *testing.T) {
+	s := NewStore()
+	var changed []*Request
+	s.SetNotifier(func(c Change) { changed = append(changed, c.Requests...) })
+	a, b, c := idleConversation(t, s, "ui"), idleConversation(t, s, "api"), idleConversation(t, s, "docs")
+	user := running(t, s, a, TurnOptions{Mentions: []string{b, c}})
+	rb, _ := s.SendRequest(user.ID, b, "q-b")
+	rc, _ := s.SendRequest(user.ID, c, "q-c")
+	if len(changed) != 2 || changed[0].ID != rb.ID {
+		t.Fatalf("not notified: %+v", changed)
+	}
+	if n, err := s.EndRequestsFor(b, "the agent was archived", false); n != 1 || err != nil {
+		t.Fatalf("%d %v", n, err)
+	}
+	if got, _ := s.Request(rb.ID); got.Status != RequestCancelled {
+		t.Fatalf("%s", got.Status)
+	}
+	if inbox := s.Inbox(a); len(inbox) != 1 || inbox[0].Wakes || !strings.Contains(inbox[0].Text, "archived") {
+		t.Fatalf("A not told: %+v", inbox)
+	}
+	if _, err := s.DeleteSession(c); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.EndRequestsFor(c, "the agent was deleted", true); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.Request(rc.ID); got.Status != RequestCancelled {
+		t.Fatalf("%s", got.Status)
+	}
+	if len(s.Inbox(c)) != 0 {
+		t.Fatal("deliveries kept for a deleted agent")
+	}
+	if last := changed[len(changed)-1]; last.ID != rc.ID || last.Status != RequestCancelled {
+		t.Fatalf("last change %+v", last)
 	}
 }

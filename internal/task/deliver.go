@@ -160,6 +160,7 @@ func (s *Store) deliverToLocked(to string) (*Task, error) {
 	if err := s.swap(next); err != nil {
 		return nil, err
 	}
+	e.notify()
 	s.publish(t.ID, Event{ID: 1, Type: "status", Status: t.Status, Message: "queued", Timestamp: now})
 	s.notifyLocked(session, t)
 	return t, nil

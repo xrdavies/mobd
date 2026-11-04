@@ -112,6 +112,7 @@ type collabEdit struct {
 	requests   map[string]*Request
 	deliveries []*Delivery
 	now        time.Time
+	changed    []*Request
 }
 
 func (s *Store) editCollab() *collabEdit {
@@ -125,6 +126,19 @@ func (e *collabEdit) put(r *Request) {
 	}
 	r.UpdatedAt = e.now
 	e.requests[r.ID] = r
+	e.changed = append(e.changed, r)
+}
+
+// notify tells live clients about the requests that changed; call after a successful swap.
+func (e *collabEdit) notify() {
+	if e.s.notify == nil || len(e.changed) == 0 {
+		return
+	}
+	out := make([]*Request, 0, len(e.changed))
+	for _, r := range e.changed {
+		out = append(out, cloneRequest(r))
+	}
+	e.s.notify(Change{Requests: out})
 }
 
 func (e *collabEdit) deliver(to, requestID, kind, text string, wakes bool) {
@@ -150,7 +164,40 @@ func (e *collabEdit) end(r *Request, status RequestStatus, why string, notify ..
 func (e *collabEdit) commit() error {
 	next := e.s.next()
 	next.Requests, next.Deliveries = e.requests, e.deliveries
-	return e.s.swap(next)
+	if err := e.s.swap(next); err != nil {
+		return err
+	}
+	e.notify()
+	return nil
+}
+
+// EndRequestsFor ends a conversation's unfinished requests when it is deleted or archived: the
+// other side is told. A deleted conversation's waiting deliveries go too.
+func (s *Store) EndRequestsFor(sessionID, why string, deleted bool) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	e := s.editCollab()
+	n := 0
+	for _, stored := range s.data.Requests {
+		if stored.Status.Ended() || (stored.From != sessionID && stored.To != sessionID) {
+			continue
+		}
+		other := stored.From
+		if other == sessionID {
+			other = stored.To
+		}
+		e.end(cloneRequest(stored), RequestCancelled, why, other)
+		n++
+	}
+	if deleted {
+		before := len(e.deliveries)
+		e.deliveries = slices.DeleteFunc(e.deliveries, func(d *Delivery) bool { return d.To == sessionID })
+		n += before - len(e.deliveries)
+	}
+	if n == 0 {
+		return 0, nil
+	}
+	return n, e.commit()
 }
 
 // collabTurnLocked returns a running turn and whether it carries request id (as its collab turn).

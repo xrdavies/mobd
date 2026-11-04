@@ -48,6 +48,8 @@ type Change struct {
 	Task           *Task
 	Running        []*Task
 	Queued         []*Task
+	// Requests are agent collaboration requests that changed.
+	Requests []*Request
 }
 
 // TaskFilter narrows GET /tasks; zero values match everything.
@@ -626,6 +628,7 @@ func (s *Store) UpdateStatus(id string, status Status, errMsg string) (*Task, er
 		if err := s.swap(next); err != nil {
 			return nil, err
 		}
+		edit.notify()
 	} else if err := s.commit(t, session, false, nil); err != nil {
 		return nil, err
 	}

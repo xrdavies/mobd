@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 
@@ -127,5 +128,53 @@ func TestCollabToolEndpoint(t *testing.T) {
 	}
 	if env, text := s.collabEnv(bTurn); env["MOB_COLLAB"] != "handle" || !strings.Contains(text, "@api") {
 		t.Fatalf("B env %v %q", env, text)
+	}
+}
+
+func TestCollabAPIListsAndCancels(t *testing.T) {
+	s := testServer(t, "")
+	idle := func(prompt string) string {
+		tk, _ := s.store.Create(prompt)
+		_, _ = s.store.UpdateStatus(tk.ID, task.StatusSucceeded, "")
+		return tk.SessionID
+	}
+	a, b := idle("ui"), idle("api")
+	user, _ := s.store.CreateTurnWith(a, "ask", task.TurnOptions{Mentions: []string{b}})
+	_, _ = s.store.UpdateStatus(user.ID, task.StatusRunning, "")
+	r, _ := s.store.SendRequest(user.ID, b, "q")
+	get := func(method, path string) *httptest.ResponseRecorder {
+		rr := httptest.NewRecorder()
+		authenticatedHandler(t, s).ServeHTTP(rr, httptest.NewRequest(method, path, nil))
+		return rr
+	}
+	rr := get(http.MethodGet, "/collab?session="+b)
+	var list struct {
+		Requests []task.Request `json:"requests"`
+	}
+	if json.Unmarshal(rr.Body.Bytes(), &list); rr.Code != http.StatusOK || len(list.Requests) != 1 || list.Requests[0].ID != r.ID {
+		t.Fatalf("list: %d %s", rr.Code, rr.Body.String())
+	}
+	if rr := get(http.MethodGet, "/collab?session=nope"); rr.Code != http.StatusNotFound {
+		t.Fatalf("unknown session: %d", rr.Code)
+	}
+	if rr := get(http.MethodGet, "/collab/requests/"+r.ID); rr.Code != http.StatusOK {
+		t.Fatalf("get: %d", rr.Code)
+	}
+	if rr := get(http.MethodPost, "/collab/requests/"+r.ID+"/cancel"); rr.Code != http.StatusOK {
+		t.Fatalf("cancel: %d %s", rr.Code, rr.Body.String())
+	}
+	if rr := get(http.MethodPost, "/collab/requests/"+r.ID+"/cancel"); rr.Code != http.StatusConflict {
+		t.Fatalf("cancel twice: %d", rr.Code)
+	}
+	// Archiving an agent ends its requests.
+	r2, _ := s.store.SendRequest(user.ID, b, "q2")
+	body, _ := json.Marshal(map[string]bool{"archived": true})
+	rr = httptest.NewRecorder()
+	authenticatedHandler(t, s).ServeHTTP(rr, httptest.NewRequest(http.MethodPatch, "/sessions/"+b, bytes.NewReader(body)))
+	if got, _ := s.store.Request(r2.ID); rr.Code != http.StatusOK || got.Status != task.RequestCancelled {
+		t.Fatalf("archive: %d %+v", rr.Code, got)
+	}
+	if !slices.Contains(baseFeatures, "agentCollaboration") {
+		t.Fatal("feature not advertised")
 	}
 }

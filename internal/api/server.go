@@ -135,6 +135,7 @@ func New(cfg config.Config, store *task.Store, auth *pairing.Store, desktops des
 	// A desktop closing, failing or finishing its start, and memory or disk changing, can let
 	// a waiting turn through.
 	desktops.Subscribe(s.onDesktopEvent)
+	go s.expireRequests()
 	return s
 }
 
@@ -166,6 +167,9 @@ func (s *Server) onChange(c task.Change) {
 		s.hub.publish("task", c.Task)
 		s.hub.publish("queue", map[string]any{"running": c.Running, "queued": c.Queued})
 	}
+	for _, r := range c.Requests {
+		s.hub.publish("collab", r)
+	}
 }
 
 func (s *Server) Handler() http.Handler {
@@ -176,6 +180,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /sessions/{id}", s.handleGetSession)
 	mux.HandleFunc("GET /sessions/{id}/history", s.handleSessionHistory)
 	mux.HandleFunc("PATCH /sessions/{id}", s.handlePatchSession)
+	mux.HandleFunc("GET /collab", s.handleCollab)
+	mux.HandleFunc("GET /collab/requests/{id}", s.handleCollabRequest)
+	mux.HandleFunc("POST /collab/requests/{id}/cancel", s.handleCancelCollabRequest)
 	mux.HandleFunc("DELETE /sessions/{id}", s.handleDeleteSession)
 	mux.HandleFunc("POST /tasks", s.handleCreateTask)
 	mux.HandleFunc("GET /tasks", s.handleListTasks)
@@ -390,6 +397,12 @@ func (s *Server) handlePatchSession(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	session, err := s.store.UpdateSession(r.PathValue("id"), patch)
+	if err == nil && patch.Archived != nil && *patch.Archived {
+		// An archived agent cannot be asked: its unfinished requests end, the other side is told.
+		if _, err := s.store.EndRequestsFor(session.ID, "the agent was archived", false); err != nil {
+			log.Printf("end requests of archived %s: %v", session.ID, err)
+		}
+	}
 	if err == nil && patch.Archived != nil && *patch.Archived && s.desktops.PerSession() {
 		// An archived conversation keeps no desktop; its running turn stops first.
 		s.closeDesktop(session.ID, session.ActiveTaskID, desktop.CloseArchived)
@@ -412,6 +425,9 @@ func (s *Server) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	artifacts, err := s.store.DeleteSession(id)
 	if err == nil {
+		if _, err := s.store.EndRequestsFor(id, "the agent was deleted", true); err != nil {
+			log.Printf("end requests of deleted %s: %v", id, err)
+		}
 		s.artifacts.Delete(artifacts...)
 		go func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
