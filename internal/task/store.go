@@ -618,7 +618,15 @@ func (s *Store) UpdateStatus(id string, status Status, errMsg string) (*Task, er
 	if status.Terminal() {
 		session.ActiveTaskID, session.Waiting = "", false
 	}
-	if err := s.commit(t, session, false, nil); err != nil {
+	if edit := s.collabStatusLocked(t, status); edit != nil {
+		bump(session, t)
+		next := s.next()
+		next.Tasks[t.ID], next.Sessions[session.ID] = t, session
+		next.Requests, next.Deliveries = edit.requests, edit.deliveries
+		if err := s.swap(next); err != nil {
+			return nil, err
+		}
+	} else if err := s.commit(t, session, false, nil); err != nil {
 		return nil, err
 	}
 	ev := Event{ID: t.EventID, Type: "status", Status: status, Message: string(status), Timestamp: t.UpdatedAt}

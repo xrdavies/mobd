@@ -383,8 +383,19 @@ func (s *Store) Inbox(sessionID string) []Delivery {
 
 // recoverRequestsLocked runs at startup, after interrupted turns were failed: a request that was
 // being handled is interrupted and needs the user; it is never retried. Waiting deliveries stay.
-func (s *Store) recoverRequestsLocked() bool {
+// Deliveries of a collab turn that was still queued (requeue) go back to the inbox.
+func (s *Store) recoverRequestsLocked(requeue []Delivery) bool {
 	changed := false
+	var back []*Delivery
+	for _, d := range requeue {
+		if r := s.data.Requests[d.RequestID]; r != nil && (!r.Status.Ended() || !d.Wakes) {
+			c := d
+			back = append(back, &c)
+		}
+	}
+	if len(back) > 0 {
+		s.data.Deliveries, changed = append(back, s.data.Deliveries...), true
+	}
 	for id, stored := range s.data.Requests {
 		if stored.Status != RequestInProgress {
 			continue

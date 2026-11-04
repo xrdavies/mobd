@@ -38,6 +38,8 @@ type Origin struct {
 	ExchangeID string `json:"exchangeId,omitempty"`
 	// Requests a collab turn carries: its deliveries were about these.
 	Requests []string `json:"requests,omitempty"`
+	// Deliveries are the inbox items the turn carried, as delivered.
+	Deliveries []Delivery `json:"deliveries,omitempty"`
 }
 
 // mentionsLocked validates mentioned session IDs for a turn in conversation self ("" for a new one):

@@ -279,6 +279,12 @@ func (s *Server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusServiceUnavailable, "mobd is stopping")
 		return
 	}
+	if req.SessionID != "" {
+		// The user's message goes first: a delivery turn not yet started returns to the inbox.
+		if _, err := s.store.WithdrawCollabTurn(req.SessionID, func(id string) bool { return s.cancels[id] != nil }); err != nil {
+			log.Printf("withdraw collaboration turn: %v", err)
+		}
+	}
 	t, err := s.store.CreateTurnWith(req.SessionID, req.Prompt, opts)
 	if err != nil {
 		s.mu.Unlock()
@@ -310,6 +316,12 @@ func (s *Server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 // pass. Every waiting turn gets its queue reason. A dispatched task has a cancel func even
 // before it reports running. Caller holds mu.
 func (s *Server) scheduleLocked() {
+	// Agent collaboration: waiting deliveries become turns in idle conversations first.
+	if !s.closing {
+		if _, err := s.store.DeliverInbox(); err != nil {
+			log.Printf("collaboration delivery: %v", err)
+		}
+	}
 	limit := max(s.cfg.MaxRunning, 1)
 	reasons := map[string]string{}
 	for _, t := range s.store.QueuedTasks() {

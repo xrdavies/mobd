@@ -124,8 +124,13 @@ func OpenStore(path string) (*Store, error) {
 		}
 	}
 	recovered := false
+	var requeue []Delivery
 	for _, id := range s.data.Order {
 		t := s.data.Tasks[id]
+		if t.Status == StatusQueued && t.Origin != nil && t.Origin.Kind == "collab" {
+			// Never started: what it carried was not handled, so it is delivered again.
+			requeue = append(requeue, t.Origin.Deliveries...)
+		}
 		if !t.Status.Terminal() {
 			msg := "interrupted by mobd restart"
 			// Unsaved debug logs may have used IDs past the saved one; clients ignore IDs they saw.
@@ -142,7 +147,7 @@ func OpenStore(path string) (*Store, error) {
 		}
 		s.publish(id, Event{ID: t.EventID, Type: "status", Status: t.Status, Message: message, Timestamp: t.UpdatedAt})
 	}
-	if s.recoverRequestsLocked() {
+	if s.recoverRequestsLocked(requeue) {
 		recovered = true
 	}
 	if recovered || migrated {
