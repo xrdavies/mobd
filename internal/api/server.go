@@ -220,6 +220,7 @@ func (s *Server) Handler() http.Handler {
 	})
 	public.HandleFunc("POST /internal/tasks/{id}/ask", s.handleAsk)
 	public.HandleFunc("POST /internal/tasks/{id}/desktop/{op}", s.handleInternalDesktop)
+	public.HandleFunc("POST /internal/tasks/{id}/collab/{op}", s.handleInternalCollab)
 	public.Handle("/", s.withAuth(mux))
 	return s.withCORS(withGzip(public))
 }

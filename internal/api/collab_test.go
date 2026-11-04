@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/xrdavies/mobd/internal/task"
@@ -74,5 +75,57 @@ func TestUserMessageReplacesAQueuedDeliveryTurn(t *testing.T) {
 	}
 	if inbox := s.store.Inbox(b); len(inbox) != 1 || inbox[0].Kind != "request" {
 		t.Fatalf("inbox %+v", inbox)
+	}
+}
+
+func TestCollabToolEndpoint(t *testing.T) {
+	s := testServer(t, "")
+	idle := func(prompt string) string {
+		tk, _ := s.store.Create(prompt)
+		_, _ = s.store.UpdateStatus(tk.ID, task.StatusSucceeded, "")
+		return tk.SessionID
+	}
+	a, b, c := idle("ui"), idle("api"), idle("docs")
+	h := "api"
+	_, _ = s.store.UpdateSession(b, task.SessionPatch{Handle: &h})
+	user, _ := s.store.CreateTurnWith(a, "ask @api", task.TurnOptions{Mentions: []string{b}})
+	_, _ = s.store.UpdateStatus(user.ID, task.StatusRunning, "")
+	s.mu.Lock()
+	s.tokens[user.ID] = "user-token"
+	s.mu.Unlock()
+	call := func(taskID, token, op string, in collabCall) *httptest.ResponseRecorder {
+		body, _ := json.Marshal(in)
+		req := httptest.NewRequest(http.MethodPost, "/internal/tasks/"+taskID+"/collab/"+op, bytes.NewReader(body))
+		req.Header.Set("X-Mob-Task-Token", token)
+		rr := httptest.NewRecorder()
+		s.Handler().ServeHTTP(rr, req)
+		return rr
+	}
+	if rr := call(user.ID, "wrong", "send", collabCall{To: "@api", Text: "q"}); rr.Code != http.StatusUnauthorized {
+		t.Fatalf("bad token: %d", rr.Code)
+	}
+	if rr := call(user.ID, "user-token", "send", collabCall{To: c[:8], Text: "q"}); rr.Code != http.StatusForbidden {
+		t.Fatalf("unmentioned agent: %d %s", rr.Code, rr.Body.String())
+	}
+	rr := call(user.ID, "user-token", "send", collabCall{To: "@api", Text: "Which fields?"})
+	var r task.Request
+	if json.Unmarshal(rr.Body.Bytes(), &r); rr.Code != http.StatusOK || r.To != b {
+		t.Fatalf("send: %d %s", rr.Code, rr.Body.String())
+	}
+	if env, text := s.collabEnv(user); env["MOB_COLLAB"] != "send" || !strings.Contains(text, "send_request") {
+		t.Fatalf("user turn env %v %q", env, text)
+	}
+	// The delivery turn in B was created by the endpoint's scheduling; B cannot send.
+	var bTurn *task.Task
+	for _, tk := range s.store.ListTasks(task.TaskFilter{SessionID: b}) {
+		if tk.Origin != nil && tk.Origin.Kind == "collab" {
+			bTurn = tk
+		}
+	}
+	if bTurn == nil {
+		t.Fatal("no delivery turn in B")
+	}
+	if env, text := s.collabEnv(bTurn); env["MOB_COLLAB"] != "handle" || !strings.Contains(text, "@api") {
+		t.Fatalf("B env %v %q", env, text)
 	}
 }

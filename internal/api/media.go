@@ -248,6 +248,11 @@ func (s *Server) runOptions(t *task.Task, env desktop.TurnEnv) (opts runner.Opti
 	// and on macOS the process holding the Screen Recording grant (a mobd mcp started by an
 	// agent CLI is not, and ScreenCaptureKit hangs there instead of refusing).
 	opts.MCPEnv["MOB_DESKTOP_PROXY"] = "1"
+	collabEnv, collabText := s.collabEnv(t)
+	for k, v := range collabEnv {
+		opts.MCPEnv[k] = v
+	}
+	opts.Instructions += collabText
 	for _, id := range t.Attachments {
 		if path, _, err := s.artifacts.Path(id); err == nil {
 			opts.Images = append(opts.Images, path)
