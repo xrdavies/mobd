@@ -49,6 +49,8 @@ const usage = `Usage: mobd <command> [options]
   connections  List authenticated active requests and streams
   auth       reset --yes: invalidate all clients and invitations
   desktops   list | close SESSION | wake SESSION | logs SESSION | seed SESSION | doctor (Linux desktops)
+  usb        status | setup | remove: import USB devices shared from Mob Desktop (Linux; setup and
+             remove need sudo)
   uninstall  Close every desktop, stop mobd and remove its service; keeps settings and data
   mcp        Run the built-in MCP server over stdio
   --version  Print version
@@ -95,6 +97,12 @@ func run(args []string) error {
 	}
 	if command == "remote" {
 		return remoteCommand(args)
+	}
+	if command == "usb" {
+		return usbCommand(args)
+	}
+	if command == "usb-helper" {
+		return usbHelper(args)
 	}
 	if command == "uninstall" {
 		return uninstall(args)

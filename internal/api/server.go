@@ -22,6 +22,7 @@ import (
 	"github.com/xrdavies/mobd/internal/settings"
 	"github.com/xrdavies/mobd/internal/stream"
 	"github.com/xrdavies/mobd/internal/task"
+	"github.com/xrdavies/mobd/internal/usb"
 )
 
 type Server struct {
@@ -40,6 +41,8 @@ type Server struct {
 	files     *fileService
 
 	streams *stream.Manager
+	// usb holds shared USB devices (docs/usb-redirection.md).
+	usb *usb.Manager
 	// desktops gives each session its desktop: the shared one, or its own on Linux.
 	desktops desktop.Provider
 
@@ -133,6 +136,7 @@ func New(cfg config.Config, store *task.Store, auth *pairing.Store, desktops des
 		panic(err)
 	}
 	s.streams = streams
+	s.usb = usb.New(usb.NewImporter(), nil)
 	store.SetNotifier(s.onChange)
 	// A desktop closing, failing or finishing its start, and memory or disk changing, can let
 	// a waiting turn through.
@@ -213,6 +217,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /stream/{id}", s.handleStreamClose)
 	mux.HandleFunc("GET /stream/ws", s.handleStreamWS)
 	mux.HandleFunc("GET /stream/ice", s.handleStreamICE)
+	mux.HandleFunc("GET /usb", s.handleUSB)
+	mux.HandleFunc("POST /usb/sessions", s.handleUSBCreate)
+	mux.HandleFunc("GET /usb/sessions/{id}", s.handleUSBGet)
+	mux.HandleFunc("DELETE /usb/sessions/{id}", s.handleUSBRelease)
+	mux.HandleFunc("GET /usb/sessions/{id}/tunnel", s.handleUSBTunnel)
 	mux.HandleFunc("POST /tasks/{id}/questions/{qid}/answer", s.handleAnswer)
 	mux.HandleFunc("POST /tasks/{id}/steer", s.handleSteer)
 	public := http.NewServeMux()
@@ -755,6 +764,7 @@ func (s *Server) Close() {
 	}
 	s.mu.Unlock()
 	s.streams.Shutdown()
+	s.usb.Close()
 	s.runs.Wait()
 }
 
