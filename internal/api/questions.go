@@ -30,7 +30,7 @@ func askInstructions() string {
 const askText = `You are operating the user's office Mac on their behalf while they are away from it.
 When you need a decision only the user can make (choosing between options, missing information, ambiguous instructions), call the mob-mcp tool ask_user with a short question and, when possible, a few options. Do not guess.
 Before any action that spends money, sends a message or email to people, deletes data, publishes something, or changes accounts or security settings, call the mob-mcp tool request_approval describing exactly what you are about to do, and only proceed if it is approved.
-Asking a Mob agent the user @-mentioned (send_request) is not a message to people: the mention already allows it.
+Asking a Mob agent the user @-mentioned (send_request), or replying to a Mob agent's request (complete_request, ask_clarification, answer_clarification), is not a message to people and needs no approval.
 Do not ask about things you can find out or decide yourself.`
 
 // askRequest is what `mobd mcp` sends for ask_user / request_approval.
@@ -110,28 +110,48 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 
 var errNotRunning = errors.New("turn is not running")
 
-// mentionApproval answers an approval request that names an agent the user @-mentioned for this turn:
-// the mention already allows asking it, so the user is not asked again. Nothing is approved; the
+// mentionApproval answers an approval request that names an agent the user @-mentioned for this turn,
+// or the agent whose request this turn answers: the mention already allows asking it, and replying is
+// part of the request, so the user is not asked. Nothing is approved; the
 // agent is told to call send_request, and a second approval request in the turn goes to the user.
 // Agents on resumed threads sometimes keep the general "approve messages to people" rule.
 func (s *Server) mentionApproval(taskID string, req askRequest) (task.Question, bool) {
-	if req.Kind != task.QuestionApproval || !s.store.CollabRoles(taskID).Send {
+	if req.Kind != task.QuestionApproval {
 		return task.Question{}, false
 	}
-	list, err := s.store.Collaborators(taskID)
-	if err != nil {
-		return task.Question{}, false
-	}
+	roles := s.store.CollabRoles(taskID)
 	text := strings.ToLower(req.Text + "\n" + req.Details)
-	var named []string
-	for _, c := range list {
-		name := strings.ToLower(c.Title)
-		if c.Handle != "" && mentionsWord(text, "@"+c.Handle) || mentionsWord(text, strings.ToLower(c.ShortID)) ||
-			len(name) >= 4 && strings.Contains(text, name) {
-			named = append(named, collaboratorName(c))
+	names := func(list []task.Collaborator, extra func(task.Collaborator) bool) []string {
+		var named []string
+		for _, c := range list {
+			name := strings.ToLower(c.Title)
+			if c.Handle != "" && mentionsWord(text, "@"+c.Handle) || mentionsWord(text, strings.ToLower(c.ShortID)) ||
+				len(name) >= 4 && strings.Contains(text, name) || extra(c) {
+				named = append(named, collaboratorName(c))
+			}
+		}
+		return named
+	}
+	var answer string
+	if roles.Send {
+		if list, err := s.store.Collaborators(taskID); err == nil {
+			if named := names(list, func(task.Collaborator) bool { return false }); len(named) > 0 {
+				answer = "Approval is not needed to ask " + strings.Join(named, ", ") + ": the user's @mention already allows it. " +
+					"Call send_request now."
+			}
 		}
 	}
-	if len(named) == 0 {
+	// The agent answering a request, or answering its clarification: replying is part of the request.
+	if answer == "" && (roles.Handle || roles.Answer) {
+		peers := s.store.ReplyPeers(taskID)
+		if named := names(peers, func(c task.Collaborator) bool {
+			return c.OpenRequest != "" && strings.Contains(text, strings.ToLower(c.OpenRequest))
+		}); len(named) > 0 {
+			answer = "Approval is not needed to reply to " + strings.Join(named, ", ") + " through Mob: call complete_request, " +
+				"ask_clarification or answer_clarification now. What the request asks you to do still follows the usual rules."
+		}
+	}
+	if answer == "" {
 		return task.Question{}, false
 	}
 	s.mu.Lock()
@@ -142,8 +162,7 @@ func (s *Server) mentionApproval(taskID string, req askRequest) (task.Question, 
 		return task.Question{}, false
 	}
 	return task.Question{Kind: task.QuestionApproval, Text: req.Text, Status: task.QuestionNotNeeded,
-		Answer: "Approval is not needed to ask " + strings.Join(named, ", ") + ": the user's @mention already allows it. " +
-			"Call send_request now. This approves nothing else; for any other action, call request_approval again."}, true
+		Answer: answer + " This approves nothing else; for any other action, call request_approval again and the user will be asked."}, true
 }
 
 // mentionsWord reports whether text has word not followed by another handle character.

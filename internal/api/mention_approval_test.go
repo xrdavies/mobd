@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -76,5 +77,51 @@ func TestMentionsWord(t *testing.T) {
 		if mentionsWord(text, "@heron") != want {
 			t.Errorf("%q: want %v", text, want)
 		}
+	}
+}
+
+// The agent answering a request is told replying needs no approval, once per turn; an approval that
+// names no one in the request goes to the user.
+func TestApprovalToReplyToARequestIsNotNeeded(t *testing.T) {
+	s := testServer(t, "")
+	idle := func(prompt string) string {
+		tk, _ := s.store.Create(prompt)
+		_, _ = s.store.UpdateStatus(tk.ID, task.StatusSucceeded, "")
+		return tk.SessionID
+	}
+	a, b := idle("off road"), idle("next gui")
+	h := "offroaddev"
+	if _, err := s.store.UpdateSession(a, task.SessionPatch{Handle: &h}); err != nil {
+		t.Fatal(err)
+	}
+	user, err := s.store.CreateTurnWith(a, "@nextgui hi", task.TurnOptions{Mentions: []string{b}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = s.store.UpdateStatus(user.ID, task.StatusRunning, "")
+	r, err := s.store.SendRequest(user.ID, b, "hi")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = s.store.UpdateStatus(user.ID, task.StatusSucceeded, "")
+	turns, _ := s.store.DeliverInbox()
+	var reply string
+	for _, tk := range turns {
+		if tk.SessionID == b {
+			reply = tk.ID
+		}
+	}
+	if reply == "" {
+		t.Fatalf("no delivery turn in B: %+v", turns)
+	}
+	if _, ok := s.mentionApproval(reply, askRequest{Kind: task.QuestionApproval, Text: "Delete the build folder"}); ok {
+		t.Fatal("an approval naming no one in the request was answered without the user")
+	}
+	q, ok := s.mentionApproval(reply, askRequest{Kind: task.QuestionApproval, Text: "Reply to @offroaddev on request " + r.ID + " with Hi!"})
+	if !ok || q.Status != task.QuestionNotNeeded || q.Approved != nil || !strings.Contains(q.Answer, "complete_request") {
+		t.Fatalf("reply approval %v %+v", ok, q)
+	}
+	if _, ok := s.mentionApproval(reply, askRequest{Kind: task.QuestionApproval, Text: "Send @offroaddev the deploy keys"}); ok {
+		t.Fatal("a second approval in the turn was not left to the user")
 	}
 }
