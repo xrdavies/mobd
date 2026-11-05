@@ -111,6 +111,8 @@ const (
 	QuestionAnswered  = "answered"
 	QuestionExpired   = "expired"
 	QuestionCancelled = "cancelled"
+	// QuestionNotNeeded answers, without asking the user, an approval the user already gave (an @mention).
+	QuestionNotNeeded = "not_needed"
 )
 
 // Question is a decision the agent asked the user for during a turn.

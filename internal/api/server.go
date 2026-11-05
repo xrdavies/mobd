@@ -54,6 +54,8 @@ type Server struct {
 	cancels map[string]context.CancelFunc
 	// tokens authenticate `mobd mcp` calls from a dispatched turn.
 	tokens map[string]string
+	// mentionApprovals marks turns whose approval request for a mentioned agent was answered "not needed".
+	mentionApprovals map[string]bool
 	// reservations hold each dispatched turn's place on its desktop until the turn ends.
 	reservations map[string]desktop.Reservation
 	// starting marks dispatched turns whose desktop is still starting.
@@ -83,7 +85,7 @@ func New(cfg config.Config, store *task.Store, auth *pairing.Store, desktops des
 		settings:  settings.Open(filepath.Join(dataDir(cfg), "settings.json")),
 		artifacts: artifact.New(filepath.Join(dataDir(cfg), "artifacts")),
 		cancels:   make(map[string]context.CancelFunc), done: make(chan struct{}),
-		tokens: make(map[string]string), waiters: make(map[string]chan struct{}),
+		tokens: make(map[string]string), mentionApprovals: make(map[string]bool), waiters: make(map[string]chan struct{}),
 		reservations: make(map[string]desktop.Reservation), starting: make(map[string]bool),
 	}
 	s.files = newFileService(filesDir(cfg))
@@ -671,6 +673,7 @@ func (s *Server) runTask(ctx context.Context, id string) {
 		}
 		delete(s.cancels, id)
 		delete(s.tokens, id)
+		delete(s.mentionApprovals, id)
 		delete(s.reservations, id)
 		delete(s.starting, id)
 		s.scheduleLocked()

@@ -179,6 +179,10 @@ started with (Codex app-server does), so a mentioning turn's input ends with a l
 the mentioned agents and how to ask them; the saved user message stays as typed. Delivered turns
 carry their instructions in the delivered text. The general approval rule covers "messages to
 people", and the note says the mention already authorizes asking those agents.
+Agents on long resumed threads may still ask anyway (Codex did in a conversation started before the
+fix). mobd answers an approval request that names a mentioned agent with "not needed, call
+send_request" without asking the user. It approves nothing, so a wrong match costs one more
+request, and a second approval request in the same turn goes to the user.
 
 ## Delivery and scheduling
 

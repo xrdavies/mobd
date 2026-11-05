@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"slices"
 	"strings"
@@ -29,6 +30,7 @@ func askInstructions() string {
 const askText = `You are operating the user's office Mac on their behalf while they are away from it.
 When you need a decision only the user can make (choosing between options, missing information, ambiguous instructions), call the mob-mcp tool ask_user with a short question and, when possible, a few options. Do not guess.
 Before any action that spends money, sends a message or email to people, deletes data, publishes something, or changes accounts or security settings, call the mob-mcp tool request_approval describing exactly what you are about to do, and only proceed if it is approved.
+Asking a Mob agent the user @-mentioned (send_request) is not a message to people: the mention already allows it.
 Do not ask about things you can find out or decide yourself.`
 
 // askRequest is what `mobd mcp` sends for ask_user / request_approval.
@@ -91,6 +93,10 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 	if req.Kind == task.QuestionAsk && len(req.Options) == 0 {
 		req.AllowText = true
 	}
+	if q, ok := s.mentionApproval(id, req); ok {
+		writeJSON(w, http.StatusOK, q)
+		return
+	}
 	q, err := s.ask(r.Context(), id, req)
 	if errors.Is(err, errNotRunning) {
 		writeErr(w, http.StatusConflict, "turn is not running")
@@ -103,6 +109,64 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 }
 
 var errNotRunning = errors.New("turn is not running")
+
+// mentionApproval answers an approval request that names an agent the user @-mentioned for this turn:
+// the mention already allows asking it, so the user is not asked again. Nothing is approved; the
+// agent is told to call send_request, and a second approval request in the turn goes to the user.
+// Agents on resumed threads sometimes keep the general "approve messages to people" rule.
+func (s *Server) mentionApproval(taskID string, req askRequest) (task.Question, bool) {
+	if req.Kind != task.QuestionApproval || !s.store.CollabRoles(taskID).Send {
+		return task.Question{}, false
+	}
+	list, err := s.store.Collaborators(taskID)
+	if err != nil {
+		return task.Question{}, false
+	}
+	text := strings.ToLower(req.Text + "\n" + req.Details)
+	var named []string
+	for _, c := range list {
+		name := strings.ToLower(c.Title)
+		if c.Handle != "" && mentionsWord(text, "@"+c.Handle) || mentionsWord(text, strings.ToLower(c.ShortID)) ||
+			len(name) >= 4 && strings.Contains(text, name) {
+			named = append(named, collaboratorName(c))
+		}
+	}
+	if len(named) == 0 {
+		return task.Question{}, false
+	}
+	s.mu.Lock()
+	again := s.mentionApprovals[taskID]
+	s.mentionApprovals[taskID] = true
+	s.mu.Unlock()
+	if again {
+		return task.Question{}, false
+	}
+	return task.Question{Kind: task.QuestionApproval, Text: req.Text, Status: task.QuestionNotNeeded,
+		Answer: "Approval is not needed to ask " + strings.Join(named, ", ") + ": the user's @mention already allows it. " +
+			"Call send_request now. This approves nothing else; for any other action, call request_approval again."}, true
+}
+
+// mentionsWord reports whether text has word not followed by another handle character.
+func mentionsWord(text, word string) bool {
+	for i := 0; ; {
+		j := strings.Index(text[i:], word)
+		if j < 0 {
+			return false
+		}
+		end := i + j + len(word)
+		if end == len(text) || !strings.ContainsRune("abcdefghijklmnopqrstuvwxyz0123456789-", rune(text[end])) {
+			return true
+		}
+		i = end
+	}
+}
+
+func collaboratorName(c task.Collaborator) string {
+	if c.Handle != "" {
+		return "@" + c.Handle
+	}
+	return fmt.Sprintf("%q (%s)", c.Title, c.ShortID)
+}
 
 // ask records a question on a running turn and blocks until the user answers,
 // it times out, ctx ends (the agent gave up) or mobd shuts down.
