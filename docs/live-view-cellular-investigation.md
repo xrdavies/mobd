@@ -1,6 +1,6 @@
 # Investigation: iPhone live view fails on cellular
 
-**Status:** open, root cause not confirmed. No code has changed.
+**Status:** root cause found 2026-11-06 (see [Results](#results-2026-11-06)); app fixes on mob-ios `fix/live-view-cellular`.
 **Date:** 2026-11-05. Times are the office Mac's local time.
 
 ## Symptom
@@ -98,3 +98,43 @@ None is verified against this failure.
 3. **A closer relay:** the [`relay.turn`](desktop-streaming.md#through-a-mob-relay-stun-and-turn)
    support with mob-relay, or a Tailscale peer relay. This gives WebRTC a path that does not depend
    on the phone's Tailscale candidate, which also covers open question 1.
+
+## Results, 2026-11-06
+
+One cellular test from the iPhone, with the app logging its candidates, WebRTC states and the
+chosen pair (mob-ios `fix/live-view-cellular`). Times are from tapping the live view.
+
+| Step | Attempt 1 | Attempt 2 |
+| --- | --- | --- |
+| Offer sent, gathering complete | 0.1 s | 0.2 s |
+| mobd's answer | 2.4 s | 0.8 s |
+| WebRTC connected | 4.5 s | 4.0 s |
+| First picture | 5.0 s | 5.1 s |
+
+- **Open question 1:** yes. On cellular the phone offers its Tailscale address (`100.94.60.46`,
+  libwebrtc network cost 50, VPN) beside the carrier's (`10.141.144.60` and IPv6, cost 900).
+- **The pair:** `100.94.60.46 (vpn) -> 100.120.57.121:9527`, round trip **1780 ms** when it
+  connected; mobd measured 312 ms once it settled. Tailscale logged the phone `via=derp` throughout.
+  A direct path measures 8 ms.
+- **Serve:** the app could not reach mobd for about 25 s after leaving Wi-Fi, and Tailscale
+  refused another of the phone's connections to 443 during the test.
+
+## Root cause
+
+On cellular there is no direct path between the phone and the Mac (two NAT layers at the office
+and the carrier's), so everything runs through Tailscale's relay, at 0.3-1.8 s per round trip.
+WebRTC then connects 4-5 s after mobd's answer, at the edge of the app's 5 s head start. When it
+was slower, the app **dropped WebRTC** for the WebSocket, which runs over the same relay and through
+Serve, and the 15 s limit from the tap ended that too. The 08:50 session on 2026-11-05 (WebSocket
+13 s in, closed 1 s later) is this case.
+
+## Fixes
+
+- **mob-ios (done, `fix/live-view-cellular`):** WebRTC still connecting at the end of its head start
+  keeps going, with the WebSocket racing beside it; once started, the WebSocket gets its own 15 s.
+- **Faster path (not done):** a direct Tailscale path or a closer relay would bring the round trip
+  from seconds to tens of milliseconds: forward a UDP port to the Mac on the upstream router (or
+  remove a NAT layer), or a Mob relay / Tailscale peer relay near both ends. The app fix makes the
+  slow path work; only this makes it good.
+- **Serve refusals:** still open (question 3). They come in bursts from the phone, logged with
+  Tailscale's per-client count of connections in flight.
