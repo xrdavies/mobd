@@ -1,6 +1,7 @@
 # USB redirection
 
-Status: draft USB-1, 2026-11-01. Not implemented or released.
+Status: draft USB-1, 2026-11-01. In progress: the Linux importer works with an emulated device
+(see [Feasibility results](#feasibility-results)); nothing is released.
 
 This is the shared design for all five repositories. Mob Desktop exports a
 user-selected local USB device; mobd imports it on the remote machine. Use
@@ -208,6 +209,23 @@ model and USB identity, remote tool/driver, permissions and results. Acceptance:
 No throughput/latency guarantee is made before measurements. Debugging can be
 latency-sensitive even when a disk copy has acceptable throughput. Successful
 enumeration alone does not qualify a device for the supported list.
+
+## Feasibility results
+
+**Linux import, 2026-11-06** (`internal/usbip`, test `TestVHCIAttachesAnEmulatedDevice`, Ubuntu 24.04
+arm64 in an OrbStack VM, kernel 7.2 with vhci_hcd and no USB class drivers):
+
+- mobd performs the `OP_REQ_IMPORT` handshake for the one selected bus ID itself and rejects a reply
+  for any other device, then writes the socket to `vhci_hcd`'s `attach`. The kernel never sees an
+  exporter's device list, which meets step 4 of [Connection and authorization](#connection-and-authorization).
+- **A Unix socket pair works as well as TCP.** mobd can hand the kernel one end and bridge the other
+  to its tunnel: no loopback listener exists for another local process to take.
+- The exporter was an emulated high-speed vendor-class device (pid.codes test ID `1209:0001`, bulk
+  loopback on endpoint 1). Linux enumerated it, usbfs moved 256 KiB out and back unchanged, and
+  detach freed the port. This exercises control, bulk OUT/IN and unlink handling, the path debug
+  probes and DFU tools use. Mass storage, serial classes and real hardware are not tested yet.
+- Attach and detach need root (`/sys/devices/platform/vhci_hcd.0/attach` is root-only), so the
+  importer belongs in a narrow privileged helper, as planned.
 
 ## Sources and companion documents
 
