@@ -132,6 +132,35 @@ func (s *Store) CollabRoles(taskID string) CollabRoles {
 	return roles
 }
 
+// ReplyPeers are the agents a collab turn answers: the other side of each request it carries, with
+// that request's ID in OpenRequest.
+func (s *Store) ReplyPeers(taskID string) []Collaborator {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	t := s.data.Tasks[taskID]
+	if t == nil || t.Origin == nil || t.Origin.Kind != "collab" {
+		return nil
+	}
+	var out []Collaborator
+	for _, id := range t.Origin.Requests {
+		r := s.data.Requests[id]
+		if r == nil || r.Status.Ended() {
+			continue
+		}
+		other := r.From
+		if r.From == t.SessionID {
+			other = r.To
+		}
+		session := s.data.Sessions[other]
+		if session == nil {
+			continue
+		}
+		out = append(out, Collaborator{SessionID: other, ShortID: other[:min(6, len(other))], Handle: session.Handle,
+			Title: session.Title, Framework: session.Runner, Archived: session.Archived, OpenRequest: r.ID})
+	}
+	return out
+}
+
 // Collaborator is an agent a turn may send requests to.
 type Collaborator struct {
 	SessionID   string `json:"sessionId"`
