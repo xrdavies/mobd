@@ -1,6 +1,7 @@
 # Agent collaboration: implementation design (COLLAB-2)
 
-Status: design COLLAB-2, 2026-11-04, on `feat/agent-collaboration`. Not implemented.
+Status: design COLLAB-2, 2026-11-04. mobd part implemented on `feat/agent-collab-core` and validated with real
+agents (see [Validation](#validation)); the apps are not done yet.
 Builds on [agent concepts](agent-concepts.md) and the [architecture](agent-collaboration.md)
 (COLLAB-1). Where they differ, this document decides.
 
@@ -149,14 +150,16 @@ any open state ──▶ cancelled (user, or participant deleted/archived)
   `in_progress` and B had not completed it or asked a clarification. Also when B's turn finishes
   normally without calling `complete_request`: the agent forgot, and the user decides. Never retried.
 - **Terminal outcomes** (answered, failed) wake A with a result delivery. **Notices** (cancelled,
-  expired, interrupted, over_budget) do not start a turn: they are shown to the user ("needs you")
-  and prefixed to A's next turn so A knows.
+  expired, interrupted, over_budget) do not start a turn: the app shows them ("needs you") from
+  `GET /collab`, and they go with the conversation's next *collaboration* turn. A turn the user
+  starts does not carry them.
 - One open request per (exchange, recipient) at a time keeps exchanges readable; A may have open
   requests to several mentioned agents at once.
 
 ## Tools (mob-mcp)
 
-Registered per turn from what the turn may do; a turn never sees a tool it cannot use. Calls use the
+Registered per turn from what the turn may do (mobd passes `MOB_COLLAB` to `mobd mcp`); a turn never
+sees a tool it cannot use. Calls use the
 existing task token on `/internal/tasks/{id}/collab/...`, so mobd knows the calling turn and session;
 the caller cannot name itself.
 
@@ -168,7 +171,18 @@ the caller cannot name itself.
 | `answer_clarification(request, text)` | A's turn carrying the clarification | Status → open; delivery to B (wakes). |
 | `complete_request(request, outcome, text)` | B's turn carrying that request | outcome `answered` or `failed`; result delivery to A (wakes). |
 
-B's turns never get `send_request` (decision 1). There is no tool that waits.
+B's turns never get `send_request` (decision 1). There is no tool that waits. `send_request` accepts
+`@handle`, a session ID or an unambiguous short ID, matched only among the mentioned agents.
+
+**Guidance goes with the turn's input.** A framework resuming a session may keep the instructions it
+started with (Codex app-server does), so a mentioning turn's input ends with a labelled note naming
+the mentioned agents and how to ask them; the saved user message stays as typed. Delivered turns
+carry their instructions in the delivered text. The general approval rule covers "messages to
+people", and the note says the mention already authorizes asking those agents.
+Agents on long resumed threads may still ask anyway (Codex did in a conversation started before the
+fix). mobd answers an approval request that names a mentioned agent with "not needed, call
+send_request" without asking the user. It approves nothing, so a wrong match costs one more
+request, and a second approval request in the same turn goes to the user.
 
 ## Delivery and scheduling
 
@@ -239,8 +253,11 @@ source of truth.
 - **Shared folder:** every conversation uses the same `workdir`; on Linux up to 4 turns run at once,
   so collaborating agents can edit the same files concurrently. Users assign who edits what;
   isolation is a separate feature.
-- **Input limits:** request, clarification and result text are bounded; tool calls are rate-limited
-  per turn.
+- **Not a confidentiality boundary:** agents run as the same user and can read mobd's state file,
+  which holds every conversation. In validation an agent did exactly that when its work folder was
+  next to mobd's data. Collaboration controls who can *start work* in another agent, not what an
+  agent can read.
+- **Input limits:** request, clarification and result text are bounded (8 KiB, results 16 KiB).
 
 ## Validation
 
@@ -257,6 +274,20 @@ Before any app work, with a mobd built from this branch:
 7. Codex `exec` and Pi once each.
 
 Record per run: tools called, turns used, whether each agent behaved as instructed.
+
+**Results, 2026-11-05** (this Mac, mobd from `feat/agent-collab-core`, `maxRunning=1`, Codex CLI
+0.165.0, Claude Code 2.1.296; each recipient was first told a fact only its conversation knew):
+
+| Run | Result |
+| --- | --- |
+| Codex (app-server) asks Claude Code | First tries failed: Codex asked `request_approval` before sending, then (without guidance on a resumed thread) searched files. After the two fixes above: send, B completes, A reports the exact answer. 3 turns, 70 s. |
+| Claude Code asks Codex (app-server) | Send, complete, report. 3 turns. |
+| Clarification: Codex asks Claude Code, which must ask first | Send, ask_clarification, answer_clarification, complete, report. 5 of 6 turns, 137 s. |
+| Claude Code asks Codex (`exec`) | Send, complete, report. A second exchange in the same conversation also worked. |
+
+Covered by unit tests rather than real agents: a recipient ending without `complete_request`
+(interrupted, not retried), budget, expiry, cancel, archive/delete, user first, restart. Not run: Pi
+(not installed here).
 
 ## Delivery plan
 

@@ -51,6 +51,8 @@ type Task struct {
 	// QueueReason says what a queued task waits for: "slots", "desktops", "memory", "disk" or
 	// "desktopStarting". Held in memory by the scheduler, never persisted.
 	QueueReason string `json:"queueReason,omitempty"`
+	// Origin is who started the turn; nil is the user without mentions (collab.go).
+	Origin *Origin `json:"origin,omitempty"`
 }
 
 // Usage is the token accounting reported when a turn completes.
@@ -109,6 +111,8 @@ const (
 	QuestionAnswered  = "answered"
 	QuestionExpired   = "expired"
 	QuestionCancelled = "cancelled"
+	// QuestionNotNeeded answers, without asking the user, an approval the user already gave (an @mention).
+	QuestionNotNeeded = "not_needed"
 )
 
 // Question is a decision the agent asked the user for during a turn.
@@ -168,6 +172,9 @@ type Session struct {
 	// Rev goes up on every change in the conversation (a turn, its steps, messages or questions,
 	// or the title and flags). Clients pass it back as ?since= to fetch only what changed.
 	Rev int64 `json:"rev,omitempty"`
+	// Handle optionally names the agent (@api); unique per mobd, kept while archived, released
+	// when the conversation is deleted. "" means none.
+	Handle string `json:"handle,omitempty"`
 	// Turns is the number of turns; the newest has Seq == Turns.
 	Turns    int64     `json:"turns,omitempty"`
 	Messages []Message `json:"messages,omitempty"`
@@ -198,6 +205,8 @@ type CreateRequest struct {
 	Model       string   `json:"model,omitempty"`
 	Effort      string   `json:"effort,omitempty"`
 	Attachments []string `json:"attachments,omitempty"`
+	// Mentions are session IDs the user selected with @; they start an agent collaboration.
+	Mentions []string `json:"mentions,omitempty"`
 }
 
 // TurnOptions are per-turn runner settings validated by the API.
@@ -210,6 +219,8 @@ type TurnOptions struct {
 	// SaveModel and SaveEffort store Model and Effort as the conversation's settings (a new
 	// conversation, or a turn that names them).
 	SaveModel, SaveEffort bool
+	// Mentions are validated session IDs from CreateRequest.Mentions.
+	Mentions []string
 }
 
 func (s Status) Terminal() bool {

@@ -34,6 +34,10 @@ type SessionPatch struct {
 	// caller validates them against the conversation's runner.
 	Model  *string `json:"model"`
 	Effort *string `json:"effort"`
+	// Handle sets the agent's handle; "" clears it. TakeHandle moves it from the conversation
+	// that has it (active or archived) in the same commit.
+	Handle     *string `json:"handle"`
+	TakeHandle bool    `json:"takeHandle"`
 }
 
 // Change summarizes a committed mutation for live clients. Task changes carry
@@ -44,6 +48,8 @@ type Change struct {
 	Task           *Task
 	Running        []*Task
 	Queued         []*Task
+	// Requests are agent collaboration requests that changed.
+	Requests []*Request
 }
 
 // TaskFilter narrows GET /tasks; zero values match everything.
@@ -61,6 +67,11 @@ type state struct {
 	Activities map[string][]Activity `json:"activities,omitempty"`
 	// Questions are keyed by task ID, in the order they were asked.
 	Questions map[string][]Question `json:"questions,omitempty"`
+	// Exchanges are agent collaborations, keyed by ID (collab.go).
+	Exchanges map[string]*Exchange `json:"exchanges,omitempty"`
+	// Requests between agents, keyed by ID, and the inbox: deliveries not yet given to a turn.
+	Requests   map[string]*Request `json:"requests,omitempty"`
+	Deliveries []*Delivery         `json:"deliveries,omitempty"`
 }
 
 // logLimit bounds memory-only debug lines kept per task for SSE replay.
@@ -127,7 +138,7 @@ func NewStore() *Store {
 	return &Store{
 		data: state{
 			Tasks: make(map[string]*Task), Sessions: make(map[string]*Session),
-			Activities: make(map[string][]Activity),
+			Activities: make(map[string][]Activity), Exchanges: make(map[string]*Exchange),
 		},
 		events: make(map[string][]Event), logs: make(map[string]int), changed: make(map[string]chan struct{}),
 		reasons: make(map[string]string),
@@ -176,6 +187,15 @@ func (s *Store) CreateTurnWith(sessionID, prompt string, opts TurnOptions) (*Tas
 		}
 		session = cloneSession(stored)
 	}
+	var exchange *Exchange
+	if len(opts.Mentions) > 0 {
+		recipients, err := s.mentionsLocked(session.ID, opts.Mentions)
+		if err != nil {
+			return nil, err
+		}
+		exchange = &Exchange{ID: "x-" + newID()[:12], SessionID: session.ID, Recipients: recipients,
+			Budget: DefaultExchangeBudget, CreatedAt: now}
+	}
 	session.Turns++
 	if opts.SaveModel {
 		session.Model = opts.Model
@@ -189,11 +209,15 @@ func (s *Store) CreateTurnWith(sessionID, prompt string, opts TurnOptions) (*Tas
 		Model: opts.Model, Effort: opts.Effort, Attachments: append([]string(nil), opts.Attachments...),
 		CreatedAt: now, UpdatedAt: now, EventID: 1, Seq: session.Turns,
 	}
+	if exchange != nil {
+		exchange.UserTaskID = t.ID
+		t.Origin = &Origin{Kind: "user", ExchangeID: exchange.ID}
+	}
 	session.ActiveTaskID, session.Status, session.UpdatedAt = t.ID, t.Status, now
 	session.Messages = append(session.Messages, Message{
 		ID: t.ID + ":user", TaskID: t.ID, Role: "user", Content: prompt, CreatedAt: now,
 	})
-	if err := s.commit(t, session, true, nil); err != nil {
+	if err := s.commitTurn(t, session, exchange); err != nil {
 		return nil, err
 	}
 	s.publish(t.ID, Event{ID: 1, Type: "status", Status: t.Status, Message: "queued", Timestamp: now})
@@ -402,11 +426,35 @@ func (s *Store) UpdateSession(id string, patch SessionPatch) (*Session, error) {
 	if patch.Effort != nil {
 		session.Effort = *patch.Effort
 	}
+	var previous *Session // the conversation the handle is taken from
+	if patch.Handle != nil && *patch.Handle != session.Handle {
+		h := *patch.Handle
+		if h != "" {
+			if !ValidHandle(h) {
+				return nil, ErrInvalidHandle
+			}
+			if owner := s.handleOwnerLocked(h); owner != nil && owner.ID != id {
+				if !patch.TakeHandle {
+					return nil, ErrHandleTaken
+				}
+				previous = cloneSession(owner)
+				previous.Handle = ""
+				bump(previous, nil)
+			}
+		}
+		session.Handle = h
+	}
 	bump(session, nil)
 	next := s.next()
 	next.Sessions[id] = session
+	if previous != nil {
+		next.Sessions[previous.ID] = previous
+	}
 	if err := s.swap(next); err != nil {
 		return nil, err
+	}
+	if previous != nil {
+		s.notifyLocked(previous, nil)
 	}
 	s.notifyLocked(session, nil)
 	summary := *session
@@ -572,7 +620,16 @@ func (s *Store) UpdateStatus(id string, status Status, errMsg string) (*Task, er
 	if status.Terminal() {
 		session.ActiveTaskID, session.Waiting = "", false
 	}
-	if err := s.commit(t, session, false, nil); err != nil {
+	if edit := s.collabStatusLocked(t, status); edit != nil {
+		bump(session, t)
+		next := s.next()
+		next.Tasks[t.ID], next.Sessions[session.ID] = t, session
+		next.Requests, next.Deliveries = edit.requests, edit.deliveries
+		if err := s.swap(next); err != nil {
+			return nil, err
+		}
+		edit.notify()
+	} else if err := s.commit(t, session, false, nil); err != nil {
 		return nil, err
 	}
 	ev := Event{ID: t.EventID, Type: "status", Status: status, Message: string(status), Timestamp: t.UpdatedAt}
@@ -740,11 +797,29 @@ func (s *Store) commit(t *Task, session *Session, added bool, activities []Activ
 	return s.swap(next)
 }
 
+// commitTurn saves a new turn with the exchange its mentions start, if any, in one commit.
+func (s *Store) commitTurn(t *Task, session *Session, exchange *Exchange) error {
+	if exchange == nil {
+		return s.commit(t, session, true, nil)
+	}
+	bump(session, t)
+	next := s.next()
+	next.Tasks[t.ID], next.Sessions[session.ID] = t, session
+	next.Order = append(append([]string(nil), s.data.Order...), t.ID)
+	next.Exchanges = maps.Clone(s.data.Exchanges)
+	if next.Exchanges == nil {
+		next.Exchanges = make(map[string]*Exchange)
+	}
+	next.Exchanges[exchange.ID] = exchange
+	return s.swap(next)
+}
+
 // next copies the top-level maps so a failed save leaves s.data untouched.
 func (s *Store) next() state {
 	return state{
 		Tasks: maps.Clone(s.data.Tasks), Sessions: maps.Clone(s.data.Sessions),
 		Order: s.data.Order, Activities: s.data.Activities, Questions: s.data.Questions,
+		Exchanges: s.data.Exchanges, Requests: s.data.Requests, Deliveries: s.data.Deliveries,
 	}
 }
 

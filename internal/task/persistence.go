@@ -42,6 +42,12 @@ func OpenStore(path string) (*Store, error) {
 	if s.data.Questions == nil {
 		s.data.Questions = make(map[string][]Question)
 	}
+	if s.data.Exchanges == nil {
+		s.data.Exchanges = make(map[string]*Exchange)
+	}
+	if s.data.Requests == nil {
+		s.data.Requests = make(map[string]*Request)
+	}
 	for id, questions := range s.data.Questions {
 		if s.data.Tasks[id] == nil {
 			return nil, errors.New("invalid question in conversation state")
@@ -118,8 +124,13 @@ func OpenStore(path string) (*Store, error) {
 		}
 	}
 	recovered := false
+	var requeue []Delivery
 	for _, id := range s.data.Order {
 		t := s.data.Tasks[id]
+		if t.Status == StatusQueued && t.Origin != nil && t.Origin.Kind == "collab" {
+			// Never started: what it carried was not handled, so it is delivered again.
+			requeue = append(requeue, t.Origin.Deliveries...)
+		}
 		if !t.Status.Terminal() {
 			msg := "interrupted by mobd restart"
 			// Unsaved debug logs may have used IDs past the saved one; clients ignore IDs they saw.
@@ -135,6 +146,9 @@ func OpenStore(path string) (*Store, error) {
 			message = *t.Error
 		}
 		s.publish(id, Event{ID: t.EventID, Type: "status", Status: t.Status, Message: message, Timestamp: t.UpdatedAt})
+	}
+	if s.recoverRequestsLocked(requeue) {
+		recovered = true
 	}
 	if recovered || migrated {
 		if err := s.save(s.data); err != nil {

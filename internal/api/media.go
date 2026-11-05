@@ -148,7 +148,7 @@ func (s *Server) handleArtifact(w http.ResponseWriter, r *http.Request) {
 // turnOptions resolves the turn's runner and validates its settings against
 // what that runner supports. It returns a problem and HTTP status on failure.
 func (s *Server) turnOptions(req task.CreateRequest) (task.TurnOptions, string, int) {
-	opts := task.TurnOptions{Runner: req.Runner, Model: req.Model, Effort: req.Effort, Attachments: req.Attachments}
+	opts := task.TurnOptions{Runner: req.Runner, Model: req.Model, Effort: req.Effort, Attachments: req.Attachments, Mentions: req.Mentions}
 	var sessionModel, sessionEffort string
 	if req.SessionID != "" {
 		// A conversation's model and effort change only with PATCH /sessions/{id}.
@@ -248,6 +248,11 @@ func (s *Server) runOptions(t *task.Task, env desktop.TurnEnv) (opts runner.Opti
 	// and on macOS the process holding the Screen Recording grant (a mobd mcp started by an
 	// agent CLI is not, and ScreenCaptureKit hangs there instead of refusing).
 	opts.MCPEnv["MOB_DESKTOP_PROXY"] = "1"
+	collabEnv, collabText := s.collabEnv(t)
+	for k, v := range collabEnv {
+		opts.MCPEnv[k] = v
+	}
+	opts.Instructions += collabText
 	for _, id := range t.Attachments {
 		if path, _, err := s.artifacts.Path(id); err == nil {
 			opts.Images = append(opts.Images, path)

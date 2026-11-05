@@ -128,6 +128,8 @@ func registerAskTools(s *mcp.Server, a Asker) {
 				note = " The user added: " + q.Answer
 			}
 			switch {
+			case q.Status == task.QuestionNotNeeded:
+				return text(q.Answer), nil, nil
 			case q.Status == task.QuestionAnswered && q.Approved != nil && *q.Approved:
 				return text("Approved by the user. Proceed with exactly this action." + note), nil, nil
 			case q.Status == task.QuestionAnswered:
