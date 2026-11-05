@@ -1,7 +1,7 @@
 # Agent collaboration: implementation design (COLLAB-2)
 
-Status: design COLLAB-2, 2026-11-04. mobd part implemented on `feat/agent-collab-core` and validated with real
-agents (see [Validation](#validation)); the apps are not done yet.
+Status: design COLLAB-2, 2026-11-04. Implemented in mobd and validated with real
+agents (see [Validation](#validation)); Desktop, iOS and Android implement the app side.
 Builds on [agent concepts](agent-concepts.md) and the [architecture](agent-collaboration.md)
 (COLLAB-1). Where they differ, this document decides.
 
