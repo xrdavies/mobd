@@ -1,6 +1,6 @@
 # Investigation: iPhone live view fails on cellular
 
-**Status:** root cause found 2026-11-06 (see [Results](#results-2026-11-06)); app fixes on mob-ios `fix/live-view-cellular`.
+**Status:** root cause found 2026-11-06 (see [Results](#results-2026-11-06)); fixed in Mob Desktop, iOS and Android. A faster path and the Serve refusals are still open.
 **Date:** 2026-11-05. Times are the office Mac's local time.
 
 ## Symptom
@@ -130,7 +130,7 @@ Serve, and the 15 s limit from the tap ended that too. The 08:50 session on 2026
 
 ## Fixes
 
-- **mob-ios (done, `fix/live-view-cellular`):** WebRTC still connecting at the end of its head start
+- **The apps (done in Mob Desktop, iOS and Android):** WebRTC still connecting at the end of its head start
   keeps going, with the WebSocket racing beside it; once started, the WebSocket gets its own 15 s.
 - **Faster path (not done):** a direct Tailscale path or a closer relay would bring the round trip
   from seconds to tens of milliseconds: forward a UDP port to the Mac on the upstream router (or

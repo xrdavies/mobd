@@ -1,6 +1,6 @@
 # Remote desktop audio
 
-Status: implemented for macOS and, on `feat/linux-audio`, for Linux conversation desktops (WebRTC). Windows waits for a Windows desktop backend.
+Status: implemented for macOS and Linux conversation desktops (WebRTC). Windows waits for a Windows desktop backend.
 
 A user watching the live view on Mob Desktop, iPhone, iPad or Android hears the office computer's
 sound: a game's effects and music, a video, an alert. One direction only: nothing is recorded or
@@ -16,7 +16,7 @@ changes the office computer's own volume or output.
 | Stage | Office computer | Transport | Status |
 | --- | --- | --- | --- |
 | 1 | macOS | WebRTC | Implemented |
-| 2 | Linux, a sound output per conversation desktop | WebRTC | Implemented on `feat/linux-audio` |
+| 2 | Linux, a sound output per conversation desktop | WebRTC | Implemented |
 | Later | Windows (WASAPI loopback) | WebRTC | With the Windows desktop backend ([windows.md](windows.md)) |
 
 Each stage ships on its own. Clients learn per stream whether sound is available (below), so a

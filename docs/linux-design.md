@@ -1,6 +1,6 @@
 # Linux: detailed design
 
-> **Status: implemented** on `feat/linux` (phases 0–4, section 12). This turns the agreed plan in
+> **Status: implemented** (phases 0–4, section 12). This turns the agreed plan in
 > [Linux](linux.md) into packages, interfaces, state, API and PR-sized steps. Statements about
 > the code before the work cite `file:line` as of commit `3d589ce`. Choices the plan left open are
 > marked *(design choice)*; unconfirmed OS behaviour *(to verify)*. Where the code differs, or a

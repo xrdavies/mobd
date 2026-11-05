@@ -1,6 +1,6 @@
 # File transfers
 
-Status: implementation on `feat/file-transfers`. This document is the shared contract for
+Status: implemented in mobd and the apps. This document is the shared contract for
 mobd, mob, mob-ios and mob-android. The website documents the same user workflow.
 
 ## User workflow

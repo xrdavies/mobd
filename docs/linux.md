@@ -1,7 +1,6 @@
 # Linux
 
-> **Status: implemented** (phases 0–4 of the [Linux design](linux-design.md), branch
-> `feat/linux`). This page is the plan the design started from; where the code ended up
+> **Status: implemented** (phases 0–4 of the [Linux design](linux-design.md)). This page is the plan the design started from; where the code ended up
 > differently, [As built](linux-design.md#as-built) says so. Items still marked *(to verify)*
 > were not confirmed on real machines. Install and use: [README](../README.md#install--run-office-linux-computer);
 > other distributions: [building on Linux](linux-build.md). The Windows plan is separate:

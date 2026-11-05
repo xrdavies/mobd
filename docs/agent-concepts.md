@@ -1,8 +1,8 @@
 # Agent concepts and terminology
 
-Status: draft COLLAB-1, 2026-11-02. This is the shared vocabulary for the Mob
-repositories. The [collaboration design](agent-collaboration.md) is proposed,
-not implemented. Existing API names remain compatible.
+Status: COLLAB-1, 2026-11-02. This is the shared vocabulary for the Mob
+repositories. The [collaboration design](agent-collaboration.md) is implemented.
+Existing API names remain compatible.
 
 ## Vocabulary
 

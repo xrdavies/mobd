@@ -1,6 +1,6 @@
 # Conversation history: paging, bounded sync and local copies
 
-Status: in progress on `feat/conversation-history`
+Status: implemented in mobd and the apps.
 
 ## Problem
 
