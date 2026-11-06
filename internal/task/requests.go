@@ -364,6 +364,36 @@ func (s *Store) CancelRequest(requestID string) (*Request, error) {
 	return cloneRequest(r), nil
 }
 
+// TurnHandling returns the unfinished collab turn in the recipient's conversation that carries
+// request id, and whether it also carries another request still open (stopping it would cut that
+// one off too). "" when no turn carries it now.
+func (s *Store) TurnHandling(id string) (taskID string, others bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	r := s.data.Requests[id]
+	if r == nil {
+		return "", false
+	}
+	for _, t := range s.data.Tasks {
+		if t.SessionID != r.To || t.Status.Terminal() || t.Origin == nil || t.Origin.Kind != "collab" {
+			continue
+		}
+		carries := false
+		for _, rid := range t.Origin.Requests {
+			if rid == id {
+				carries = true
+			} else if o := s.data.Requests[rid]; o != nil && !o.Status.Ended() {
+				others = true
+			}
+		}
+		if carries {
+			return t.ID, others
+		}
+		others = false
+	}
+	return "", false
+}
+
 // ExpireRequests ends requests unanswered past their ExpiresAt; it returns how many.
 func (s *Store) ExpireRequests(now time.Time) (int, error) {
 	s.mu.Lock()

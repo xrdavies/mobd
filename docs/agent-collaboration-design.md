@@ -227,6 +227,8 @@ source of truth.
 - `GET /collab?session=ID`: exchanges and requests involving that conversation, open first.
   Independent of paged history, so pending work stays visible in long conversations.
 - `GET /collab/requests/{id}`, `POST /collab/requests/{id}/cancel` (either participant's user).
+  `?stopTurn=true` also stops the recipient's turn working on it, unless that turn carries another
+  open request; the answer adds `stoppedTask`, or `turnKept` with why.
 - `/health` lists the feature `agentCollaboration`; apps show `@` only when it is there.
 - Global event `collab` with the changed request summary (and `rev`), published through the store
   notifier like `session` and `task`.

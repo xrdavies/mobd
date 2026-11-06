@@ -38,9 +38,38 @@ func (s *Server) handleCollabRequest(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, req)
 }
 
-// handleCancelCollabRequest is the user cancelling a request from either conversation.
+// handleCancelCollabRequest is the user cancelling a request from either conversation. With
+// ?stopTurn=true it also stops the recipient's turn working on it, unless that turn carries another
+// open request; the answer then says which turn was stopped (stoppedTask) or why not (turnKept).
 func (s *Server) handleCancelCollabRequest(w http.ResponseWriter, r *http.Request) {
-	req, err := s.store.CancelRequest(r.PathValue("id"))
+	id := r.PathValue("id")
+	turn, others := "", false
+	if r.URL.Query().Get("stopTurn") == "true" {
+		// Before cancelling: afterwards the request no longer counts as open in its turn.
+		turn, others = s.store.TurnHandling(id)
+	}
+	req, err := s.store.CancelRequest(id)
+	if err == nil && turn != "" {
+		out := struct {
+			*task.Request
+			StoppedTask string `json:"stoppedTask,omitempty"`
+			TurnKept    string `json:"turnKept,omitempty"`
+		}{Request: req}
+		if others {
+			out.TurnKept = "the agent's turn also handles another request"
+		} else {
+			s.mu.Lock()
+			_, cerr := s.cancelLocked(turn)
+			s.mu.Unlock()
+			if cerr == nil {
+				out.StoppedTask = turn
+			} else {
+				out.TurnKept = cerr.Error()
+			}
+		}
+		writeJSON(w, http.StatusOK, out)
+		return
+	}
 	switch {
 	case errors.Is(err, task.ErrNotFound):
 		writeErr(w, http.StatusNotFound, "request not found")
