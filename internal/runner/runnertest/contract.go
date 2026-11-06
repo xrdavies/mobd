@@ -150,9 +150,11 @@ func Run(t *testing.T, s Suite) {
 				return nil
 			})
 		}()
+		// Generous: macOS scans a newly written executable on its first run, which took over 5 s
+		// under the full parallel suite. Only stopping it is timed strictly.
 		select {
 		case <-started:
-		case <-time.After(5 * time.Second):
+		case <-time.After(30 * time.Second):
 			t.Fatal("agent did not start")
 		}
 		cancel()
