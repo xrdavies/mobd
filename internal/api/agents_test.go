@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -20,7 +21,15 @@ func fakeBin(t *testing.T, name, version string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), name)
 	os.WriteFile(path, []byte("#!/bin/sh\necho '"+version+"'\n"), 0o700)
+	warm(t, path)
 	return path
+}
+
+// warm runs a freshly written fake once, outside any timed check: macOS scans a new executable on
+// its first run, which took over 10 s under the full parallel suite.
+func warm(t *testing.T, path string, args ...string) {
+	t.Helper()
+	_ = exec.Command(path, args...).Run()
 }
 
 // Every supported agent is reported, enabled or not: ready, installed but not enabled, missing

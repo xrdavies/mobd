@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -100,6 +101,9 @@ func fakeClaude(t *testing.T, status string) (bin, record string) {
 	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	// macOS scans a new executable on its first run (seconds under load, past the check's 10 s
+	// timeout): run it once now. --version exits before recording anything.
+	_ = exec.Command(bin, "--version").Run()
 	return bin, record
 }
 
