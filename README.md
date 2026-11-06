@@ -293,127 +293,6 @@ from `.env` does not unset a variable already exported in your shell; use
 assignment is an explicit override, not a request to use the default. `.env`
 is ignored by Git; commit only the example.
 
-## curl examples
-
-First generate an invitation with `mobd link`, then redeem it with `POST /pair`
-as described in the [pairing protocol](docs/pairing.md). Set `MOBD_TOKEN` to the
-returned device credential. Every example below requires it, including reads.
-Do not put the credential in URLs or share it between devices.
-
-```bash
-# health
-curl -H "Authorization: Bearer $MOBD_TOKEN" -s localhost:8080/health | jq .
-
-# first turn: creates a conversation and returns its sessionId
-curl -H "Authorization: Bearer $MOBD_TOKEN" -s -X POST localhost:8080/tasks \
-  -H 'Content-Type: application/json' \
-  -d '{"prompt":"Use mob-mcp to open Safari"}' | jq .
-
-# follow-up: reuse the returned sessionId
-curl -H "Authorization: Bearer $MOBD_TOKEN" -s -X POST localhost:8080/tasks \
-  -H 'Content-Type: application/json' \
-  -d '{"sessionId":"SESSION_ID","prompt":"Now open example.com in that window"}' | jq .
-
-# list conversations, then read the full user/assistant transcript and turns
-curl -H "Authorization: Bearer $MOBD_TOKEN" -s localhost:8080/sessions | jq .
-curl -H "Authorization: Bearer $MOBD_TOKEN" -s localhost:8080/sessions/SESSION_ID | jq .
-
-# list (filters: sessionId, status, limit 1-500)
-curl -H "Authorization: Bearer $MOBD_TOKEN" -s 'localhost:8080/tasks?status=running' | jq .
-
-# get one (replace ID)
-curl -H "Authorization: Bearer $MOBD_TOKEN" -s localhost:8080/tasks/TASK_ID | jq .
-
-# SSE events
-curl -H "Authorization: Bearer $MOBD_TOKEN" -N localhost:8080/tasks/TASK_ID/events
-
-# resume delivery after event 12 (Last-Event-ID takes precedence over ?after=)
-curl -H "Authorization: Bearer $MOBD_TOKEN" -N -H 'Last-Event-ID: 12' localhost:8080/tasks/TASK_ID/events
-
-# cancel
-curl -H "Authorization: Bearer $MOBD_TOKEN" -s -X POST localhost:8080/tasks/TASK_ID/cancel | jq .
-```
-
-General file exchange uses [tus uploads and HTTP Range downloads](docs/file-transfers.md).
-Clients show the shared folder (`filesDir`, default `~/mob-files`); uploads are checksum-verified before
-publication and never overwrite an existing file.
-
-Task options, attachments, session management and live updates
-([API reference](docs/mobd-v3.md)):
-
-```bash
-# per-turn model / reasoning effort / image attachments
-curl -H "Authorization: Bearer $MOBD_TOKEN" -s -X POST localhost:8080/uploads -F file=@shot.png | jq .      # → {id, url, …}
-curl -H "Authorization: Bearer $MOBD_TOKEN" -s -X POST localhost:8080/tasks -H 'Content-Type: application/json' \
-  -d '{"prompt":"What is in this image?","effort":"high","attachments":["UPLOAD_ID"]}' | jq .
-
-# desktop queue (one running task by default)
-curl -H "Authorization: Bearer $MOBD_TOKEN" -s localhost:8080/queue | jq .
-
-# session admin
-curl -H "Authorization: Bearer $MOBD_TOKEN" -s -X PATCH localhost:8080/sessions/SESSION_ID -d '{"title":"Weekly report","pinned":true}' | jq .
-curl -H "Authorization: Bearer $MOBD_TOKEN" -s -X PATCH localhost:8080/sessions/SESSION_ID -d '{"archived":true}' | jq .
-curl -H "Authorization: Bearer $MOBD_TOKEN" -s 'localhost:8080/sessions?archived=all' | jq .
-curl -H "Authorization: Bearer $MOBD_TOKEN" -s -X DELETE localhost:8080/sessions/SESSION_ID -o /dev/null -w '%{http_code}\n'   # 204, 409 while active
-
-# timeline: messages + activities (tool calls, commands, plans…) + task usage
-curl -H "Authorization: Bearer $MOBD_TOKEN" -s localhost:8080/sessions/SESSION_ID | jq '.activities'
-
-# live view: POST /stream with a WebRTC offer (see docs/desktop-streaming.md);
-# cmd/stream-probe is a command-line viewer for testing:
-go run ./cmd/stream-probe -url http://localhost:8080 -token "$MOBD_TOKEN" -seconds 10
-
-# global live stream (session / session.deleted / task / queue / reset)
-curl -H "Authorization: Bearer $MOBD_TOKEN" -N localhost:8080/events
-
-# desktop snapshot; tool screenshots and uploads
-curl -H "Authorization: Bearer $MOBD_TOKEN" -s 'localhost:8080/screen?maxWidth=720' -o screen.jpg
-curl -H "Authorization: Bearer $MOBD_TOKEN" -s localhost:8080/artifacts/ARTIFACT_ID -o artifact.png
-```
-
-## Configuration reference
-
-| JSON key | Environment variable | Default | Meaning |
-| --- | --- | --- | --- |
-| `listen` | `MOBD_LISTEN` | `:8080` | HTTP bind |
-| `streamPort` | `MOBD_STREAM_PORT` | `9527` | UDP port for live desktop WebRTC on all interfaces; `0` = random per session |
-| `codexBin` | `MOBD_CODEX_BIN` | `codex` | Codex CLI |
-| `workdir` | `MOBD_CODEX_WORKDIR` | process cwd | Codex working directory |
-| `mcpCommand` | `MOBD_MOB_MCP_COMMAND` | this `mobd` binary | MCP server command for Codex `-c` injection; empty = built-in `mobd mcp` |
-| `mcpArgs` | `MOBD_MOB_MCP_ARGS` | `["mcp"]` when built-in, else `[]` | JSON array of args (external command only) |
-| `sharedSecret` | `MOBD_SHARED_SECRET` | empty | Not supported; a nonempty value fails startup. Pair each client instead. |
-| `controlSocket` | `MOBD_CONTROL_SOCKET` | `~/.mobd/run/control.sock` (Windows: `%LOCALAPPDATA%\mobd\run\control.sock`) | Private local management; parent directory must be owned by this user with mode 0700 |
-| `statePath` | `MOBD_STATE_PATH` | macOS: `~/Library/Application Support/mob/state.json`; Linux: `~/.local/share/mob/state.json` (`$XDG_DATA_HOME`); Windows: `%APPDATA%\mob\state.json` | Private conversation snapshot |
-| `maxRunning` | `MOBD_MAX_RUNNING` | `1`; `4` on Linux with a desktop per conversation | Tasks running at once across all sessions; others wait in the FIFO desktop queue |
-| `dataDir` | `MOBD_DATA_DIR` | directory of `MOBD_STATE_PATH` | Root of `artifacts/` (tool screenshots, uploads) and private `auth.json` |
-| `filesDir` | `MOBD_FILES_DIR` | `~/mob-files` | Folder shared with paired devices for file transfers; unfinished uploads in its hidden `.uploads/` |
-| `corsOrigins` | `MOBD_CORS_ORIGINS` | `http://localhost:1420,http://127.0.0.1:1420,tauri://localhost,http://tauri.localhost` | Comma-separated exact origins; a nonempty value replaces the defaults |
-| `questionTimeout` | `MOBD_QUESTION_TIMEOUT` | `30m` | How long a turn waits for your answer to the agent's question or approval request |
-| `runners` | `MOBD_RUNNERS` | `codex,claude` | Enabled runners |
-| `codexMode` | `MOBD_CODEX_MODE` | `app-server` | `app-server` (approvals, steering, streaming) or `exec` |
-| `claudeSettingSources` | `MOBD_CLAUDE_SETTING_SOURCES` | `project` | Claude settings loaded; `all` includes your personal `~/.claude` (with `project`, only its `env` and `apiKeyHelper` are used, for logging in) |
-| `claudeBin` | `MOBD_CLAUDE_BIN` | `claude` | Claude Code executable |
-| `claudeWorkdir` | `MOBD_CLAUDE_WORKDIR` | Codex workdir | Claude working directory |
-| `piBin` | `MOBD_PI_BIN` | `pi` | Pi CLI (tested with 1.4.0; requires 1.4.x or later 1.x); uses `workdir` |
-
-Conversation desktops (Linux; accepted and validated everywhere):
-
-| JSON key | Environment variable | Default | Meaning |
-| --- | --- | --- | --- |
-| `desktopMode` | `MOBD_DESKTOP_MODE` | `session` on Linux, `shared` elsewhere | Linux: `session` (a desktop per conversation) or `none` |
-| `desktopSleepAfter` | `MOBD_DESKTOP_SLEEP_AFTER` | `10m` | Idle time before a desktop sleeps; `0` never |
-| `desktopSleepCPU` | `MOBD_DESKTOP_SLEEP_CPU` | `0.02` | CPU use (fraction of one core) under which a desktop counts as idle |
-| `desktopSize` | `MOBD_DESKTOP_SIZE` | `1920x1080` | Desktop size in points |
-| `desktopScale` | `MOBD_DESKTOP_SCALE` | `1` | `1` or `2` (HiDPI) |
-| `desktopKeyboardLayout` | `MOBD_DESKTOP_KEYBOARD_LAYOUT` | the machine's `XKBLAYOUT`, else `us` | XKB layout of every desktop |
-| `desktopDisplayBase` | `MOBD_DESKTOP_DISPLAY_BASE` | `100` | First X display number |
-| `maxDesktops` | `MOBD_MAX_DESKTOPS` | `0` (no cap) | Desktops open at once; new conversations wait (`queueReason: desktops`) |
-| `memoryWarnPercent` / `memoryFloorPercent` | `MOBD_MEMORY_WARN_PERCENT` / `MOBD_MEMORY_FLOOR_PERCENT` | `15` / `5` | Available memory below which mobd warns / starts no new desktop |
-| `diskWarnPercent`, `diskWarnBytes` / `diskFloorBytes` | `MOBD_DISK_WARN_PERCENT`, `MOBD_DISK_WARN_BYTES` / `MOBD_DISK_FLOOR_BYTES` | `10`, `5G` / `1G` | Free space (the lower of percent and bytes) to warn / floor for new desktops |
-| `desktopBrowserSeed` | `MOBD_DESKTOP_BROWSER_SEED` | `<dataDir>/seed` | Browser profiles (`chrome/`, `firefox/`) new conversations start from |
-
-
-## Conversations and runner lifecycle
 
 mobd and the desktop client are released independently. `/health` advertises `apiVersion: 3` with `features`, `runners` (each with models, efforts and readiness), the default runner's `models`/`efforts`, and readiness `checks`. Clients should use these capabilities rather than require matching product versions. API version 3 is separate from the binary release version printed by `mobd --version`.
 
@@ -433,16 +312,18 @@ CORS covers API responses and SSE, plus `OPTIONS` preflight for `GET`/`POST`/`PA
 
 ## Documentation
 
-- [Agent concepts](docs/agent-concepts.md) and [collaboration design](docs/agent-collaboration.md): shared terminology, architecture, the request/reply flow and first-delivery scope (draft COLLAB-1; not implemented).
+- [Agent concepts](docs/agent-concepts.md) and [collaboration design](docs/agent-collaboration.md): shared terminology, architecture, the request/reply flow and first-delivery scope.
 - [Releases and installation](docs/releases.md): signing, GitHub Actions, R2, install and upgrade.
 - [Architecture](docs/architecture.md), [API reference](docs/mobd-v3.md), [runners](docs/runners.md): server behavior and supported capabilities.
+- [Configuration reference](docs/configuration.md): every setting, with its default and environment variable.
+- [API examples](docs/api-examples.md): HTTP API usage with curl.
 - [Connection setup](docs/connection-setup.md), [pairing](docs/pairing.md): networks, client pairing and authentication.
 - [Office smoke checklist](docs/office-smoke-checklist.md), [security](docs/security.md): deployment and verification.
 - [Live desktop streaming](docs/desktop-streaming.md): capture, encoding, WebRTC and WebSocket transports, rate control and input.
-- [Live view on cellular](docs/live-view-cellular-investigation.md): open investigation of iPhone live view failing on cellular.
-- [USB redirection draft](docs/usb-redirection.md): shared open-source USB/IP plan, platform limits and client responsibilities; not implemented. [Apple entitlement application](docs/apple-usb-entitlement.md): required macOS importer authorization, entry points and materials.
+- [Live view on cellular](docs/live-view-cellular-investigation.md) (historical): investigation of iPhone live view failing on cellular.
+- [USB redirection](docs/usb-redirection.md): shared open-source USB/IP plan, platform limits and client responsibilities. [Apple entitlement application](docs/apple-usb-entitlement.md): required macOS importer authorization, entry points and materials.
 - [Signing dev builds](docs/dev-signing.md): keep macOS grants across rebuilds.
 - [Linux](docs/linux.md): one virtual desktop per conversation (Xvfb), sleep, memory, browsers, packaging.
 - [Linux design](docs/linux-design.md): packages, interfaces, desktop state machine, API, CLI, and what was built differently.
 - [Building on Linux](docs/linux-build.md): other distributions, from source.
-- [Windows](docs/windows.md) (planned; waits for a test machine): current state, stages (first without the desktop, then the desktop), the logged-in user's desktop, session model and packaging.
+- [Windows](docs/windows.md) (waits for a test machine): current state, stages (first without the desktop, then the desktop), the logged-in user's desktop, session model and packaging.
