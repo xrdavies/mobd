@@ -106,6 +106,10 @@ the `apt install` line for the packages above. Other distributions:
   start of every new conversation's profile.
 - **Memory and disk:** below `memoryFloorPercent` or `diskFloorBytes` no new desktop starts;
   turns of conversations with a desktop still run. `/health`, `GET /desktops` and SSE report it.
+- **USB devices from Mob Desktop:** `sudo mobd usb setup` once lets this computer use a device
+  shared from a user's computer, as if it were plugged in here (the vhci-hcd kernel module and a
+  small root helper that only attaches and detaches). `mobd usb status` shows whether it is ready.
+  [USB redirection](docs/usb-redirection.md).
 - **Live view:** H.264 from VA-API, NVENC or OpenH264 in software through GStreamer. Allow UDP
   `streamPort` in the firewall (`sudo ufw allow 9527/udp`) or use the WebSocket fallback.
 - **Not isolated:** desktops, agents and mobd run as one Unix user; agents can read each other's

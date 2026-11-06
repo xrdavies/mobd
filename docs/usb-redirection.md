@@ -1,6 +1,7 @@
 # USB redirection
 
-Status: draft USB-1, 2026-11-01. Not implemented or released.
+Status: USB-2, 2026-11-06. mobd implements the [API](#api) and imports on Linux, verified with an
+emulated device (see [Feasibility results](#feasibility-results)); not released.
 
 This is the shared design for all five repositories. Mob Desktop exports a
 user-selected local USB device; mobd imports it on the remote machine. Use
@@ -134,10 +135,47 @@ reason such as missing helper, unsupported OS, permission or entitlement.
 
 Control operations are create, inspect and release an owned USB session, plus
 open its authenticated tunnel. The session result contains an opaque ID, selected
-device summary, state and optional reason. Reserve these common states:
+device summary, state and optional reason. States:
 `connecting`, `connected`, `disconnecting`, `disconnected`, `failed`.
-Do not create a second identity system. Exact HTTP routes and model definitions
-will be frozen with the backend proof of concept before implementation in clients.
+Do not create a second identity system.
+
+## API
+
+All routes need the paired client's credential and act only on that client's sessions: another
+client's session is `404`, never listed or released.
+
+| Route | Does |
+| --- | --- |
+| `GET /usb` | `{"importer": {backend, ready, detail}, "sessions": [...]}` |
+| `POST /usb/sessions` | Body `{busId, name?, vendorId?, productId?, serialNumber?}`: a session in `connecting`. `503 usb_not_ready` with the reason, `409` if this client already shares that bus ID or has 4 sessions |
+| `GET /usb/sessions/{id}` | The session |
+| `DELETE /usb/sessions/{id}` | Detach here, then close the tunnel. `409 usb_busy` while a drive from it is mounted here; `?force=true` detaches anyway and can lose writes |
+| `GET /usb/sessions/{id}/tunnel` | WebSocket, `Authorization` header (native clients). Binary messages carry the USB/IP stream both ways, split anywhere. mobd sends text `{"t":"state", ...session}` on each change |
+
+Session: `{id, device: {busId, name, vendorId, productId, serialNumber}, state, reason, localBusId,
+createdAt, updatedAt}`. mobd trusts only `busId`, checks it against the exporter's import reply and
+never asks for another device; the other fields are for display.
+
+Over the tunnel, the exporter's side is a plain USB/IP server for that one device: it answers
+`OP_REQ_IMPORT` for `busId`, then URBs. mobd runs the import on one end of a socket pair and gives
+it to the OS importer; the other end is bridged to the WebSocket.
+
+Lifecycle: a session whose tunnel does not open within 2 minutes fails. mobd pings the tunnel every
+15 s and ends the session if it stops answering. Release, pairing revoke and mobd shutdown detach
+first and then close the tunnel; a closed tunnel or a mobd crash closes the OS importer's socket,
+which removes the device. Ended sessions stay listed for 10 minutes with their reason.
+
+`/health` lists the feature `usbRedirection` and `usb: {backend, ready, detail}`.
+
+### Linux importer
+
+`vhci_hcd` attaching needs root and mobd runs as the user, so `sudo mobd usb setup` installs
+`mobd-usb-helper@UID.service` and loads `vhci-hcd` at boot. The helper listens on
+`/run/mobd-usb/UID.sock` (mode 0600, owned by the user), checks the caller's UID with
+`SO_PEERCRED`, takes the socket over `SCM_RIGHTS` and only attaches it, or detaches a port it
+attached. `mobd usb status` shows readiness; `sudo mobd usb remove` undoes setup. A mobd running as
+root attaches directly. Tools that open the imported device through usbfs need a udev rule or group
+for its device node, as with a locally plugged device.
 
 Only one remote attachment may own a local device at a time. Keep an active share
 independent of the selected chat, preview, video transport and foreground window.
@@ -208,6 +246,27 @@ model and USB identity, remote tool/driver, permissions and results. Acceptance:
 No throughput/latency guarantee is made before measurements. Debugging can be
 latency-sensitive even when a disk copy has acceptable throughput. Successful
 enumeration alone does not qualify a device for the supported list.
+
+## Feasibility results
+
+**Linux import, 2026-11-06** (`internal/usbip`, test `TestVHCIAttachesAnEmulatedDevice`, Ubuntu 24.04
+arm64 in an OrbStack VM, kernel 7.2 with vhci_hcd and no USB class drivers):
+
+- mobd performs the `OP_REQ_IMPORT` handshake for the one selected bus ID itself and rejects a reply
+  for any other device, then writes the socket to `vhci_hcd`'s `attach`. The kernel never sees an
+  exporter's device list, which meets step 4 of [Connection and authorization](#connection-and-authorization).
+- **A Unix socket pair works as well as TCP.** mobd can hand the kernel one end and bridge the other
+  to its tunnel: no loopback listener exists for another local process to take.
+- The exporter was an emulated high-speed vendor-class device (pid.codes test ID `1209:0001`, bulk
+  loopback on endpoint 1). Linux enumerated it, usbfs moved 256 KiB out and back unchanged, and
+  detach freed the port. This exercises control, bulk OUT/IN and unlink handling, the path debug
+  probes and DFU tools use. Mass storage, serial classes and real hardware are not tested yet.
+- Attach and detach need root (`/sys/devices/platform/vhci_hcd.0/attach` is root-only), hence the
+  [helper](#linux-importer).
+- Through the API: `TestUSBSessionOverTheAPI` exports the emulated device over a real WebSocket
+  tunnel. `TestEndToEndThroughTheHelper` (opt-in, `MOBD_USB_E2E=1` after setup) runs as the user
+  through the helper and the kernel, moves data through usbfs, releases and checks that the helper
+  detached the device before the tunnel closed.
 
 ## Sources and companion documents
 
