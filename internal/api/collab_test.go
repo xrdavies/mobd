@@ -201,3 +201,54 @@ func TestMentionNoteGoesWithTheMentioningTurnOnly(t *testing.T) {
 		t.Fatalf("note on a plain turn: %q", note)
 	}
 }
+
+// Cancel with stopTurn also stops the recipient's turn working on the request, but not a turn that
+// also carries another open request.
+func TestCancelCanStopTheRecipientsTurn(t *testing.T) {
+	s := testServer(t, "")
+	idle := func(prompt string) string {
+		tk, _ := s.store.Create(prompt)
+		_, _ = s.store.UpdateStatus(tk.ID, task.StatusSucceeded, "")
+		return tk.SessionID
+	}
+	cancel := func(id string) map[string]any {
+		rr := httptest.NewRecorder()
+		authenticatedHandler(t, s).ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/collab/requests/"+id+"/cancel?stopTurn=true", nil))
+		var v map[string]any
+		if json.Unmarshal(rr.Body.Bytes(), &v); rr.Code != http.StatusOK {
+			t.Fatalf("cancel: %d %s", rr.Code, rr.Body.String())
+		}
+		return v
+	}
+	a, b := idle("ui"), idle("api")
+	user, _ := s.store.CreateTurnWith(a, "ask", task.TurnOptions{Mentions: []string{b}})
+	_, _ = s.store.UpdateStatus(user.ID, task.StatusRunning, "")
+	r, _ := s.store.SendRequest(user.ID, b, "q")
+	turns, _ := s.store.DeliverInbox() // B's turn carrying r, queued
+	if len(turns) != 1 {
+		t.Fatalf("%+v", turns)
+	}
+	if v := cancel(r.ID); v["stoppedTask"] != turns[0].ID || v["status"] != "cancelled" {
+		t.Fatalf("%v", v)
+	}
+	if got, _ := s.store.Get(turns[0].ID); got.Status != task.StatusCancelled {
+		t.Fatalf("turn %s", got.Status)
+	}
+
+	// One turn carrying two requests (from two conversations): cancelling one keeps the turn.
+	c := idle("web")
+	user2, _ := s.store.CreateTurnWith(c, "ask too", task.TurnOptions{Mentions: []string{b}})
+	_, _ = s.store.UpdateStatus(user2.ID, task.StatusRunning, "")
+	r1, _ := s.store.SendRequest(user.ID, b, "q1")
+	r2, _ := s.store.SendRequest(user2.ID, b, "q2")
+	turns, _ = s.store.DeliverInbox()
+	if len(turns) != 1 {
+		t.Fatalf("%+v", turns)
+	}
+	if v := cancel(r1.ID); v["stoppedTask"] != nil || v["turnKept"] == nil {
+		t.Fatalf("%v", v)
+	}
+	if got, _ := s.store.Get(turns[0].ID); got.Status.Terminal() {
+		t.Fatalf("the turn for %s was stopped", r2.ID)
+	}
+}
