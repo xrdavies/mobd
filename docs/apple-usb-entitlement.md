@@ -1,7 +1,7 @@
 # Apple USB entitlement application
 
-Status: draft USB-1, 2026-11-01. Preparation only; no application was submitted
-by this documentation change. Existing account approvals have not been inspected.
+Status: USB-2, 2026-11-06. Request ready to submit (see [Submit](#submit)); not submitted yet.
+Linux import works and is documented for users (mymob.dev/usb/); macOS import waits for this grant.
 Companion to the [shared USB redirection design](usb-redirection.md). Until it is granted, the
 receiver can be developed on a test Mac with the checks lowered: [macos-usb-development.md](macos-usb-development.md).
 
@@ -50,78 +50,89 @@ The general capability-request page is background. Apple's specific DTS guidance
 directs this USB request to Feedback Assistant because it is not a normal
 self-service Xcode capability. Check the linked thread for changes when submitting.
 
-## Application steps
+## Submit
 
-1. Have the team's account holder/authorized maintainer confirm the Team ID,
-   distribution method and actual importer target identity. The current daemon
-   identifier is `com.xrdavies.mobd`; an entitled helper's Bundle ID is still to
-   be selected. Do not invent an identifier or infer approval from a certificate.
-2. Sign in to Feedback Assistant and start a macOS report. Use the title
-   `Request for Entitlement - com.apple.developer.usb.host-controller-interface`
-   and the USB problem area. Apple DTS specifies the feedback type **Other Bug**.
-   If the current UI does not offer it, use an available appropriate category,
-   explicitly label the report an entitlement request and ask Developer Support
-   to confirm routing; do not claim a missing field is a technical product bug.
-3. Attach the materials below and explain why the receiving Mac must create a
-   virtual USB controller. Request confirmation that the grant/profile supports
-   both development and the intended Developer ID distribution outside the App Store.
-4. Record the Feedback ID and date. Respond to requests for information; if
-   routing is unclear, follow up through Apple support/the linked DTS discussion
-   with the Feedback ID. Do not post certificates, private keys or account secrets.
-5. Once approved, obtain the appropriate profile for the exact target, configure
-   its entitlements, embed the profile in the supported bundle layout, sign and
-   notarize the resulting distribution. Verify effective entitlements and profile
-   authorization, then exercise the USB interface on a clean Mac with SIP enabled.
+Apple DTS (Kevin Elliott, [thread 802495](https://developer.apple.com/forums/thread/802495), checked
+2026-11-06): the request is a Feedback Assistant report, not the Capability Requests or DriverKit
+forms, and it "cannot be acted on" without the team ID, a product overview and marketing links.
+What matters is *what product you are building and why it needs to simulate a USB controller*.
 
-Submitting the report and following up are external communications and must be
-performed as a separately authorized action. Drafting this document does neither.
+1. **Signed in as the team's Account Holder or an Admin**, open
+   [Feedback Assistant](https://feedbackassistant.apple.com/) (or the Feedback Assistant app on a Mac).
+2. **New Feedback** → **macOS**.
+3. **Title:** `Request for Entitlement - com.apple.developer.usb.host-controller-interface`
+4. **Problem area:** USB.
+5. **Type of feedback:** Other Bug. In 2026 it was sometimes missing from the menu; then choose
+   **Incorrect/Unexpected Behavior** (a request filed that way was still processed), and keep the
+   title as above so it is routed as an entitlement request.
+6. **Describe the issue:** paste the [request text](#request-text) below.
+7. Attach nothing else: no certificates, keys or account details beyond the team ID.
+8. Submit, and record the Feedback ID (FB…) and date in the [tracking table](#packaging-gate-and-tracking).
+9. Follow up in the report when Apple asks. If nothing moves for about two weeks, reply in
+   [thread 802495](https://developer.apple.com/forums/thread/802495) with only the FB number:
+   DTS offered there to check routing. Approvals are usually quick but slow down around Apple
+   holidays and announcement weeks.
 
-## Materials to prepare
+Optional, before or after submitting: register the receiver's App ID in
+[Certificates, Identifiers & Profiles](https://developer.apple.com/account/resources/identifiers/list)
+(Identifiers → **+** → App IDs → App, macOS, Explicit Bundle ID `com.xrdavies.mobd.usb`). Apple does
+not require it for the request; the entitlement is added to that identifier's profiles once granted.
 
-Apple DTS explicitly asks for Team ID, a product overview and product/company
-links. Supply these and the following implementation context:
+### After approval
 
-| Material | Value or preparation |
-| --- | --- |
-| Team ID and contact | Fill from the verified developer account; no credential/private key attachment |
-| Product | Mob: open-source remote agent workspace, with a planned local-to-remote USB sharing feature |
-| Public product information | [Mob website](https://mymob.dev/), [Desktop repository](https://github.com/xrdavies/mob), [mobd repository](https://github.com/xrdavies/mobd) |
-| Technical design | [USB design](https://github.com/xrdavies/mobd/blob/main/docs/usb-redirection.md); confirm the link resolves before submitting |
-| Actual target | Daemon/helper Bundle ID, team, deployment OS/architectures, bundle/launch design; finalize before submission |
-| Need for the interface | Remote macOS tools need a virtual USB device backed by hardware attached to the user's separate computer |
-| Distribution | Developer ID signed and notarized macOS distribution outside the App Store; explain proposed helper packaging |
-| Intended devices | Tested/targeted USB drives, development boards and debug probes; distinguish tested results from planned support |
-| Access controls | Explicit local device selection, paired destination, authenticated encrypted transport, exclusive ownership, revocation and cleanup |
-| Supporting evidence | Architecture diagram, prototype description or logs if available; label unimplemented behavior accurately |
+1. Apple adds the entitlement to the team. Create **Developer ID** and **Mac Development**
+   provisioning profiles for `com.xrdavies.mobd.usb` that include it ([TN3125](https://developer.apple.com/documentation/technotes/tn3125-inside-code-signing-provisioning-profiles)).
+2. Build the receiver as a small app-like bundle (a bare CLI cannot carry a profile): the profile as
+   `Contents/embedded.provisionprofile`, the entitlement in its signature, signed with the Developer
+   ID Application identity and notarized. mobd launches it and hands it the tunnel's socket.
+3. Check `codesign -d --entitlements - …`, then import a device on a clean Mac with SIP enabled.
 
-Suggested request body, to complete and review before submission:
+## Request text
+
+Paste as is; Apple asks for exactly these items.
 
 ```text
-Team ID: <verified Team ID>
-Product: Mob / mobd
-Importer Bundle ID: <final Bundle ID of the macOS importer component>
-Distribution: Developer ID signed and notarized, outside the Mac App Store
+Team ID: 69GK3C9666
 
-Mob is an open-source remote agent workspace. We plan to let a user explicitly
-share a USB device attached to their local computer with their paired remote
-Mac running mobd. On that receiving Mac, native drivers and development tools
-need to access the device through a virtual USB host controller.
+Product: Mob (https://mymob.dev/), an open-source (MIT) app for running AI coding agents
+(Codex, Claude Code) on a user's own office computer and steering them from a laptop or phone.
+The office computer runs our daemon, mobd; the user runs Mob Desktop on their laptop. Both are
+distributed outside the Mac App Store, signed with Developer ID and notarized.
 
-We request com.apple.developer.usb.host-controller-interface for the receiving
-macOS importer, using IOUSBHostControllerInterface. The planned transport is
-USB/IP carried over an authenticated encrypted connection. The design limits
-each share to a selected device and destination, provides explicit release,
-and terminates access on credential revocation or connection failure.
+What we are building: USB device sharing. A developer with a debug probe or development board
+plugged into their laptop shares it, from Mob Desktop, with their paired office computer, so that
+the native tools there (and the agents working there) can flash and debug the board as if it
+were plugged in locally. It is released for Linux office computers, where mobd attaches the
+device through the kernel's USB/IP virtual host controller (vhci_hcd). User guide:
+https://mymob.dev/usb/
 
-Please confirm the supported provisioning and packaging requirements for
-development and Developer ID distribution of this component.
+Why it needs IOUSBHostControllerInterface: when the office computer is a Mac, the device has to
+appear to macOS as a real USB device, so that its drivers and existing tools (OpenOCD, dfu-util,
+vendor flashing tools) work unchanged. There is no other supported way for a process to present
+a remote USB device to macOS; the IOUSBHostControllerInterface header describes exactly this use
+("to provide access to remote USB devices").
 
-Product: https://mymob.dev/
-Source: https://github.com/xrdavies/mobd
-Design: https://github.com/xrdavies/mobd/blob/main/docs/usb-redirection.md
-Prototype status and target devices: <accurate current status>
-Supported macOS versions/architectures and bundle layout: <verified plan>
-Contact: <maintainer contact>
+How it works and its limits:
+- The user explicitly picks one device on their laptop and one paired office computer; nothing is
+  shared automatically and mobd only ever requests that one device.
+- Traffic is USB/IP (the Linux kernel's protocol) inside an authenticated WebSocket tunnel per
+  device (TLS where the connection is remote); nothing listens for USB on the network.
+- Stopping, quitting the app, a lost connection or revoking the laptop's pairing detaches the
+  device at once. Isochronous devices (audio, cameras) and hubs are not supported.
+
+Component that needs the entitlement: a small helper app bundle launched by mobd on the receiving
+Mac. Proposed bundle ID: com.xrdavies.mobd.usb (macOS, Apple Silicon).
+
+Please confirm that the entitlement can be used with both Mac Development and Developer ID
+provisioning profiles for this bundle ID, and whether any packaging requirement applies to a
+helper launched by a command-line daemon.
+
+Links:
+- Product: https://mymob.dev/
+- USB guide: https://mymob.dev/usb/
+- Daemon source: https://github.com/xrdavies/mobd
+- Desktop app source: https://github.com/xrdavies/mob
+- Design: https://github.com/xrdavies/mobd/blob/main/docs/usb-redirection.md
 ```
 
 ## Packaging gate and tracking
@@ -136,9 +147,9 @@ Do not modify today's release signing configuration merely to declare the key.
 | Item | Current status |
 | --- | --- |
 | Application owner | mobd maintainers / developer-account owner |
-| Team and prior account grant | Not checked in this change |
-| Importer Bundle ID and packaging | Pending implementation proof |
-| Submission date / Feedback ID | No submission by this change |
+| Team ID | `69GK3C9666` (the Team ID the published installer, dl.mymob.dev/mobd/install.sh, checks mobd's signature against) |
+| Importer Bundle ID and packaging | Proposed `com.xrdavies.mobd.usb`, helper app bundle launched by mobd; not built yet |
+| Submission date / Feedback ID | Not submitted yet |
 | Apple approval and distribution profile | Not verified; release gate remains open |
 | Clean-machine device import test | Not performed |
 
