@@ -2,7 +2,8 @@
 
 Status: draft USB-1, 2026-11-01. Preparation only; no application was submitted
 by this documentation change. Existing account approvals have not been inspected.
-Companion to the [shared USB redirection design](usb-redirection.md).
+Companion to the [shared USB redirection design](usb-redirection.md). Until it is granted, the
+receiver can be developed on a test Mac with the checks lowered: [macos-usb-development.md](macos-usb-development.md).
 
 ## Required capability and owner
 

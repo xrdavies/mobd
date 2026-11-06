@@ -69,6 +69,8 @@ held by system drivers. libusb has device-capture paths with platform/permission
 limitations; its existence does not prove that a target drive can be exported.
 Test with normal system security enabled. Disabling SIP or driver-signature
 enforcement is not a product installation path.
+Developing the macOS receiver before Apple grants the entitlement: [lowering the checks on a
+test Mac](macos-usb-development.md), development only.
 
 Prefer invoking an existing tool/helper before adding a library or writing a
 driver. If a backend needs work, implement USB/IP-compatible device handling and
