@@ -132,7 +132,8 @@ the agent is: `@api`, `@ui`. Like a display name and @handle elsewhere, the two 
 - **Across machines (later, reserved):** `@api@m4002` would name `@api` on another office. The part
   after the second `@` is a machine handle published by that mobd (not the name each app gives the
   machine). The stored reference stays `{serverId, sessionId}`. Handles cannot contain `@`, so the
-  form is free to add.
+  form is free to add. The first cross-machine protocol proposal is in
+  [agent-cross-machine-collaboration.md](agent-cross-machine-collaboration.md).
 
 ## Lifecycle
 
