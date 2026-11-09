@@ -1,6 +1,6 @@
 # Apple USB entitlement application
 
-Status: USB-2, 2026-11-06. Request ready to submit (see [Submit](#submit)); not submitted yet.
+Status: USB-2. Request submitted 2026-11-10 as FB25504649 (see [Submit](#submit)); waiting for Apple.
 Linux import works and is documented for users (mymob.dev/usb/); macOS import waits for this grant.
 Companion to the [shared USB redirection design](usb-redirection.md). Until it is granted, the
 receiver can be developed on a test Mac with the checks lowered: [macos-usb-development.md](macos-usb-development.md).
@@ -149,8 +149,8 @@ Do not modify today's release signing configuration merely to declare the key.
 | Application owner | mobd maintainers / developer-account owner |
 | Team ID | `69GK3C9666` (the Team ID the published installer, dl.mymob.dev/mobd/install.sh, checks mobd's signature against) |
 | Importer Bundle ID and packaging | Proposed `com.xrdavies.mobd.usb`, helper app bundle launched by mobd; not built yet |
-| Submission date / Feedback ID | Not submitted yet |
-| Apple approval and distribution profile | Not verified; release gate remains open |
+| Submission date / Feedback ID | 2026-11-10, FB25504649 (Feedback Assistant) |
+| Apple approval and distribution profile | Waiting for Apple; release gate remains open |
 | Clean-machine device import test | Not performed |
 
 Approval is not guaranteed and does not establish device compatibility. macOS
