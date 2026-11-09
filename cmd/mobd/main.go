@@ -41,6 +41,8 @@ const usage = `Usage: mobd <command> [options]
              close the conversations' desktops (--close-desktops, --keep-desktops)
   restart    Reload configuration and restart; preserve login setting
   status     Show background service address and health
+  permissions  Approve the macOS permissions mobd and its agents need (start and restart ask
+             for missing ones when run in a terminal)
   logs       Follow background service logs
   link       print a one-use pairing link and QR for the remote address (mobd remote), else the
              LAN one; --lan: the LAN address; --url ORIGIN: that address; --close: close invitations
@@ -106,6 +108,9 @@ func run(args []string) error {
 	}
 	if command == "uninstall" {
 		return uninstall(args)
+	}
+	if command == "permissions" {
+		return permissionsCommand(args)
 	}
 	if command == "mcp" {
 		if len(args) != 0 {
@@ -195,6 +200,12 @@ func run(args []string) error {
 			return err
 		}
 		fmt.Printf("mobd started; listen=%s; health=%s/health\nconfig=%s; logs=%s\n", cfg.ListenAddr, service.LocalURL(cfg.ListenAddr), path, manager.LogPath())
+		afterStart(cfg.ControlSocket, func() error {
+			if err := manager.Stop(); err != nil {
+				return err
+			}
+			return manager.Start(cfg, args, login)
+		})
 		return nil
 	}
 	return serve(cfg)
@@ -298,7 +309,8 @@ func serve(cfg config.Config) error {
 
 	defer httpSrv.Close()
 
-	adminSrv := &http.Server{Handler: control.Handler(control.Deps{Pairing: auth, Desktops: srv, Listen: cfg.ListenAddr}),
+	adminSrv := &http.Server{Handler: control.Handler(control.Deps{Pairing: auth, Desktops: srv,
+		Grants: serverGrants{list: desktop.Grants, probe: probePermissions}, Listen: cfg.ListenAddr}),
 		// Closing every desktop (stop, uninstall) can take a while.
 		ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 5 * time.Minute}
 	defer adminSrv.Close()

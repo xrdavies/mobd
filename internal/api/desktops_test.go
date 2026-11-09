@@ -97,7 +97,7 @@ func TestHealthOnLinuxNamesNoMacGrantsAndListsSessionDesktops(t *testing.T) {
 	if !slices.Contains(health.Features, "sessionDesktops") {
 		t.Fatalf("features %v", health.Features)
 	}
-	for _, name := range []string{"accessibility", "screenRecording"} {
+	for _, name := range []string{"accessibility", "screenRecording", "files", "localNetwork"} {
 		if c := health.Checks[name]; !c.OK || c.Detail != "not needed on Linux" {
 			t.Fatalf("%s: %+v", name, c)
 		}

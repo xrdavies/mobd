@@ -39,11 +39,15 @@ Edit `~/.mobd/config.json` before starting:
 
 ## 2. Start and check readiness
 
-1. Start mobd once. If Accessibility or Screen Recording is missing, mobd asks
-   macOS to show the corresponding authorization prompt. Approve it for the
-   app that launches mobd (Terminal/iTerm for a shell launch, or mobd under
-   launchd). You can review the grants in System Settings → Privacy & Security;
-   restart mobd after changing them.
+1. Start mobd once with `mobd start` in a terminal on the office computer. It
+   then walks through each missing macOS permission, one prompt at a time:
+   Accessibility, Screen & System Audio Recording, the Desktop, Documents and
+   Downloads folders (or Full Disk Access), and Local Network. The agents mobd runs
+   share these, and later nobody is at the computer to answer a prompt, so approve
+   them all now. Press Enter to open System Settings when no prompt appears (a
+   prompt that was dismissed once does not come back); mobd restarts itself to use
+   Screen Recording. `mobd permissions` asks again later. Under launchd the grants
+   belong to mobd; with `mobd serve` in a shell they belong to Terminal/iTerm.
 2. Screen Sharing is not needed: mobd streams the desktop itself, with the
    Screen Recording and Accessibility grants above. For a dedicated office Mac, turn
    off automatic screen locking so snapshots keep working (the live view works at

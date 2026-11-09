@@ -156,11 +156,13 @@ func (s *Server) readiness(ctx context.Context) map[string]check {
 	}
 	if name := backendName(); name == "macos" {
 		checks["accessibility"], checks["screenRecording"] = permissionChecks()
+		checks["files"], checks["localNetwork"] = agentGrantChecks(ctx)
 		checks["display"] = displayCheck()
 	} else {
 		// API v3 clients warn on a failed check, so grants other systems do not have read as ok.
 		notNeeded := check{OK: true, Detail: "not needed on " + desktop.OSName(name)}
 		checks["accessibility"], checks["screenRecording"] = notNeeded, notNeeded
+		checks["files"], checks["localNetwork"] = notNeeded, notNeeded
 		checks["display"] = check{Unknown: true, Detail: "no desktop on this " + desktop.ComputerName(name) + " yet"}
 	}
 	if c, ok := s.desktops.(desktop.Checker); ok {
@@ -232,6 +234,25 @@ func permissionChecks() (check, check) {
 	return ax, sr
 }
 
+// agentGrantChecks reports the folder and local network grants the agents share with mobd;
+// `mobd permissions` on the office computer asks for missing ones.
+func agentGrantChecks(ctx context.Context) (check, check) {
+	files, network := check{Unknown: true}, check{Unknown: true}
+	for _, g := range currentGrants(ctx) {
+		c := check{OK: g.State == desktop.GrantGranted, Unknown: g.State == desktop.GrantUnknown, Detail: g.Detail}
+		if !c.OK && !c.Unknown {
+			c.Detail += "; run mobd permissions on the office computer"
+		}
+		switch g.Name {
+		case "files":
+			files = c
+		case "localNetwork":
+			network = c
+		}
+	}
+	return files, network
+}
+
 // displayCheck reports a locked console or sleeping display: screen capture running as the
 // user sees no display then, so snapshots and the live view have no picture.
 func displayCheck() check {
@@ -251,8 +272,11 @@ func displayCheck() check {
 // displayState is swapped in tests.
 var displayState = desktop.State
 
-// currentPermissions is swapped in tests.
-var currentPermissions = desktop.CurrentPermissions
+// currentPermissions and currentGrants are swapped in tests.
+var (
+	currentPermissions = desktop.CurrentPermissions
+	currentGrants      = desktop.Grants
+)
 
 func binaryCheck(bin string) check {
 	path, err := exec.LookPath(bin)

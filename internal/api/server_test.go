@@ -874,6 +874,14 @@ func TestHealthReadiness(t *testing.T) {
 	perms := desktop.Permissions{Accessibility: true}
 	currentPermissions = func() (desktop.Permissions, error) { return perms, nil }
 	t.Cleanup(func() { currentPermissions = desktop.CurrentPermissions })
+	restoreGrants := currentGrants
+	currentGrants = func(context.Context) []desktop.Grant {
+		return []desktop.Grant{
+			{Name: "files", State: desktop.GrantWaiting, Detail: "answer the prompt about Desktop on this computer"},
+			{Name: "localNetwork", State: desktop.GrantUnknown, Detail: "no local network router to try"},
+		}
+	}
+	t.Cleanup(func() { currentGrants = restoreGrants })
 	displayState = func() (desktop.DisplayState, error) { return desktop.DisplayState{Locked: true}, nil }
 	t.Cleanup(func() { displayState = desktop.State })
 	// A new settings.json offers the model of Codex's own config.
@@ -904,6 +912,10 @@ func TestHealthReadiness(t *testing.T) {
 		c["accessibility"].OK != perms.Accessibility || c["screenRecording"].OK || c["screenRecording"].Detail == "" ||
 		!c["display"].OK || !strings.Contains(c["display"].Detail, "locked") {
 		t.Fatalf("checks %+v", c)
+	}
+	if f, n := c["files"], c["localNetwork"]; f.OK || f.Unknown || !strings.HasSuffix(f.Detail, "run mobd permissions on the office computer") ||
+		n.OK || !n.Unknown || n.Detail != "no local network router to try" {
+		t.Fatalf("grant checks %+v %+v", f, n)
 	}
 	if body.Runner != "codex" || len(body.Runners) != 1 || !body.Runners[0].Available || !body.Runners[0].Default ||
 		!body.Runners[0].Resume || len(body.Runners[0].Efforts) != 5 || body.Runners[0].Models[0] != "gpt-5.5" {
