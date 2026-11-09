@@ -27,6 +27,32 @@ user created. The destination node owns the local delivery, runner turn and
 local permissions. Neither node writes the other node's `state.json`, and a
 remote node never receives a local task token or runner resume handle.
 
+The important ownership boundary is visible here:
+
+```mermaid
+flowchart LR
+    U[User on client A] -->|mentions remote agent| A["mobd A<br/>source / authority"]
+    subgraph NA[Office A]
+        A --> SA[(state A)]
+        A --> OA[(outbox A)]
+        OA -->|signed envelope| T["Direct HTTPS<br/>or future relay"]
+    end
+    T --> IB[(inbox B)]
+    subgraph NB[Office B]
+        IB --> B["mobd B<br/>recipient / executor"]
+        B --> SB[(state B)]
+        B --> R[Agent B runner]
+    end
+    R -->|result or clarification| B
+    B -->|signed envelope| T
+    T --> A
+```
+
+`mobd A` owns the exchange and the user's authorization. `mobd B` owns the
+recipient's session, runner settings and approvals. The relay, when added,
+only routes envelopes; it is not an agent and does not become a third owner of
+the conversation.
+
 This gives us one protocol with two transports:
 
 1. **First implementation:** direct HTTPS between explicitly paired nodes,
@@ -56,6 +82,42 @@ preserve:
 
 The cross-machine protocol should adapt to these boundaries instead of
 removing them.
+
+## One request from A to B and back
+
+The network hop is asynchronous. No runner slot is held while A waits, and a
+duplicate HTTP delivery cannot create a second B turn.
+
+```mermaid
+sequenceDiagram
+    participant U as User / client A
+    participant A as mobd A
+    participant OA as outbox A
+    participant B as mobd B
+    participant IB as inbox B
+    participant RB as Agent B turn
+
+    U->>A: Send user turn mentioning @api@office-b
+    A->>A: Create exchange + request + outbox in one commit
+    A-->>U: Request pending; A turn ends
+    OA->>B: POST signed request envelope
+    B->>B: Verify peer, target ref, expiry and signature
+    B->>IB: Commit envelope ID and local delivery
+    B-->>OA: Ack durable acceptance
+    OA->>OA: Mark outbox item acknowledged
+    B->>RB: Start labelled turn at a turn boundary
+    RB->>B: complete_request(result)
+    B->>B: Commit result + result outbox
+    B->>A: POST signed result envelope
+    A->>A: Apply once to authoritative request
+    A->>A: Schedule A's result turn when idle
+    A-->>U: A resumes with B's result
+```
+
+If the POST times out after B commits, A retries the same envelope ID. B
+acknowledges the duplicate and does not run the request again. If B's runner
+crashes, B marks the request interrupted and sends that terminal notice; a
+user can decide what to do next.
 
 ## Identity and addresses
 
@@ -113,6 +175,24 @@ message from a remote agent is still peer text and never counts as the user's
 approval. Questions and approvals go to the local user. A remote peer cannot
 create a local task, call local MCP, change settings, or address a third agent
 through the federation endpoint.
+
+The trust boundaries are therefore separate:
+
+```mermaid
+flowchart TB
+    U[Human user] -->|approval / mention| OA["Source mobd<br/>user authority"]
+    OA -->|peer credential + signed envelope| OB["Destination mobd<br/>peer boundary"]
+    OB -->|labelled peer text| RB[Destination runner]
+    RB -->|ask_user / request_approval| UB[Destination user]
+    OA -.->|never sends| TOK[local task token / resumeId]
+    OB -.->|cannot call| API[general tasks, files, desktop or MCP API]
+    RELAY[Future relay] -.->|routes only; no authority| OA
+    RELAY -.->|routes only; no authority| OB
+```
+
+The source user's mention authorizes the source agent to contact the selected
+recipient. It does not authorize the destination agent to perform an action on
+the source user's behalf, and peer text never satisfies a local approval gate.
 
 For a future multi-user network, node pairing and user membership are separate
 permissions. A user may be allowed to discover an agent without being allowed
