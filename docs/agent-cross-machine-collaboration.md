@@ -55,8 +55,10 @@ the conversation.
 
 This gives us one protocol with two transports:
 
-1. **First implementation:** direct HTTPS between explicitly paired nodes,
-   normally over the existing LAN, VPN or Tailscale setup.
+1. **First implementation:** direct HTTPS between nodes paired by their local
+   agents at the users' request, normally over an existing LAN/VPN HTTPS setup.
+   Users initiate pairing in Mob chat; no SSH login or per-machine CLI setup
+   is part of the pairing flow.
 2. **Later network:** the same envelopes through a relay that routes opaque
    node-to-node traffic and handles nodes that cannot accept inbound
    connections.
@@ -151,11 +153,139 @@ type Peer struct {
 }
 ```
 
-The first pairing is an explicit administrator action using a one-time
-invitation. It pins the peer's public key and endpoint; discovery does not
-create trust. Revoking a peer stops new delivery and invalidates its queued
-outbound work. The client bearer token in `auth.json` is for human/device API
-access and must not be reused as a node credential.
+The first pairing is user-authorized and agent-configured, using a one-time
+invitation as described below. It pins the peer's public key and endpoint;
+discovery does not create trust. Revoking a peer stops new delivery and
+invalidates its queued outbound work. The client bearer token in `auth.json`
+is for human/device API access and must not be reused as a node credential.
+
+## Pairing through agents
+
+The user talks to the agents through existing Mob conversations. Each agent
+asks its **own** `mobd` to prepare or join a pairing; the daemons perform the
+handshake and persist their own configuration. The user never needs to log in
+to either machine, run a command, edit a config file or copy a permanent key.
+
+For example, the user tells agent A, "Connect with the API agent on office B;
+share only this agent." Agent A returns a pairing invitation. The user gives
+that invitation to agent B in Mob and says, "Pair with this office; share only
+this API agent." The respective users confirm the concrete peer and sharing
+scope in Mob; the agents then report the connection status.
+
+```mermaid
+sequenceDiagram
+    participant U as User(s) in Mob
+    participant AA as Agent A
+    participant DA as mobd A
+    participant AB as Agent B
+    participant DB as mobd B
+
+    U->>AA: Prepare pairing; share selected local agent
+    AA->>DA: prepare_peer_pairing(local scope)
+    DA-->>U: Short-lived invitation card
+    U->>AB: Pair using this invitation; select local agent
+    AB->>DB: join_peer_pairing(invitation, local scope)
+    DB->>DA: Redeem invitation; exchange identity and key proofs
+    DA-->>U: Confirm B identity and A's sharing scope
+    DB-->>U: Confirm A identity and B's sharing scope
+    U->>DA: Approve from Mob
+    U->>DB: Approve from Mob
+    DA->>DB: Exchange approved pairing records; verify connectivity
+    Note over DA,DB: Each daemon persists its own peer record
+    DA-->>U: Paired; selected remote agents available
+    DB-->>U: Paired; selected remote agents available
+```
+
+The user can be the same person on both sides or two different owners. In the
+first release, a local approver is an already paired Mob client with the
+existing office-wide authority; this does not add individual user identity.
+For different owners, each approves access to their own office. A's user
+cannot authorize access to B merely by knowing B's name or endpoint.
+
+### Bootstrap and discovery
+
+Before pairing, normal `send_request` cannot carry the invitation: there is
+no authorized peer yet. The minimum bootstrap is a one-time invitation passed
+through the user's existing Mob conversations. A client already connected to
+both offices may offer "Send to office B" and forward it after the user selects
+the target. That is a client feature, not an assumption that the daemons share
+client credentials. Cross-user sharing uses the invitation link. A relay or
+team directory is not required for this first flow.
+
+The invitation contains a pairing ID, A's `serverId`, public-key fingerprint,
+HTTPS endpoint, expiry and a high-entropy single-use secret. A stores only the
+secret hash. Reuse the existing device-pairing lifetime (10 minutes) and
+invitation pattern, with separate federation records and endpoints. Redemption
+reserves the invitation for one B identity/key; retries by that same proven
+identity recover the same pending pairing, while another identity is refused.
+The invitation permits only this handshake, not collaboration or general API
+access. Secret redemption uses a request body, never a URL query or logs; the
+client handles the invitation secret as a fragment, like device pairing.
+
+A display name is not enough to find or authenticate a machine. If no
+invitation or previously verified reference is available, the agent asks for
+one rather than guessing an endpoint. Public keys, challenges and exact
+handshake encoding must be specified and tested before implementation.
+
+### Local tools and approval
+
+The proposed local MCP surface is deliberately small:
+
+| Tool | Effect |
+| --- | --- |
+| `prepare_peer_pairing(localAgents)` | Create a pending invitation for the selected local agents; grant no peer access. |
+| `join_peer_pairing(invitation, localAgents)` | Start identity verification and request approval for the concrete peer and scope. |
+| `peer_pairing_status(pairingId)` | Read pending approval, connection problem, paired or expired status. |
+
+Tool names are proposals, not available capabilities. Calls use the existing
+local task authentication pattern; the task token never crosses machines.
+Pairing mutations are allowed only from locally user-started turns, with
+server-side checks; a turn started by another agent cannot change peer trust.
+Agents use these operations rather than editing `auth.json` or invoking the
+device-pairing CLI. Keys and permanent peer credentials stay with `mobd`.
+
+Reuse the Mob question/approval UI, but bind the approval record to the pairing
+ID, both server IDs and public keys, endpoint and exact local sharing scope.
+The daemon validates and consumes that approval before granting access; an
+agent's claim that "the user approved" is not a grant. An existing recorded
+approval for that exact proposal is reused on retries. A change of peer, key
+or scope requires a new approval. Ordinary reconnects require none.
+
+The current generic `request_approval` response alone does not provide that
+binding. Implementation must add it to the daemon and client approval path,
+without the mention-based approval exemption used for ordinary agent messages.
+These API checks do not sandbox a local agent running as the same OS user;
+the existing local trust model still applies.
+
+### Completion and recovery
+
+Pairing work is asynchronous and belongs to the daemon. A tool returns a
+pending ID; the agent can end its turn while the user or peer responds. The
+existing blocking ask tool must not hold a runner slot for the handshake.
+Pairing approvals belong to that pending record and its expiry, not to the
+originating task's questions, which expire when the turn ends. Reuse the
+approval presentation, not the current task-bound lifetime.
+
+Both daemons save the same pairing identity and negotiated scope, plus their
+own local grant. Collaboration is enabled only after both approvals and key
+proofs have been verified. A lost response or restart resumes the same pending
+record; one-sided completion is shown as pending, never as a working link.
+Expiry or rejection leaves no collaboration grant. Before activation, recheck
+that each shared session exists, is unarchived and remains authorized.
+
+The agent checks the saved network configuration automatically. Direct
+request/result POSTs require working paths in both directions; pairing alone
+does not make two private networks reachable. If those paths are unavailable,
+report the missing route and propose tunnel/relay setup through the same chat.
+Opening ports, changing firewall rules or creating network accounts is a
+separate approved action, not a hidden side effect of pairing. Endpoints come
+from the user-provided invitation or an existing verified configuration, with
+certificate checks and no credential-bearing redirects.
+
+Revocation is also available through Mob: it disables the local grant
+immediately, even while the peer is offline. Re-pairing or an auth reset must
+not silently restore an old grant. Every admission and queued delivery checks
+the current grant; stopping already running work remains a separate action.
 
 ## Authorization model
 
@@ -196,8 +326,9 @@ the source user's behalf, and peer text never satisfies a local approval gate.
 
 For a future multi-user network, node pairing and user membership are separate
 permissions. A user may be allowed to discover an agent without being allowed
-to send work to it. The first implementation can use an administrator-managed
-allowlist per peer; team and per-user ACLs belong in the relay phase.
+to send work to it. The first implementation uses a user-approved allowlist per
+peer, configured by the local agent through the pairing flow; team and per-user
+ACLs belong in the relay phase.
 
 ## Message envelope
 
@@ -307,10 +438,18 @@ These routes must not be added to the paired-client API or the local
 `/internal/tasks` surface. They accept only peer credentials and enforce a
 small body limit, per-peer queue limit, replay protection and rate limit.
 
-For the first network implementation, the source node can make outbound HTTPS
-requests to a paired endpoint. Existing Tailscale/VPN/HTTPS deployment handles
-NAT and encryption. A persistent stream is not required for correctness; it is
-an optimization after request/result delivery works through ordinary POSTs.
+Bootstrapping has a separate, bounded `/federation/v1/pair` surface: it accepts
+an unexpired invitation and subsequent proof from the bound candidate, not an
+already established peer credential. It exposes only the pending handshake,
+never the agent directory or message delivery. No open invitation means no
+new pairing. Local pairing MCP calls use dedicated task-authenticated handlers
+with the approval checks above; the remote pairing handler cannot call them.
+
+For the first network implementation, both nodes make outbound HTTPS requests
+to their peer's verified endpoint. Existing tunnel or VPN configuration must
+supply reachability; HTTPS supplies transport encryption. A persistent stream
+is not required for correctness; it is an optimization after request/result
+delivery works through ordinary POSTs.
 
 The later relay implements the same `CollaborationTransport` contract. It
 routes by `ServerID`, stores envelopes long enough for reconnect, and cannot
@@ -355,8 +494,9 @@ federated requests.
 ## Directory and sharing
 
 Remote agents should not become globally visible just because two nodes are
-paired. A node publishes only sessions that a local user has marked shareable,
-and the published card contains the minimum picker data:
+paired. A node publishes only sessions included in the local user's approved
+sharing scope, configured by the agent during pairing or a later approved
+update. The published card contains the minimum picker data:
 
 ```go
 type AgentCard struct {
@@ -378,17 +518,29 @@ deleted or moved handle never retargets an old request.
    outbox/inbox records and a loopback transport. Exercise duplicate delivery,
    restart recovery, ordering, expiry and user-first scheduling without opening
    a network port.
-2. **Two-node direct transport.** Add explicit peer pairing, signed HTTPS
-   envelopes, an allowlisted agent directory, request/result/clarification
-   delivery and integration tests with two `httptest` servers. Validate a
-   one-slot A → B → A exchange while either node is offline and then restarted.
-3. **Client support.** Let a user choose a remote agent, show its node name and
-   connection state, and display pending/failed delivery separately from a
-   runner failure. Keep local mentions and existing clients compatible.
+2. **Agent-configured pairing and direct transport.** Add the local pairing
+   MCP tools, task authentication and typed approval binding, pending pairing
+   storage/recovery, invitation cards and approval/status UI in the apps.
+   Support invitation forwarding when a client already connects to both offices.
+   Add the separate federation handshake, signed HTTPS envelopes, a scoped
+   directory and request/result/clarification delivery. CLI-only pairing is not
+   a completed first release. Validate with two `httptest` servers and then a
+   real one-slot A → B → A exchange, including offline/restart recovery.
+3. **Collaboration client support.** Let a user choose a remote agent, show its
+   node name and connection state, and display pending/failed delivery
+   separately from a runner failure. Keep local mentions and existing clients
+   compatible; clients without pairing approval support cannot approve it.
 4. **Relay and teams.** Add a relay transport, per-user membership and ACLs,
    encrypted payloads, audit events and quotas. Group collaboration, agent
    discovery across an organization and shared file/workspace coordination
    belong here, not in the direct two-node protocol.
+
+Pairing acceptance checks: complete the flow entirely through Mob chat and
+approval cards; reject expired invitations, reuse by another candidate and peer-started management
+calls; refuse an approval for different keys or scopes; resume after a lost
+handshake response or daemon restart without duplicate grants; handle rejection
+on either side without enabling collaboration; block unshared agents; show a
+missing network path clearly; revoke locally while the peer is offline.
 
 ## Explicit non-goals
 
