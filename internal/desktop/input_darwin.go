@@ -131,18 +131,24 @@ func mobPostAccess() bool { return C.mob_post_access() != 0 }
 // postAccess is swapped in tests to simulate a missing Accessibility grant.
 var postAccess = mobPostAccess
 
+func screenAccess() bool { return C.mob_screen_access() != 0 }
+
+// requestPostAccess and requestScreenAccess show the Accessibility and Screen Recording prompts.
+func requestPostAccess()   { C.mob_request_post_access() }
+func requestScreenAccess() { C.mob_request_screen_access() }
+
 // Permissions reports the TCC grants of this process (inherited by `mobd mcp`).
 func (macOS) Permissions() (Permissions, error) {
-	return Permissions{Accessibility: postAccess(), ScreenRecording: C.mob_screen_access() != 0}, nil
+	return Permissions{Accessibility: postAccess(), ScreenRecording: screenAccess()}, nil
 }
 
 // RequestPermissions asks macOS to show any missing TCC prompts.
 func (macOS) RequestPermissions() {
 	if !postAccess() {
-		C.mob_request_post_access()
+		requestPostAccess()
 	}
-	if C.mob_screen_access() == 0 {
-		C.mob_request_screen_access()
+	if !screenAccess() {
+		requestScreenAccess()
 	}
 }
 

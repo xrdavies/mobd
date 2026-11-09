@@ -84,10 +84,17 @@ type Desktops interface {
 	SeedDesktop(id string) error
 }
 
-// Deps are what the management routes act on; Desktops may be nil (tests).
+// Grants are the OS permissions of the running server, asked for by `mobd permissions`.
+type Grants interface {
+	Grants(ctx context.Context) []desktop.Grant
+	RequestGrant(name string) error
+}
+
+// Deps are what the management routes act on; Desktops and Grants may be nil (tests).
 type Deps struct {
 	Pairing  *pairing.Store
 	Desktops Desktops
+	Grants   Grants
 	// Listen is mobd's HTTP listen address, so `mobd link` and `mobd remote` know the port.
 	Listen string
 }
@@ -106,6 +113,9 @@ func Handler(deps Deps) http.Handler {
 	mux := http.NewServeMux()
 	if deps.Desktops != nil {
 		desktopRoutes(mux, deps.Desktops)
+	}
+	if deps.Grants != nil {
+		grantRoutes(mux, deps.Grants)
 	}
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		reply(w, 200, map[string]any{"ok": true, "service": "mobd", "listen": deps.Listen})
@@ -240,6 +250,30 @@ func desktopRoutes(mux *http.ServeMux, d Desktops) {
 	})
 	mux.HandleFunc("GET /doctor", func(w http.ResponseWriter, r *http.Request) {
 		reply(w, 200, map[string]any{"checks": d.DesktopDoctor(r.Context())})
+	})
+}
+
+// GrantList is GET /permissions on the control socket; empty where the OS has nothing to grant.
+type GrantList struct {
+	Permissions []desktop.Grant `json:"permissions"`
+}
+
+func grantRoutes(mux *http.ServeMux, g Grants) {
+	mux.HandleFunc("GET /permissions", func(w http.ResponseWriter, r *http.Request) {
+		list := g.Grants(r.Context())
+		if list == nil {
+			list = []desktop.Grant{}
+		}
+		reply(w, 200, GrantList{Permissions: list})
+	})
+	// Requests come from the server, so macOS records the grant for the process running mobd
+	// (mobd itself under launchd), not for the terminal running the CLI.
+	mux.HandleFunc("POST /permissions/{name}", func(w http.ResponseWriter, r *http.Request) {
+		if err := g.RequestGrant(r.PathValue("name")); err != nil {
+			reply(w, 400, map[string]string{"error": err.Error()})
+			return
+		}
+		w.WriteHeader(204)
 	})
 }
 
