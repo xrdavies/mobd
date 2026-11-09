@@ -55,9 +55,11 @@ mobd serve                      # foreground; Ctrl-C to stop
 
 Install and authenticate the agent CLI you plan to use (Codex, Claude Code or Pi).
 Pi is opt-in: add `"pi"` to `runners`; see [Pi setup and tests](docs/runners.md#pi).
-On macOS, mobd requests Accessibility and Screen Recording when it starts if
-they are missing; approve the system prompts for the app that launches mobd.
-You can also grant them in System Settings → Privacy & Security. The live desktop is
+On macOS, `mobd start` in a terminal walks through the permissions mobd and its agents need,
+one prompt at a time: Accessibility, Screen & System Audio Recording, the Desktop, Documents
+and Downloads folders (or Full Disk Access) and Local Network. Approve them then: the mob apps
+cannot answer a prompt later. `mobd permissions` asks for missing ones again, and `/health`
+reports them. The live desktop is
 streamed by mobd itself (H.264 over WebRTC); Screen Sharing is not needed. For direct LAN/VPN access,
 configure `listen` for that interface; loopback is enough behind Tailscale Serve,
 a gateway or an SSH tunnel. `mobd init` sets `listen` to `0.0.0.0:8080` (all IPv4 interfaces).
