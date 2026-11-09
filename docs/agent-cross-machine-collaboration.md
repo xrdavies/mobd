@@ -186,6 +186,7 @@ sequenceDiagram
     U->>AB: Pair using this invitation; select local agent
     AB->>DB: join_peer_pairing(invitation, local scope)
     DB->>DA: Redeem invitation; exchange identity and key proofs
+    DA->>DA: Atomically consume invitation and save pending pairing
     DA-->>U: Confirm B identity and A's sharing scope
     DB-->>U: Confirm A identity and B's sharing scope
     U->>DA: Approve from Mob
@@ -215,12 +216,35 @@ team directory is not required for this first flow.
 The invitation contains a pairing ID, A's `serverId`, public-key fingerprint,
 HTTPS endpoint, expiry and a high-entropy single-use secret. A stores only the
 secret hash. Reuse the existing device-pairing lifetime (10 minutes) and
-invitation pattern, with separate federation records and endpoints. Redemption
-reserves the invitation for one B identity/key; retries by that same proven
-identity recover the same pending pairing, while another identity is refused.
+invitation pattern, with separate federation records and endpoints.
 The invitation permits only this handshake, not collaboration or general API
 access. Secret redemption uses a request body, never a URL query or logs; the
 client handles the invitation secret as a fragment, like device pairing.
+
+**Invitation validity is a fixed deadline plus one successful redemption:**
+
+- The issuing daemon sets `expiresAt` when creating the invitation and checks
+  its own time on redemption. At `now >= expiresAt`, the link is invalid even
+  if unused. Opening it, retrying or restarting a daemon never extends it.
+  The invitation card shows the deadline; enforcement is server-side.
+- The first valid redemption atomically consumes the invitation and creates
+  one pending pairing bound to B's identity/key. Concurrent attempts can
+  produce only one successful redemption. Consumed links are rejected for
+  everyone, including the same B; consumption survives a daemon restart.
+- Opening or previewing a link does not consume it. Only the validated
+  redemption POST does. Invalid requests do not consume it, and a failed
+  durable commit must not report successful redemption.
+- Expired or consumed links cannot be reactivated. If pairing is rejected or
+  abandoned after redemption, the agent must prepare a new invitation rather
+  than reuse the old one. Invalid links return a clear expired/used result
+  without creating or changing peer access.
+
+Recovery uses the pending pairing ID and proof of the already bound B key,
+**not another use of the invitation secret**. B saves its pairing ID and key
+before redemption so a lost response can be recovered this way. An ID alone
+grants no access. The pending handshake and approvals retain the invitation's
+original deadline; they cannot activate a pairing after it expires. Expiry
+does not disconnect an already completed pairing, which has its own grant.
 
 A display name is not enough to find or authenticate a machine. If no
 invitation or previously verified reference is available, the agent asks for
@@ -269,7 +293,9 @@ approval presentation, not the current task-bound lifetime.
 Both daemons save the same pairing identity and negotiated scope, plus their
 own local grant. Collaboration is enabled only after both approvals and key
 proofs have been verified. A lost response or restart resumes the same pending
-record; one-sided completion is shown as pending, never as a working link.
+record through bound-key authentication before its original deadline; the
+invitation link remains consumed. One-sided completion is shown as pending,
+never as a working link.
 Expiry or rejection leaves no collaboration grant. Before activation, recheck
 that each shared session exists, is unarchived and remains authorized.
 
@@ -438,12 +464,14 @@ These routes must not be added to the paired-client API or the local
 `/internal/tasks` surface. They accept only peer credentials and enforce a
 small body limit, per-peer queue limit, replay protection and rate limit.
 
-Bootstrapping has a separate, bounded `/federation/v1/pair` surface: it accepts
-an unexpired invitation and subsequent proof from the bound candidate, not an
-already established peer credential. It exposes only the pending handshake,
-never the agent directory or message delivery. No open invitation means no
-new pairing. Local pairing MCP calls use dedicated task-authenticated handlers
-with the approval checks above; the remote pairing handler cannot call them.
+Bootstrapping has a separate, bounded `/federation/v1/pair` surface. Redemption
+accepts only an unused, unexpired invitation and consumes it atomically.
+Subsequent handshake/status operations authenticate the bound candidate's key
+against the pending record; they never redeem the invitation again. This
+surface exposes only the pending handshake, never the agent directory or
+message delivery. No open invitation means no new pairing. Local pairing MCP
+calls use dedicated task-authenticated handlers with the approval checks above;
+the remote pairing handler cannot call them.
 
 For the first network implementation, both nodes make outbound HTTPS requests
 to their peer's verified endpoint. Existing tunnel or VPN configuration must
@@ -536,11 +564,15 @@ deleted or moved handle never retargets an old request.
    belong here, not in the direct two-node protocol.
 
 Pairing acceptance checks: complete the flow entirely through Mob chat and
-approval cards; reject expired invitations, reuse by another candidate and peer-started management
-calls; refuse an approval for different keys or scopes; resume after a lost
-handshake response or daemon restart without duplicate grants; handle rejection
-on either side without enabling collaboration; block unshared agents; show a
-missing network path clearly; revoke locally while the peer is offline.
+approval cards; reject redemption at/after expiry and all reuse (including by
+the same candidate); allow only one successful concurrent redemption; preserve
+consumption and the deadline across restarts; leave invitations unused after
+link previews or invalid requests; report no success on persistence failure;
+recover a lost response using bound-key authentication without reusing the
+link or extending its deadline; reject late approvals and peer-started
+management calls; refuse an approval for different keys or scopes; handle
+rejection on either side without enabling collaboration; block unshared agents;
+show a missing network path clearly; revoke locally while the peer is offline.
 
 ## Explicit non-goals
 
