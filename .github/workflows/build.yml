@@ -14,9 +14,34 @@ on:
         description: Linux amd64 and arm64 (tarball and .deb)
         type: boolean
         default: true
+      windows:
+        description: Windows amd64 (portable ZIP; foreground server only)
+        type: boolean
+        default: true
 permissions:
   contents: read
 jobs:
+  windows:
+    if: inputs.windows
+    runs-on: windows-2022
+    env:
+      CGO_ENABLED: '0'
+      GOOS: windows
+      GOARCH: amd64
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: Build, smoke test and package
+        shell: pwsh
+        run: ./packaging/windows/build.ps1 -Version "0.0.0-test.$($env:GITHUB_SHA.Substring(0, 7))" -OutputDir out
+      - uses: actions/upload-artifact@v7
+        with:
+          name: mobd-test-windows-amd64
+          path: out/*.zip
+          if-no-files-found: error
+          retention-days: 14
   macos:
     if: inputs.macos
     runs-on: macos-15

@@ -1,10 +1,10 @@
-# Windows (plan, not started)
+# Windows (portable builds and implementation plan)
 
-> **Status:** planned, waiting for a Windows test machine ([Prerequisites](#prerequisites)).
-> The portable groundwork is done and `GOOS=windows go build ./...` succeeds (checked in CI), but
-> nothing Windows-specific beyond that is implemented: there is no service manager, desktop
-> backend, installer or release. Items marked *(to verify)* are OS behaviour not yet confirmed on
-> a real machine. The Linux plan is separate: [Linux](linux.md).
+> **Status:** a Windows test machine is now available. From v0.5.1, Actions packages a portable
+> x64 ZIP, checks its extracted binary's version, and publishes it when `RELEASE_WINDOWS=true`.
+> Run `mobd.exe serve` in the foreground; there is still no Windows service manager, desktop
+> backend or installer. These packages enable manual testing, not full Windows desktop support.
+> Items marked *(to verify)* still need real-machine validation. The Linux plan is separate: [Linux](linux.md).
 
 Windows keeps the macOS shape: a per-user mobd inside the logged-in user's interactive session,
 driving that **single real desktop**, shared by all tasks and serialized by the FIFO desktop queue
@@ -26,11 +26,13 @@ do not change, so Mob Desktop and Mob Mobile need no Windows-specific work.
 | Desktop backend (screenshots, input, live view) | ❌ `unsupported`; `/screen` and `/stream` answer 501 | `internal/desktop/backend_other.go` |
 | Agent launch through `.cmd` shims | ❓ untested | `internal/runner/*` |
 | `mobd remote` (Tailscale, Cloudflare) | ❌ macOS/Linux commands (`sudo`, Homebrew, apt) | `cmd/mobd/remote.go` |
-| Installer, release, tests on Windows | ❌ none; CI only builds | |
+| Portable ZIP and release | ✅ Windows Actions build, version/help and ZIP smoke checks; no installer or Authenticode signing | `packaging/windows/`, `.github/workflows/{build,release}.yml` |
+| Full tests and real Windows validation | ❌ pending; cross-platform CI still builds/vets Windows | |
 
 ## Stages
 
-Work starts when a Windows machine is available. Each stage is released on its own.
+A Windows machine is available; the portable package is ready for testing. The remaining stages
+below are not implemented by the packaging work. Each stage is released on its own.
 
 ### Stage 1: mobd without the desktop (about 1–1.5 weeks)
 

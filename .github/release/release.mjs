@@ -31,6 +31,8 @@ export function prepareDistribution(assets, output, options) {
   // Linux, every architecture: tarballs for install.sh, Debian packages for apt.
   const linux = { 'linux-x86_64': 'amd64', 'linux-aarch64': 'arm64' };
   const names = [`${stem}.tar.gz`, ...Object.values(linux).flatMap(arch => [`mobd_${v}_linux_${arch}.tar.gz`, `mobd_${v}_${arch}.deb`])];
+  const windows = `mobd_${v}_windows_amd64.zip`;
+  if (options.windows) names.push(windows);
   const put = (key, data) => {
     mkdirSync(dirname(join(output, key)), { recursive: true });
     writeFileSync(join(output, key), data);
@@ -48,6 +50,7 @@ export function prepareDistribution(assets, output, options) {
   for (const [key, arch] of Object.entries(linux)) {
     platforms[key] = { ...asset(`mobd_${v}_linux_${arch}.tar.gz`), deb: asset(`mobd_${v}_${arch}.deb`) };
   }
+  if (options.windows) platforms['windows-x86_64'] = asset(windows);
   const download = payload;
   const manifest = {
     version: v, notes: options.notes || `mobd ${v}`, pub_date: options.date,
@@ -168,7 +171,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     const output = join(process.env.RUNNER_TEMP, 'r2-distribution');
     if (existsSync(output)) throw Error('Distribution directory must be fresh');
     const base = baseURL(process.env.DOWNLOAD_BASE_URL);
-    const manifests = prepareDistribution(path, output, { version: v, base, team: process.env.APPLE_TEAM_ID, notes: metadata.body, date: metadata.publishedAt });
+    const manifests = prepareDistribution(path, output, { version: v, base, team: process.env.APPLE_TEAM_ID, notes: metadata.body, date: metadata.publishedAt, windows: process.env.RELEASE_WINDOWS === 'true' });
     // Keep remote reads outside the immutable artifact tree.
     const remote = r2Remote(process.env.RUNNER_TEMP, base);
     if (command === 'publish-installer') await publishInstaller(output, manifests.mobd, remote);

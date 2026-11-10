@@ -160,8 +160,36 @@ jobs:
           name: mobd-release-linux-${{ matrix.arch }}
           path: release-assets/*
           if-no-files-found: error
+  windows:
+    needs: prepare
+    if: vars.RELEASE_WINDOWS == 'true'
+    runs-on: windows-2022
+    env:
+      CGO_ENABLED: '0'
+      GOOS: windows
+      GOARCH: amd64
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.prepare.outputs.commit }}
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: Vet
+        run: go vet ./...
+      - name: Build, smoke test and package
+        shell: pwsh
+        env:
+          RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
+        run: ./packaging/windows/build.ps1 -Version $env:RELEASE_VERSION -OutputDir release-assets
+      - uses: actions/upload-artifact@v7
+        with:
+          name: mobd-release-windows-amd64
+          path: release-assets/*.zip
+          if-no-files-found: error
   release:
-    needs: [prepare, mobd, linux]
+    needs: [prepare, mobd, linux, windows]
+    if: ${{ !cancelled() && !failure() }}
     runs-on: ubuntu-24.04
     environment: release
     permissions:

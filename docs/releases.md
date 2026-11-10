@@ -275,6 +275,18 @@ Codex/Claude 的安装和登录、辅助功能和屏幕录制权限是办公室�
 
 ## 发布验收清单
 
+### Windows x64（从 v0.5.1 起）
+
+将仓库级 Actions Variable `RELEASE_WINDOWS` 设为 `true`，让 release 和 R2 发布均包含
+`mobd_<版本>_windows_amd64.zip`，清单键为 `windows-x86_64`。Windows job 在
+`windows-2022` 上编译、vet，并检查打包后解压的程序版本；ZIP 包含 `mobd.exe`、LICENSE
+和 Windows 专用 README。手动 Test builds 也提供 Windows 选项。
+
+这是未做 Authenticode 签名的便携包，目前使用 `mobd.exe serve` 前台运行；没有 Windows
+服务管理、截图、输入或 Live View，也没有 `install.ps1`。完整支持状态见 [Windows](windows.md)。
+开启该变量后，发布器要求 Windows ZIP 存在；不要用它重新发布不含 Windows 的旧版本，
+已有版本的清单和产物保持不可变。
+
 每次发布核对：
 
 - [ ] mobd 仓库 `release` 环境已配置 8 个 Secrets 和 3 个 Variables。

@@ -64,6 +64,20 @@ test('a release fails when any Linux file is missing', t => {
   }
 });
 
+test('Windows publication requires its ZIP and includes its checksum in the manifest', t => {
+  const windows = 'mobd_1.2.3_windows_amd64.zip';
+  const { assets, output } = assetsDir(t, ['mobd_1.2.3_darwin_arm64.tar.gz', ...LINUX_ASSETS]);
+  assert.throws(() => prepareDistribution(assets, output, { ...options, windows: true }), /ENOENT/);
+  writeFileSync(join(assets, windows), 'Windows ZIP fixture');
+  const { mobd } = prepareDistribution(assets, output, { ...options, windows: true });
+  const digest = sha256(readFileSync(join(assets, windows)));
+  assert.deepEqual(mobd.platforms['windows-x86_64'], {
+    url: `https://download.example.com/mobd/v1.2.3/${windows}`, sha256: digest,
+  });
+  assert.equal(sha256(readFileSync(join(output, 'mobd/v1.2.3', windows))), digest);
+  assert.ok(readFileSync(join(output, 'mobd/v1.2.3/SHA256SUMS'), 'utf8').includes(`${digest}  ${windows}\n`));
+});
+
 function remote(events, overrides = {}) {
   return {
     async readJSON() { return null; }, async digest() { return null; },
