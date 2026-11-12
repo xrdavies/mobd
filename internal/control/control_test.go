@@ -37,12 +37,17 @@ func TestPrivateManagementLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer auth.Close()
-	srv := &http.Server{Handler: Handler(Deps{Pairing: auth})}
+	srv := &http.Server{Handler: Handler(Deps{Pairing: auth, Version: "1.2.3", Executable: "/opt/mobd",
+		LoginStartup: func() bool { return true }})}
 	go srv.Serve(ln)
 	defer srv.Close()
 	var health map[string]any
 	if err := Call(path, "GET", "/health", nil, &health); err != nil || health["service"] != "mobd" {
 		t.Fatalf("health: %v %v", health, err)
+	}
+	if health["serverId"] != auth.ServerID() || auth.ServerID() == "" || health["version"] != "1.2.3" ||
+		health["executable"] != "/opt/mobd" || health["loginStartup"] != true {
+		t.Fatalf("health identity: %v", health)
 	}
 	var invite pairing.Invitation
 	if err := Call(path, "POST", "/invitations", map[string]string{"url": "https://office.example"}, &invite); err != nil {

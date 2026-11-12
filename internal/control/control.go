@@ -97,6 +97,12 @@ type Deps struct {
 	Grants   Grants
 	// Listen is mobd's HTTP listen address, so `mobd link` and `mobd remote` know the port.
 	Listen string
+	// Version and Executable describe the running binary, so Mob Desktop can tell which mobd it
+	// manages and whether it needs an upgrade (docs/mob-desktop-local-mobd.md).
+	Version, Executable string
+	// LoginStartup reports whether the background service starts at login; nil where the system
+	// has no service management (Windows).
+	LoginStartup func() bool
 }
 
 // DesktopList is GET /desktops on the control socket.
@@ -118,7 +124,12 @@ func Handler(deps Deps) http.Handler {
 		grantRoutes(mux, deps.Grants)
 	}
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
-		reply(w, 200, map[string]any{"ok": true, "service": "mobd", "listen": deps.Listen})
+		body := map[string]any{"ok": true, "service": "mobd", "listen": deps.Listen,
+			"serverId": store.ServerID(), "version": deps.Version, "executable": deps.Executable}
+		if deps.LoginStartup != nil {
+			body["loginStartup"] = deps.LoginStartup()
+		}
+		reply(w, 200, body)
 	})
 	mux.HandleFunc("POST /probes", func(w http.ResponseWriter, r *http.Request) {
 		reply(w, 201, map[string]string{"code": store.NewProbe()})

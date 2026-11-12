@@ -278,6 +278,7 @@ SSE with monotonic `id`s from a 1024-entry in-memory ring. `Last-Event-ID` / `?a
 | `desktop` | desktop Info (below) on every state or viewer change; `reason: "oomKill"` when the kernel ended one of its apps |
 | `memory`, `disk` | `{level: ok\|low\|critical, …}` when the level changes |
 | `settings` | same as `GET /settings`, after the machine settings change |
+| `screenUse` | `{source: "agent"\|"control", sessionId?, taskId?, clientId?, active, since}` when an agent's desktop tools or a live view client's input start acting on a desktop, and with `active: false` 15 s after the last action; `/health` lists those in progress as `screenUse` (feature `screenUse`) |
 | `reset` | `{}` |
 
 Per-task timelines stay on `/tasks/{id}/events`, including `question` events for

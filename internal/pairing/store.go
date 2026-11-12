@@ -400,6 +400,13 @@ func (s *Store) begin(parent context.Context, found record, method, path string)
 	}, nil
 }
 
+// ServerID identifies this mobd to its clients; it changes only with Reset.
+func (s *Store) ServerID() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.state.ServerID
+}
+
 func (s *Store) Clients() []Client {
 	s.mu.Lock()
 	defer s.mu.Unlock()

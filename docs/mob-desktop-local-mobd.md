@@ -131,6 +131,16 @@ Not in scope:
 - **Reason:** macOS has the service, installer, signing and permission APIs this needs. Linux has the service and
   installer; only live view dependencies differ. Windows lacks a service manager and screen features in mobd.
 
+### D9. The live view UDP port keeps listening on all interfaces
+
+- **Options:** (a) bind the WebRTC UDP port to the `listen` address; (b) keep it on all interfaces.
+- **Choice:** (b). Proposed in the first design, rejected during implementation.
+- **Reason:** the HTTP address and the media path are independent. Behind Tailscale Serve, `listen` is
+  `127.0.0.1:8080` while video still reaches the tailnet address over UDP
+  ([connection setup](connection-setup.md)), and the relay's TURN traffic leaves from the same socket. Binding it to
+  `listen` would push those setups to the WebSocket fallback or break relayed video. With D4, Desktop installs
+  listen on all interfaces anyway.
+
 ## Part 3: Design
 
 Desktop is a graphical installer and manager for the standard mobd. Each computer has one mobd, identical to a
@@ -218,9 +228,19 @@ are hidden (D5); Files can open the shared folder directly.
 
 ### 5. Screen use indicator
 
-mobd sends events when an agent's screen tools (`screenshot`, `click`, `type_text`, `key`, `open_app` …) start and
-finish, and when a phone takes or releases control. Desktop shows the indicator for this computer while any is
-active, naming the conversation.
+mobd publishes a `screenUse` event on `/events` when someone starts acting on a desktop and again when they stop;
+`/health` lists the uses in progress (`screenUse`) for a client that connects mid-way. The feature is advertised as
+`screenUse`.
+
+- **Agent:** every desktop tool call (`screenshot`, `click`, `type_text`, `key`, `list_windows`, `open_app`) goes
+  through mobd (`/internal/tasks/{id}/desktop/{op}`) on every platform, so mobd sees it directly.
+  `{source: "agent", sessionId, taskId}`.
+- **Control:** each pointer, key, text or scroll message from a live view client; view-only watching does not count.
+  `{source: "control", sessionId, clientId}`.
+- **End:** 15 s after the last action (agents pause between tool calls while they think, so a shorter wait would
+  make the indicator flicker). Event: the same object with `active: false`.
+
+Desktop shows the indicator for this computer while any use is active, naming the conversation.
 
 - **macOS:** the tools act on the user's real screen, so the indicator is important.
 - **Linux:** agents and live view use per-conversation virtual desktops, not the user's screen, so the indicator is
@@ -230,7 +250,7 @@ active, naming the conversation.
 
 | Area | Capabilities | Implementation |
 | --- | --- | --- |
-| Service | Status, version, start, stop, restart, logs, login startup | `mobd start/stop/restart/logs`; status from the control socket (mobd changes) |
+| Service | Status, version, start, stop, restart, logs, login startup | `mobd start/stop/restart/logs`; status from the control socket `GET /health` |
 | Agents | Detected CLI paths, availability, enabled runners | `/health` runners and checks; paths into `config.json`, then restart |
 | Defaults | Default agent, model, reasoning effort, permission options | Existing `GET/PUT /settings` |
 | Working directory | View and change `workdir` / `claudeWorkdir` | `config.json` + restart |
@@ -263,11 +283,10 @@ and the indicator would not apply. Until then, Desktop on Windows shows remote m
 
 **mobd**
 
-- Control socket `GET /health` adds `serverId`, `version`, the executable path and login startup state (or
-  `mobd status --json`), so Desktop can recognise an installed instance, match machines and show service status.
-- Events when agent screen tools start and finish and when a phone takes or releases control (`/events`, with the
-  session ID).
-- Bind the live view UDP port to the same address as `listen` instead of all interfaces.
+- Control socket `GET /health` adds `serverId`, `version`, `executable` and `loginStartup` (absent where the system
+  has no service management), so Desktop can recognise an installed instance, match machines and show service
+  status.
+- `screenUse` events and `/health` field (section 5).
 - Keep the terminal walkthrough in `mobd permissions`; Desktop uses the same capability through the control socket.
 
 **mob (Desktop)**

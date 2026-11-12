@@ -54,7 +54,15 @@ func (f *fakeInput) snapshot() ([]string, bool) {
 }
 
 func TestDataChannelsDriveInputAndReportCursor(t *testing.T) {
-	h := newHarness(t)
+	var inputMu sync.Mutex
+	var reported []string
+	h := harnessWith(t, func(c *Config) {
+		c.OnInput = func(sessionID, clientID string) {
+			inputMu.Lock()
+			reported = append(reported, sessionID+"/"+clientID)
+			inputMu.Unlock()
+		}
+	})
 	se := webrtc.SettingEngine{}
 	se.SetIncludeLoopbackCandidate(true)
 	se.SetNetworkTypes([]webrtc.NetworkType{webrtc.NetworkTypeUDP4})
@@ -81,7 +89,7 @@ func TestDataChannelsDriveInputAndReportCursor(t *testing.T) {
 	gathered := webrtc.GatheringCompletePromise(pc)
 	_ = pc.SetLocalDescription(offer)
 	<-gathered
-	a, err := h.m.Open("desk", Request{Offer: pc.LocalDescription().SDP})
+	a, err := h.m.Open("desk", Request{Offer: pc.LocalDescription().SDP, SessionID: "conv"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -121,6 +129,17 @@ func TestDataChannelsDriveInputAndReportCursor(t *testing.T) {
 		t.Fatalf("events %s", got)
 	}
 	waitFor(t, "keyframe request", func() bool { return h.last().keyframes.Load() > before })
+	// Every input message counts as control, including rejected ones; keyframe and junk do not.
+	inputMu.Lock()
+	got := len(reported)
+	first := ""
+	if got > 0 {
+		first = reported[0]
+	}
+	inputMu.Unlock()
+	if got != 9 || first != "conv/desk" {
+		t.Fatalf("OnInput: %d calls, first %q", got, first)
+	}
 	waitFor(t, "error reports", func() bool {
 		mu.Lock()
 		defer mu.Unlock()

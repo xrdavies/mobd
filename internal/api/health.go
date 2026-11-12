@@ -18,7 +18,7 @@ import (
 // APIVersion is advertised on /health; clients gate features on it.
 const APIVersion = 3
 
-var baseFeatures = []string{"queue", "activities", "sessionAdmin", "events", "screen", "uploads", "taskOptions", "runners", "questions", "steer", "pairing", "stream", "streamResize", "settings", "fileTransfers", "fileFolders", "sessionHistory", "agentCollaboration", "usbRedirection"}
+var baseFeatures = []string{"queue", "activities", "sessionAdmin", "events", "screen", "uploads", "taskOptions", "runners", "questions", "steer", "pairing", "stream", "streamResize", "settings", "fileTransfers", "fileFolders", "sessionHistory", "agentCollaboration", "usbRedirection", "screenUse"}
 
 // features adds what this server's desktops can do: sessionDesktops where each conversation
 // has its own desktop (Linux).
@@ -119,6 +119,8 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		"checks":         checks,
 		"agents":         s.agentStatuses(r.Context()),
 		"streamSessions": s.streams.Count(),
+		// Agents' desktop tools and live view control in progress (screenUse events on /events).
+		"screenUse": s.screen.list(),
 		// Whether USB devices can be imported now: usbRedirection says only that the API exists.
 		"usb": s.usb.Readiness(),
 	}

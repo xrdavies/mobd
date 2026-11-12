@@ -99,6 +99,9 @@ type Config struct {
 	Attach func(parent context.Context, clientID string) (context.Context, func(), error)
 	// NewInput gives a session control of the desktop; nil makes sessions view-only.
 	NewInput func() Input
+	// OnInput, when set, is told about each input message a client sends (pointer, keys, text,
+	// scroll): who is controlling which conversation's desktop.
+	OnInput func(sessionID, clientID string)
 	// Loopback adds 127.0.0.1 candidates; only for tests on one machine.
 	Loopback bool
 	// UDP, when set, carries every session's media (tests use it to impair the link).
@@ -194,7 +197,7 @@ func (m *Manager) Open(clientID string, req Request) (Answer, error) {
 	if old != nil {
 		old.close()
 	}
-	s := &session{m: m, id: randomID(), client: clientID, finish: finish, source: source,
+	s := &session{m: m, id: randomID(), client: clientID, conversation: req.SessionID, finish: finish, source: source,
 		display: [2]int{int(float64(disp.Width) * scale), int(float64(disp.Height) * scale)}, profile: p}
 	s.ctx, s.cancel = context.WithCancel(ctx)
 	s.rate = newRateController(p, w, h, time.Now())
@@ -253,6 +256,7 @@ func (m *Manager) Shutdown() {
 type session struct {
 	m              *Manager
 	id, client     string
+	conversation   string // the request's SessionID, reported to OnInput
 	ctx            context.Context
 	cancel         context.CancelFunc
 	finish         func()

@@ -64,6 +64,7 @@ func (s *Server) handleInternalDesktop(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusNotFound, err.Error())
 		return
 	}
+	s.screen.touch(ScreenUse{Source: "agent", SessionID: t.SessionID, TaskID: t.ID})
 	ctx, cancel := context.WithTimeout(r.Context(), desktopCallTimeout)
 	defer cancel()
 	// The turn keeps its desktop awake; Ensure only waits if it is still starting.

@@ -85,6 +85,12 @@ func (c *controller) handle(data []byte) {
 		c.report("json", errors.New("invalid JSON message"))
 		return
 	}
+	switch m.T {
+	case "move", "button", "key", "text", "scroll":
+		if on := c.s.m.cfg.OnInput; on != nil {
+			on(c.s.conversation, c.s.client)
+		}
+	}
 	var err error
 	switch m.T {
 	case "move":

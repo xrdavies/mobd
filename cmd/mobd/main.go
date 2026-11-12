@@ -310,7 +310,8 @@ func serve(cfg config.Config) error {
 	defer httpSrv.Close()
 
 	adminSrv := &http.Server{Handler: control.Handler(control.Deps{Pairing: auth, Desktops: srv,
-		Grants: serverGrants{list: desktop.Grants, probe: probePermissions}, Listen: cfg.ListenAddr}),
+		Grants: serverGrants{list: desktop.Grants, probe: probePermissions}, Listen: cfg.ListenAddr,
+		Version: version, Executable: executablePath(), LoginStartup: loginStartup()}),
 		// Closing every desktop (stop, uninstall) can take a while.
 		ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 5 * time.Minute}
 	defer adminSrv.Close()
@@ -340,4 +341,25 @@ func serve(cfg config.Config) error {
 	}
 	log.Printf("mobd stopped")
 	return nil
+}
+
+// executablePath is this binary's resolved path ("" if unknown), reported on the control socket.
+func executablePath() string {
+	exe, err := os.Executable()
+	if err != nil {
+		return ""
+	}
+	if resolved, err := filepath.EvalSymlinks(exe); err == nil {
+		return resolved
+	}
+	return exe
+}
+
+// loginStartup reports the background service's login startup, or nil without service management.
+func loginStartup() func() bool {
+	manager, err := service.New()
+	if err != nil {
+		return nil
+	}
+	return manager.LoginEnabled
 }

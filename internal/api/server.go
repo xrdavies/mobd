@@ -36,6 +36,7 @@ type Server struct {
 	supported []runner.Runner
 
 	hub       *hub
+	screen    *screenUses
 	artifacts *artifact.Store
 	health    healthCache
 	files     *fileService
@@ -92,6 +93,7 @@ func New(cfg config.Config, store *task.Store, auth *pairing.Store, desktops des
 		reservations: make(map[string]desktop.Reservation), starting: make(map[string]bool),
 	}
 	s.files = newFileService(filesDir(cfg))
+	s.screen = newScreenUses(screenIdle, func(u ScreenUse) { s.hub.publish("screenUse", u) })
 	// settings.json is created on the first start and gets an entry for each newly enabled agent.
 	var enabled []string
 	for _, r := range runners {
@@ -128,6 +130,9 @@ func New(cfg config.Config, store *task.Store, auth *pairing.Store, desktops des
 		KeepAwakeAfter: 30 * time.Second,
 		Attach: func(parent context.Context, client string) (context.Context, func(), error) {
 			return auth.Attach(parent, client, http.MethodPost, "/stream")
+		},
+		OnInput: func(sessionID, clientID string) {
+			s.screen.touch(ScreenUse{Source: "control", SessionID: sessionID, ClientID: clientID})
 		},
 		UDP: cfg.StreamUDP,
 		ICE: relayICE(cfg),
@@ -765,6 +770,7 @@ func (s *Server) Close() {
 	s.mu.Unlock()
 	s.streams.Shutdown()
 	s.usb.Close()
+	s.screen.close()
 	s.runs.Wait()
 }
 
