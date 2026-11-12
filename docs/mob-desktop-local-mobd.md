@@ -1,152 +1,179 @@
-# Mob Desktop 本机 mobd 方案
+# Mob Desktop local mobd
 
-状态：设计已确定，2026-11-12；尚未实现。
+Status: design settled 2026-11-12; not implemented yet.
 
-## 问题与目标
+## Problem and goal
 
-Mob Desktop 目前只能连接远端机器。多数用户不只想操作远端电脑，也想让 Agent 在自己面前的这台电脑上工作；
-现在这需要在终端安装 mobd，再用 Desktop 手动配对本机。
+Mob Desktop can only connect to remote machines today. Most users want agents to work not only on a remote
+computer but also on the one in front of them; today that means installing mobd in a terminal and then
+pairing Desktop with its own computer by hand.
 
-**目标：安装 Mob Desktop 后，本机就有一个可用的 mobd。**
+**Goal: after installing Mob Desktop, this computer has a working mobd.**
 
-- Desktop 默认打开“本机”，直接与本机 Agent 对话、管理本机 mobd。
-- 同一个 mobd 也服务手机和其他电脑上的 Desktop：配对后从任何地方使用这台电脑。
-- 用户坐在本机前，本机 Desktop 不显示本机的实时桌面和控制；配对的手机和其他 Desktop 照常可用。
-- 远端机器仍按现有方式添加，一个 Desktop 同时使用本机和多台远端机器。
+- Desktop opens on "This computer" by default: chat with local agents and manage the local mobd directly.
+- The same mobd also serves phones and Desktops on other computers: once paired, they use this computer from anywhere.
+- The user is sitting at this computer, so the local Desktop does not show live view or control for it; paired
+  phones and other Desktops keep both.
+- Remote machines are added as today; one Desktop works with this computer and several remote machines.
 
-## 方案
+## Solution
 
-**Desktop 是标准 mobd 的图形安装和管理界面，不内置、不另建 mobd。**
-每台电脑只有一个 mobd，与终端安装的完全相同：`~/.local/bin/mobd`、`~/.mobd`、
-标签 `com.xrdavies.mobd` 的 LaunchAgent（Linux 为 systemd 用户服务）。
+**Desktop is a graphical installer and manager for the standard mobd; it neither bundles nor creates its own mobd.**
+Each computer has one mobd, identical to a terminal install: `~/.local/bin/mobd`, `~/.mobd`, and the LaunchAgent
+labelled `com.xrdavies.mobd` (a systemd user service on Linux).
 
 ```mermaid
 flowchart TB
-    subgraph LOCAL[本机]
-        DESK[Mob Desktop] -->|控制 socket：安装后配对、权限、状态| D[mobd 后台服务]
-        DESK -->|HTTP API，本机凭据| D
+    subgraph LOCAL[This computer]
+        DESK[Mob Desktop] -->|control socket: post-install pairing, permissions, status| D[mobd background service]
+        DESK -->|HTTP API, local credential| D
         D --> AGENT[Codex / Claude Code / Pi]
     end
-    PHONE[手机 Mob] -->|配对后 HTTP + 实时桌面| D
-    OTHER[其他电脑的 Mob Desktop] -->|配对后 HTTP + 实时桌面| D
-    DESK -->|现有配对| REMOTE[远端 mobd]
+    PHONE[Mob on phone] -->|after pairing: HTTP + live view| D
+    OTHER[Mob Desktop on another computer] -->|after pairing: HTTP + live view| D
+    DESK -->|existing pairing| REMOTE[Remote mobd]
 ```
 
-### 1. 安装
+### 1. Install
 
-Desktop 先找本机 mobd：控制 socket（`~/.mobd/run/control.sock`）有响应，或存在 `~/.local/bin/mobd`，或 PATH 中有 `mobd`。
+Desktop first looks for a local mobd: the control socket (`~/.mobd/run/control.sock`) answers, or
+`~/.local/bin/mobd` exists, or `mobd` is on PATH.
 
-- **已安装**：直接使用，不改其配置、监听地址或登录自启。
-- **未安装**：显示“设置本机”，由 Desktop 原生层（Rust）执行与 `install.sh` 相同的步骤，然后
-  `mobd init`、`mobd start --login`。
+- **Installed**: use it as is; do not change its configuration, listen address or login startup.
+- **Not installed**: show "Set up this computer". Desktop's native layer (Rust) performs the same steps as
+  `install.sh`, then runs `mobd init` and `mobd start --login`.
 
-Desktop 用 Rust 重复安装步骤，而不是运行 `curl | sh` 或内置脚本：不依赖 shell 输出，进度和错误可结构化展示，
-脚本内容也不会在 Desktop 不知情时变化。步骤与 [`.github/release/install.sh`](../.github/release/install.sh) 一致：
+Desktop repeats the install steps in Rust rather than running `curl | sh` or a bundled script: it does not depend
+on shell output, progress and errors can be shown as structured results, and the script cannot change without
+Desktop knowing. The steps match [`.github/release/install.sh`](../.github/release/install.sh):
 
-1. 拒绝 root；检查平台（macOS 13+ Apple Silicon；Linux x86_64 / arm64）。
-2. mobd 正在运行则停止安装（安装只用于首次安装和升级，见第 6 节）。
-3. 下载 `<下载源>/mobd/latest.json` 取版本，再下载 `v<版本>/release.json`，核对版本，取本平台 `sha256`。
-4. 下载 `mobd_<版本>_<平台>.tar.gz`，校验 SHA-256；归档只能含普通文件 `LICENSE`、`README.md`、`mobd`。
-5. macOS：`codesign --verify --strict` 校验与脚本相同的签名要求（标识 `com.xrdavies.mobd`、固定 Team ID、
-   Developer ID）。下载源和 Team ID 在 Desktop 构建时固定，与发布脚本使用同一值。
-6. `mobd --version` 必须等于目标版本；先写入 `~/.local/bin` 内的临时文件，再原子替换为 `mobd`。
+1. Refuse root; check the platform (macOS 13+ on Apple Silicon; Linux x86_64 / arm64).
+2. If mobd is running, stop the installation (installing is only for first installs and upgrades; see section 6).
+3. Download `<download base>/mobd/latest.json` for the version, then `v<version>/release.json`; check the version
+   and take this platform's `sha256`.
+4. Download `mobd_<version>_<platform>.tar.gz` and verify its SHA-256; the archive may contain only the regular
+   files `LICENSE`, `README.md` and `mobd`.
+5. macOS: `codesign --verify --strict` against the same requirement as the script (identifier `com.xrdavies.mobd`,
+   fixed Team ID, Developer ID). The download base and Team ID are fixed when Desktop is built, using the same
+   values as the release script.
+6. `mobd --version` must equal the target version; write to a temporary file inside `~/.local/bin` first, then
+   atomically rename it to `mobd`.
 
-`latest.json` / `release.json` 的格式是 `install.sh` 与 Desktop 共同的约定；mob 仓库增加测试，
-用真实清单格式检查 Desktop 的解析，避免两个安装器分别演变。
+The format of `latest.json` / `release.json` is the shared contract between `install.sh` and Desktop. The mob
+repository adds a test that checks Desktop's parsing against the real manifest format, so the two installers
+cannot drift apart.
 
-**环境**：从访达启动的 Desktop 的 PATH 只有系统目录，找不到 Homebrew、npm 或 `~/.local/bin` 中的 CLI。
-Desktop 以登录 shell 读取一次 PATH（`$SHELL -lc`，带超时），用它运行 `mobd init` 和 `mobd start`；
-mobd 的 `start` 会把 CLI 解析为绝对路径并写入服务定义。设置页显示找到的路径，可手动修改。
+**Environment**: Desktop launched from Finder has a PATH of system directories only and cannot find CLIs installed
+with Homebrew, npm or in `~/.local/bin`. Desktop reads the PATH once from the login shell (`$SHELL -lc`, with a
+timeout) and uses it to run `mobd init` and `mobd start`; mobd's `start` resolves the CLIs to absolute paths and
+writes them into the service definition. The settings page shows the paths found and allows editing them.
 
-**默认配置**：沿用 `mobd init` 的官方默认值，包括 `listen: 0.0.0.0:8080`，使 Desktop 安装与终端安装行为一致，
-配对手机无需再改配置。所有请求仍需配对凭据。工作目录建议默认 `~/Mob`（实现时确认），
-因为 Desktop 进程的当前目录不是有意义的工作目录。
+**Default configuration**: keep the official `mobd init` defaults, including `listen: 0.0.0.0:8080`, so a Desktop
+install behaves like a terminal install and pairing a phone needs no further configuration. Every request still
+needs a pairing credential. The working directory should default to `~/Mob` (to be confirmed during
+implementation), because the Desktop process's current directory is not a meaningful working directory.
 
-### 2. Desktop 连接本机
+### 2. Desktop connects to this computer
 
-Desktop 通过控制 socket 创建邀请（`POST /invitations`，地址 `http://127.0.0.1:<端口>`），
-用现有 `POST /pair` 兑换，凭据存入系统安全存储。用户看不到邀请码；localhost 不免认证。
+Desktop creates an invitation through the control socket (`POST /invitations`, address
+`http://127.0.0.1:<port>`), redeems it with the existing `POST /pair`, and stores the credential in the system's
+secure storage. The user never sees the invitation; localhost is not exempt from authentication.
 
-- 邀请和凭据不写入日志、命令行参数或前端持久化存储。
-- 401 或凭据被撤销时显示“重新连接本机”，由用户点击后再创建邀请；不自动反复配对。
-- 本机用 `serverId` 识别。若列表中已有同一 `serverId` 的机器（以前通过局域网地址配对），合并为“本机”，不重复显示。
+- Invitations and credentials are never written to logs, command-line arguments or frontend persistent storage.
+- On 401 or a revoked credential, show "Reconnect this computer"; a new invitation is created only after the user
+  clicks it. No automatic repeated pairing.
+- This computer is identified by `serverId`. If the list already has a machine with the same `serverId` (paired
+  earlier by its LAN address), merge it into "This computer" instead of listing it twice.
 
-### 3. 本机工作
+### 3. Working on this computer
 
-“本机”在机器列表第一项，首次启动默认选中，之后恢复上次选择。对话、任务、审批、Agent 协作、设置与远端相同。
+"This computer" is first in the machine list, selected on first launch; later launches restore the last selection.
+Chats, tasks, approvals, agent collaboration and settings work the same as for remote machines.
 
-本机隐藏实时桌面、控制和 USB 重定向；文件入口可直接打开共享目录。判断依据是“这台机器是本机”，
-而非 `/health` 的 features，因为同一 mobd 对手机仍提供这些功能。
+This computer hides live view, control and USB redirection; the Files entry can open the shared folder directly.
+This is decided by "this machine is the local one", not by the `/health` features, because the same mobd still
+offers those features to phones.
 
-### 4. 配对其他设备
+### 4. Pairing other devices
 
-“配对设备”显示二维码和链接，与 `mobd link` 相同（控制 socket 的 `POST /invitations`，地址取 `mobd remote` 或局域网地址）。
-手机和其他 Desktop 配对后拥有完整功能，包括实时桌面和控制。设置页列出已配对设备，可撤销（`/clients`）。
+"Pair a device" shows the QR code and link, the same as `mobd link` (control socket `POST /invitations`, with the
+address from `mobd remote` or the LAN address). Once paired, phones and other Desktops have the full feature set,
+including live view and control. The settings page lists paired devices and can revoke them (`/clients`).
 
-### 5. Agent 使用屏幕与提示
+### 5. Agents using the screen, and the indicator
 
-本机 Agent 的屏幕工具（`screenshot`、`click`、`type_text`、`key`、`open_app` 等）与远端一样默认开启，
-手机和 Agent 在每台机器上行为一致。
+Local agents' screen tools (`screenshot`, `click`, `type_text`, `key`, `open_app` and so on) are on by default, as
+on remote machines, so phones and agents behave the same on every machine.
 
-用户可能正在使用这台电脑，所以 **Agent 使用屏幕时 Desktop 显示提示**（如标题栏或菜单栏图标“Agent 正在使用屏幕”，
-指明哪个对话），避免鼠标突然移动令人意外。提示需要 mobd 在屏幕工具执行时发出事件（见“mobd 改动”）。
-手机正在控制本机时也显示同样的提示。
+The user may be using this computer, so **Desktop shows an indicator while an agent uses the screen** (for example
+a title bar or menu bar icon, "Agent is using the screen", naming the conversation), so the mouse moving on its own
+is not a surprise. The indicator needs mobd to send events while screen tools run (see "mobd changes"). The same
+indicator shows while a phone is controlling this computer.
 
-### 6. 管理与升级
+### 6. Management and upgrades
 
-本机设置页：
+Local settings page:
 
-| 区域 | 能力 | 实现 |
+| Area | Capabilities | Implementation |
 | --- | --- | --- |
-| 服务 | 状态、版本、启动、停止、重启、日志、登录自启 | `mobd start/stop/restart/logs`，状态见“mobd 改动” |
-| Agent | 检测到的 CLI 路径、可用状态、启用的 runner | `/health` 的 runners 与 checks；路径写入 `config.json` 后重启 |
-| 默认设置 | 默认 Agent、模型、推理强度、权限选项 | 现有 `GET/PUT /settings` |
-| 工作目录 | 查看、修改 `workdir` / `claudeWorkdir` | `config.json` + 重启 |
-| 系统权限（macOS） | 辅助功能、屏幕录制等的状态和请求 | 控制 socket `GET /permissions`、`POST /permissions/{name}`；屏幕录制授权后需重启 mobd |
-| 设备 | 已配对设备、撤销、配对新设备 | 控制 socket `/clients`、`/invitations` |
+| Service | Status, version, start, stop, restart, logs, login startup | `mobd start/stop/restart/logs`; status per "mobd changes" |
+| Agents | Detected CLI paths, availability, enabled runners | `/health` runners and checks; paths written to `config.json`, then restart |
+| Defaults | Default agent, model, reasoning effort, permission options | Existing `GET/PUT /settings` |
+| Working directory | View and change `workdir` / `claudeWorkdir` | `config.json` + restart |
+| System permissions (macOS) | Status of and requests for Accessibility, Screen Recording and others | Control socket `GET /permissions`, `POST /permissions/{name}`; Screen Recording needs a mobd restart after granting |
+| Devices | Paired devices, revoke, pair a new device | Control socket `/clients`, `/invitations` |
 
-修改 `config.json` 时保留无关字段；需要重启才生效的变更标明，重启前说明受影响的运行中任务。
-退出 Desktop 不停止 mobd，手机仍可使用这台电脑。
+Edits to `config.json` keep unrelated fields; changes that need a restart are marked, and before restarting Desktop
+explains which running tasks are affected. Quitting Desktop does not stop mobd, so phones can still use this
+computer.
 
-**升级**：Desktop 查询 `latest.json`，有新版本时提示。无运行中任务时按官方步骤：`mobd stop` → 第 1 节安装步骤 →
-`mobd start`（原来开启登录自启则加 `--login`）。配置、对话和附件保留。
-macOS 二进制路径和签名标识不变，系统权限在升级后保留。Desktop 与 mobd 独立发布，以 `/health` 的 `apiVersion`
-和 features 判断兼容；mobd 版本过低时提示升级。
+**Upgrades**: Desktop checks `latest.json` and offers new versions. When no tasks are running it follows the
+official steps: `mobd stop` → the install steps in section 1 → `mobd start` (with `--login` if login startup was
+on). Configuration, conversations and attachments are kept. The macOS binary path and signing identifier do not
+change, so system permissions survive the upgrade. Desktop and mobd are released independently; compatibility is
+decided by `apiVersion` and features on `/health`, and Desktop asks for an upgrade when mobd is too old.
 
-## 平台
+## Platforms
 
-1. **macOS（Apple Silicon，13+）**：第一版。
-2. **Linux**：安装步骤相同，Agent 可直接使用；手机实时桌面需要 `.deb` 带来的 Xvfb、GStreamer 等，
-   安装需要 sudo，Desktop 显示 `apt install` 命令而不代为执行。Linux 的实时桌面是每个对话的虚拟桌面，不是用户屏幕。
-3. **Windows**：等 mobd 有安装器和服务管理后再做。
+1. **macOS (Apple Silicon, 13+)**: first version.
+2. **Linux**: the same install steps; agents work directly. Live view from a phone needs Xvfb, GStreamer and the
+   other packages the `.deb` brings, which need sudo, so Desktop shows the `apt install` command instead of running
+   it. Linux live view shows each conversation's virtual desktop, not the user's screen.
+3. **Windows**: after mobd has an installer and service management.
 
-## 各仓库改动
+## Changes by repository
 
 **mobd**
 
-- 控制 socket `GET /health` 增加 `serverId`、`version`、可执行文件路径和登录自启状态；
-  或增加 `mobd status --json`。Desktop 据此判断已安装的实例、匹配机器、显示服务状态。
-- Agent 屏幕工具开始和结束时发出事件（`/events`，含会话 ID），供 Desktop 显示提示；手机控制本机时同样发出。
-- 实时桌面的 UDP 端口绑定到与 `listen` 相同的地址，而不是所有接口。
-- `mobd permissions` 的终端引导保留；Desktop 使用控制 socket 的同一能力。
+- Control socket `GET /health` adds `serverId`, `version`, the executable path and login startup state; or add
+  `mobd status --json`. Desktop uses them to recognise an installed instance, match machines and show service
+  status.
+- Agent screen tools send events when they start and finish (`/events`, with the session ID) for Desktop's
+  indicator; the same when a phone controls this computer.
+- Bind the live view UDP port to the same address as `listen` instead of all interfaces.
+- Keep the terminal walkthrough in `mobd permissions`; Desktop uses the same capability through the control socket.
 
-**mob（Desktop）**
+**mob (Desktop)**
 
-- Rust 安装器（第 1 节）与清单格式测试；登录 shell PATH 读取。
-- 首次启动“设置本机”流程，本机自动配对，“本机”机器项与 `serverId` 合并。
-- 本机隐藏实时桌面、控制和 USB；屏幕使用提示。
-- 本机设置页：服务、Agent、默认设置、工作目录、权限、设备；“配对设备”二维码。
-- mobd 升级提示与升级流程。
+- Rust installer (section 1) and the manifest format test; reading the login shell PATH.
+- First-launch "Set up this computer" flow, automatic local pairing, the "This computer" entry merged by `serverId`.
+- Hide live view, control and USB for this computer; the screen-use indicator.
+- Local settings page: service, agents, defaults, working directory, permissions, devices; "Pair a device" QR code.
+- mobd upgrade prompt and upgrade flow.
 
-## 验收
+## Acceptance
 
-1. 未安装 mobd 的 Mac：打开 Desktop，完成“设置本机”后不打开终端即可与本机 Agent 对话。
-2. 已安装 mobd（终端安装）：Desktop 直接使用，不改配置、不重复安装、不出现两个本机。
-3. 安装器拒绝校验和不符、签名不符、归档内容异常和版本不符的下载；mobd 运行中不替换二进制。
-4. 从访达启动时也能找到 Homebrew / npm 安装的 Agent CLI。
-5. 本机不显示实时桌面、控制和 USB；配对的手机可查看和控制本机。
-6. Agent 或手机操作本机屏幕时，Desktop 显示提示。
-7. 退出 Desktop 后手机仍可使用本机；重启电脑后（登录自启）同样可用。
-8. 升级后配置、对话、配对设备和 macOS 系统权限保留；有运行中任务时不升级。
-9. 本机凭据被撤销后显示“重新连接本机”，不自动重新配对。
-10. 远端机器的添加和使用不受影响。
+1. A Mac without mobd: open Desktop, finish "Set up this computer", and chat with a local agent without opening a
+   terminal.
+2. mobd already installed (from a terminal): Desktop uses it directly, without changing its configuration,
+   reinstalling, or showing this computer twice.
+3. The installer rejects downloads with a wrong checksum, wrong signature, unexpected archive contents or wrong
+   version; it never replaces the binary while mobd is running.
+4. Agent CLIs installed with Homebrew / npm are found even when Desktop is launched from Finder.
+5. This computer shows no live view, control or USB; a paired phone can view and control it.
+6. Desktop shows the indicator while an agent or a phone operates this computer's screen.
+7. After quitting Desktop, the phone can still use this computer; likewise after a reboot (login startup).
+8. After an upgrade, configuration, conversations, paired devices and macOS system permissions are kept; no upgrade
+   while tasks are running.
+9. After the local credential is revoked, Desktop shows "Reconnect this computer" and does not re-pair on its own.
+10. Adding and using remote machines is unaffected.
