@@ -166,6 +166,7 @@ Invitation redemption and preview are documented in [pairing](pairing.md).
 | Method | Path | Notes |
 | --- | --- | --- |
 | GET | `/health`, `/healthz` | `apiVersion: 3`, `features`, `checks`, `runners` (each with `models`, `efforts`, `defaultModel`, `defaultEffort`, `permissions`), `maxRunning` |
+| DELETE | `/pair` | This device removes its own pairing (as `mobd clients delete`); 204, then its credential stops working. Feature `unpair` |
 | GET | `/sessions` | `?archived=false` (default) \| `true` \| `all`. Sorted pinned first, then `updatedAt` descending |
 | GET | `/sessions/{id}` | `{session, tasks, activities, questions}` |
 | PATCH | `/sessions/{id}` | Body `{title?, pinned?, archived?, model?, effort?}` → updated session. `model`/`effort` set the conversation's settings (`""` = the agent's default from settings.json); effort must be one of its runner's |

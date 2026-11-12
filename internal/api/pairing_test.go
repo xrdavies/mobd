@@ -17,6 +17,7 @@ import (
 	"github.com/xrdavies/mobd/internal/config"
 	"github.com/xrdavies/mobd/internal/pairing"
 	"github.com/xrdavies/mobd/internal/runner"
+	"github.com/xrdavies/mobd/internal/runner/codex"
 	"github.com/xrdavies/mobd/internal/task"
 )
 
@@ -262,5 +263,37 @@ func TestProbeAnswersOnlyALiveCode(t *testing.T) {
 		if rr.Code != want {
 			t.Fatalf("%s: %d, want %d", path, rr.Code, want)
 		}
+	}
+}
+
+func TestDeviceRemovesItsOwnPairing(t *testing.T) {
+	cfg := config.Config{}
+	s := newTestServer(t, cfg, task.NewStore(), codex.New(cfg))
+	mine, other := pairedClient(t, s), pairedClient(t, s)
+	call := func(method, path, token string) int {
+		req := httptest.NewRequest(method, path, nil)
+		if token != "" {
+			req.Header.Set("Authorization", "Bearer "+token)
+		}
+		rr := httptest.NewRecorder()
+		s.Handler().ServeHTTP(rr, req)
+		return rr.Code
+	}
+	if code := call(http.MethodDelete, "/pair", ""); code != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated unpair: %d", code)
+	}
+	if code := call(http.MethodDelete, "/pair", mine.Token); code != http.StatusNoContent {
+		t.Fatalf("unpair: %d", code)
+	}
+	for _, c := range s.pairing.Clients() {
+		if c.ID == mine.ClientID {
+			t.Fatal("the device is still listed")
+		}
+	}
+	if code := call(http.MethodGet, "/sessions", mine.Token); code != http.StatusUnauthorized {
+		t.Fatalf("removed credential still works: %d", code)
+	}
+	if code := call(http.MethodGet, "/sessions", other.Token); code != http.StatusOK {
+		t.Fatalf("another device lost access: %d", code)
 	}
 }

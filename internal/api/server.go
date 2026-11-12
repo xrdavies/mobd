@@ -229,6 +229,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /usb/sessions/{id}/tunnel", s.handleUSBTunnel)
 	mux.HandleFunc("POST /tasks/{id}/questions/{qid}/answer", s.handleAnswer)
 	mux.HandleFunc("POST /tasks/{id}/steer", s.handleSteer)
+	mux.HandleFunc("DELETE /pair", s.handleUnpair)
 	public := http.NewServeMux()
 	public.HandleFunc("POST /pair", s.handlePair)
 	public.HandleFunc("GET /pair", s.handlePairInfo)

@@ -19,6 +19,25 @@ import (
 // is refused before its body is read.
 const pairingClosed = "pairing is off: no invitation is open. Run mobd link on the office computer to create one."
 
+// handleUnpair is DELETE /pair: the calling device removes its own pairing, so a Mob app the user
+// removes the machine from leaves the device list instead of keeping a working credential there.
+func (s *Server) handleUnpair(w http.ResponseWriter, r *http.Request) {
+	id := pairing.ClientID(r.Context())
+	if id == "" {
+		writeErr(w, http.StatusBadRequest, "this credential is not a paired device")
+		return
+	}
+	switch err := s.pairing.Revoke(id, true); {
+	case errors.Is(err, pairing.ErrNotFound):
+		writeErr(w, http.StatusNotFound, err.Error())
+	case err != nil:
+		writeErr(w, http.StatusInternalServerError, err.Error())
+	default:
+		log.Printf("pairing: device %s removed its own pairing", id)
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
 // pairingOff answers /pair when no invitation is open, reporting whether it did.
 func (s *Server) pairingOff(w http.ResponseWriter, r *http.Request) bool {
 	w.Header().Set("Cache-Control", "no-store")
