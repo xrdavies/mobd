@@ -314,7 +314,7 @@ CORS covers API responses and SSE, plus `OPTIONS` preflight for `GET`/`POST`/`PA
 
 ## Documentation
 
-- [Mob Desktop local mobd proposal](docs/mob-desktop-local-mobd.md): enable the local machine by default, manage local mobd from Desktop, and add remote machines as needed.
+- [Mob Desktop local mobd](docs/mob-desktop-local-mobd.md): Desktop installs the standard mobd with the official steps, works with this computer by default, and pairs phones and other Desktops with it.
 - [Agent concepts](docs/agent-concepts.md), [collaboration design](docs/agent-collaboration.md) and [cross-machine collaboration](docs/agent-cross-machine-collaboration.md): shared terminology, the local request/reply flow and the first federation proposal.
 - [Releases and installation](docs/releases.md): signing, GitHub Actions, R2, install and upgrade.
 - [Architecture](docs/architecture.md), [API reference](docs/mobd-v3.md), [runners](docs/runners.md): server behavior and supported capabilities.
