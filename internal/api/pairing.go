@@ -8,6 +8,9 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"os"
+	"os/exec"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -89,8 +92,29 @@ func (s *Server) handlePair(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	log.Printf("pairing: paired device %q as client %s (%s)", strings.TrimSpace(req.Name), credential.ClientID, peer(r))
-	writeJSON(w, 201, credential)
+	// The computer's name goes only to a device holding the invite: GET /pair answers anyone who can
+	// reach mobd while an invitation is open, possibly over a public address.
+	writeJSON(w, 201, struct {
+		pairing.Credential
+		ComputerName string `json:"computerName,omitempty"`
+	}{credential, computerName()})
 }
+
+// computerName is the name people gave this computer (macOS: System Settings → General → About),
+// else its host name without .local; Mob apps name a newly paired machine with it.
+var computerName = sync.OnceValue(func() string {
+	if runtime.GOOS == "darwin" {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		if out, err := exec.CommandContext(ctx, "/usr/sbin/scutil", "--get", "ComputerName").Output(); err == nil {
+			if name := strings.TrimSpace(string(out)); name != "" {
+				return name
+			}
+		}
+	}
+	host, _ := os.Hostname()
+	return strings.TrimSuffix(host, ".local")
+})
 
 // peer describes where a request came from, for logs only (never for access decisions). Behind
 // a tunnel or proxy the connection is local, so the forwarded address is added when present.

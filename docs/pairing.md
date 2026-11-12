@@ -91,9 +91,13 @@ Content-Type: application/json
 {
   "serverId": "SERVER_ID",
   "clientId": "CLIENT_ID",
-  "token": "RANDOM_DEVICE_CREDENTIAL"
+  "token": "RANDOM_DEVICE_CREDENTIAL",
+  "computerName": "Office Mac"
 }
 ```
+
+`computerName` 是这台电脑的名称（macOS 为“关于本机”中的名称，其他系统为去掉 `.local` 的主机名），
+客户端可用它命名新配对的机器；旧版本 mobd 没有该字段。它只随兑换成功返回，不出现在任何人都能访问的 `GET /pair` 中。
 
 名称为去除两端空白后 1–128 字节的非空字符串，不允许控制字符。
 配对打开时，无效、过期或已经兑换的邀请返回 **401**；无效请求返回 **400**；存储失败返回 **503**，不签发凭据。

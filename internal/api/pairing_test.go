@@ -126,6 +126,17 @@ func TestPairPreviewRedemptionAndNoManagementOverTCP(t *testing.T) {
 	if rr.Code != 201 || rr.Header().Get("Cache-Control") != "no-store" {
 		t.Fatalf("%d %s", rr.Code, rr.Body.String())
 	}
+	var named struct {
+		ComputerName string `json:"computerName"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &named); err != nil || named.ComputerName == "" {
+		t.Fatalf("redeem gives no computer name: %s", rr.Body.String())
+	}
+	var preview = httptest.NewRecorder()
+	s.Handler().ServeHTTP(preview, httptest.NewRequest("GET", "/pair", nil))
+	if preview.Code == 200 && strings.Contains(preview.Body.String(), named.ComputerName) {
+		t.Fatal("the preview, open to anyone, names the computer")
+	}
 	var credential pairing.Credential
 	if err := json.Unmarshal(rr.Body.Bytes(), &credential); err != nil {
 		t.Fatal(err)
