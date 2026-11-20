@@ -12,7 +12,7 @@ This document has three parts: [the feature](#part-1-feature), [the decisions](#
 
 Changing how mobd runs (enabled agents, their programs, working folders) means logging in to that computer, editing
 `~/.mobd/config.json` and running `mobd restart`. Upgrading means stopping mobd, running the installer and starting
-it again. For an office computer used from a phone or another Desktop, that breaks the point of Mob. Mob Desktop
+it again; mobd has no upgrade command. For an office computer used from a phone or another Desktop, that breaks the point of Mob. Mob Desktop
 upgrades this computer's mobd itself (stop → install → start); if Desktop quits midway, mobd stays stopped.
 
 ### What the feature does

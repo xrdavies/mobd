@@ -315,7 +315,7 @@ CORS covers API responses and SSE, plus `OPTIONS` preflight for `GET`/`POST`/`PA
 ## Documentation
 
 - [Mob Desktop local mobd](docs/mob-desktop-local-mobd.md): Desktop installs the standard mobd with the official steps, works with this computer by default, and pairs phones and other Desktops with it.
-- [Remote maintenance](docs/remote-maintenance.md): change mobd's config, restart and upgrade it from the apps, with validation and fallback (planned).
+- [Remote maintenance](docs/remote-maintenance.md): change mobd's config, restart and upgrade it from the apps or with `mobd upgrade`, with validation and fallback (planned).
 - [Agent concepts](docs/agent-concepts.md), [collaboration design](docs/agent-collaboration.md) and [cross-machine collaboration](docs/agent-cross-machine-collaboration.md): shared terminology, the local request/reply flow and the first federation proposal.
 - [Releases and installation](docs/releases.md): signing, GitHub Actions, R2, install and upgrade.
 - [Architecture](docs/architecture.md), [API reference](docs/mobd-v3.md), [runners](docs/runners.md): server behavior and supported capabilities.
