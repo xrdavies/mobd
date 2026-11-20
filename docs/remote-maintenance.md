@@ -193,7 +193,9 @@ instructions in the README and `install.sh`'s output become `mobd upgrade`; `ins
 Implementation notes: on macOS the new binary must carry the installed one's Developer ID team (a development
 build without one refuses and points to `install.sh`); Linux checks SHA-256 only, like `install.sh`. Verified
 downloads are kept in `~/.mobd/upgrade/<version>/`; the replaced binary is kept as `mobd.previous` next to it.
-`MOBD_UPDATE_BASE` points mobd at another release server (HTTPS, or HTTP to localhost for tests).
+Releases come from the download base the release build sets (`DOWNLOAD_BASE_URL`, the same one `install.sh` is
+published with; `https://dl.mymob.dev` in local builds): `mobd/latest.json`, `mobd/v<version>/release.json` and
+the archive. `MOBD_UPDATE_BASE` points mobd at another release server (HTTPS, or HTTP to localhost for tests).
 
 ### Restarts not started from the apps
 

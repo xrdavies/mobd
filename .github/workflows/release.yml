@@ -61,12 +61,13 @@ jobs:
       - name: Test and build
         env:
           RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
+          DOWNLOAD_BASE_URL: ${{ vars.DOWNLOAD_BASE_URL || secrets.DOWNLOAD_BASE_URL }}
         run: |
           set -euo pipefail
           go vet ./...
           go test ./...
           mkdir -p dist/mobd release-assets
-          go build -trimpath -ldflags "-s -w -X main.version=$RELEASE_VERSION" -o dist/mobd/mobd ./cmd/mobd
+          go build -trimpath -ldflags "-s -w -X main.version=$RELEASE_VERSION -X main.downloadBase=$DOWNLOAD_BASE_URL" -o dist/mobd/mobd ./cmd/mobd
           test "$(dist/mobd/mobd --version)" = "mobd $RELEASE_VERSION"
           test "$(lipo -archs dist/mobd/mobd)" = arm64
           dist/mobd/mobd --help
@@ -147,11 +148,12 @@ jobs:
         env:
           RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
           ARCH: ${{ matrix.arch }}
+          DOWNLOAD_BASE_URL: ${{ vars.DOWNLOAD_BASE_URL || secrets.DOWNLOAD_BASE_URL }}
         run: |
           set -euo pipefail
           go vet ./...
           go test ./...
-          go build -trimpath -ldflags "-s -w -X main.version=$RELEASE_VERSION" -o dist/mobd ./cmd/mobd
+          go build -trimpath -ldflags "-s -w -X main.version=$RELEASE_VERSION -X main.downloadBase=$DOWNLOAD_BASE_URL" -o dist/mobd ./cmd/mobd
           test "$(dist/mobd --version)" = "mobd $RELEASE_VERSION"
           packaging/linux/build.sh "$RELEASE_VERSION" "$ARCH" dist/mobd release-assets
           dpkg-deb --info "release-assets/mobd_${RELEASE_VERSION}_${ARCH}.deb"

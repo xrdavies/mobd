@@ -64,9 +64,16 @@ func maintainCommand(args []string) error {
 	return maintenance.RunOperation(maintenance.Store{Dir: manager.Dir()}, *id, manager, saved, manager.LoginEnabled(), executablePath())
 }
 
+// downloadBase is where releases are published, set by the release build from the same
+// DOWNLOAD_BASE_URL install.sh is published with; empty in local builds (maintenance.DefaultBase).
+var downloadBase string
+
 // upgrader is this binary's upgrader; MOBD_UPDATE_BASE points it at another release server (tests).
 func upgrader(dir string) *maintenance.Upgrader {
 	base := os.Getenv("MOBD_UPDATE_BASE")
+	if base == "" {
+		base = downloadBase
+	}
 	if base == "" {
 		base = maintenance.DefaultBase
 	}
