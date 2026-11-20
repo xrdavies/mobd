@@ -34,6 +34,10 @@ func (s *Server) features() []string {
 		// The shared desktop's sound, where the backend captures it (macOS; docs/desktop-audio.md).
 		f = append(slices.Clone(f), "streamAudio")
 	}
+	// Remote config and restart (docs/remote-maintenance.md).
+	if s.maint != nil {
+		f = append(slices.Clone(f), "maintenance")
+	}
 	// The relay's STUN/TURN servers at GET /stream/ice (mob-relay docs/media-path.md).
 	if s.cfg.Relay != nil && s.cfg.Relay.TURN != nil {
 		f = append(slices.Clone(f), "streamIce")
@@ -128,6 +132,10 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		"screenUse": s.screen.list(),
 		// Whether USB devices can be imported now: usbRedirection says only that the API exists.
 		"usb": s.usb.Readiness(),
+	}
+	if s.maint != nil {
+		// The restart in progress, if any; null otherwise.
+		body["maintenance"] = s.maint.Store.Running()
 	}
 	if s.desktops.PerSession() {
 		// Memory and disk are cheap and change fast: read live, not from the cache.

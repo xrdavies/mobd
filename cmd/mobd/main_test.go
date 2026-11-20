@@ -34,7 +34,7 @@ func TestOccupiedPortDoesNotTouchState(t *testing.T) {
 	if err := os.WriteFile(path, original, 0600); err != nil {
 		t.Fatal(err)
 	}
-	if err := serve(config.Config{ListenAddr: listener.Addr().String(), StatePath: path}); err == nil {
+	if err := serve(config.Config{ListenAddr: listener.Addr().String(), StatePath: path}, ""); err == nil {
 		t.Fatal("occupied port accepted")
 	}
 	got, err := os.ReadFile(path)

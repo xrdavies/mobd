@@ -1,6 +1,7 @@
 # Remote maintenance: config, restart and upgrade from the apps
 
-Status: design 2026-11-20; not implemented. Issue: [#11](https://github.com/xrdavies/mobd/issues/11) (input, not
+Status: phase 1 (config API, controlled restart with fallback) implemented 2026-11-20 and tested on a macOS
+LaunchAgent; Linux systemd path not yet run on a real machine. Phase 2 (`mobd upgrade`) not implemented. Issue: [#11](https://github.com/xrdavies/mobd/issues/11) (input, not
 spec; see [Part 2](#part-2-decisions) for what we kept, changed and dropped).
 
 This document has three parts: [the feature](#part-1-feature), [the decisions](#part-2-decisions) and
@@ -147,8 +148,14 @@ macOS (LaunchAgent) and Linux (systemd user unit). Windows once it has service m
 | GET | `/maintenance/{id}` | `{id, action, state, step, version?, error?, startedAt, finishedAt?}` |
 | GET | `/maintenance/latest` | the same as `mobd upgrade --check --json`: current and latest version, notes, whether this install can upgrade itself and why not |
 
-`/health` adds `maintenance` (the running operation, if any); the running task count is already there for the apps
-to enable or disable Apply. Events: `maintenance` on `/events` at each step.
+`/health` adds `maintenance` (the running operation, if any). A `maintenance` event on `/events` announces an
+accepted operation; its result is read with `GET /maintenance/{id}` after reconnecting. "Tasks running" counts
+running and queued tasks (a queued one would start mid-restart); the apps enable Apply from `/queue`.
+
+`GET /config` in detail: `values` are the editable keys `config.json` sets; `effective` what the running service
+uses (programs resolved to full paths); `pendingRestart` whether a restart would change `effective`;
+`configError` when `config.json` would not load; `canRestart` false for a mobd run in a terminal. Besides the
+startup checks, a change must name existing working folders and found programs for the enabled agents. Events: `maintenance` on `/events` at each step.
 
 ### Operation steps
 
@@ -157,13 +164,17 @@ to enable or disable Apply. Events: `maintenance` on `/events` at each step.
 | `preparing` | Validate the candidate config | Download, verify, run `--version` on the new binary |
 | `checking` | Refuse if any task runs (`failed`, `tasks_running`); otherwise hold new tasks until the restart | Same; the verified download is kept for a retry |
 | `swapping` | Save the current config as last-good | Keep the current binary as `mobd.previous`; move the new one in |
-| `restarting` | Start the helper; exit non-zero so launchd (`KeepAlive`) / systemd (`Restart=on-failure`) starts mobd again | Same |
+| `restarting` | The helper stops the service and starts it again like `mobd start` (the service runs from `service.json`, which only `start` rewrites from `config.json` and the saved arguments) | Same |
 | `done` / `failed` / `rolled-back` | Recorded by the new mobd, or by the helper after a fallback | Same |
 
-The helper is `mobd maintain --operation ID`, started with `launchctl submit` (macOS) or `systemd-run --user`
-(Linux) so it is not killed with the service. It polls the control socket for health up to 60 s. On timeout it
-restores last-good (config or `mobd.previous`), restarts the service, waits again, and records the result. If the
-fallback also fails, the operation is `failed` with "needs attention on the computer" and the log path.
+The helper is `mobd maintain --operation ID`, started as a one-shot LaunchAgent (`launchctl bootstrap`, no
+KeepAlive) on macOS or a transient unit (`systemd-run --user`) on Linux, with the service's PATH and working
+directory, so it is not stopped with the service. `start` waits for the new mobd to answer on its control socket
+(15 s). If it does not, the helper keeps the refused `config.json` as `config.rejected.json`, restores
+`config.last-good.json` (saved after every successful start; before the first one, the previous `service.json`),
+and starts again. If that fails too, the operation is `failed` with "needs attention on the computer". An
+operation still `running` after 10 minutes (the helper died) is reported as `failed`. New tasks get **503**
+`maintenance` from the accepted request until the service stops (at most 2 minutes, if the helper never stops it).
 
 Kept across every operation: `serverId`, client credentials, conversations, files, login startup, service
 arguments. Interrupted tasks are never replayed.

@@ -20,6 +20,7 @@ import (
 	"github.com/xrdavies/mobd/internal/config"
 	"github.com/xrdavies/mobd/internal/control"
 	"github.com/xrdavies/mobd/internal/desktop"
+	"github.com/xrdavies/mobd/internal/maintenance"
 	"github.com/xrdavies/mobd/internal/mcpserver"
 	"github.com/xrdavies/mobd/internal/pairing"
 	"github.com/xrdavies/mobd/internal/runner"
@@ -54,6 +55,7 @@ const usage = `Usage: mobd <command> [options]
   usb        status | setup | remove: import USB devices shared from Mob Desktop (Linux; setup and
              remove need sudo)
   uninstall  Close every desktop, stop mobd and remove its service; keeps settings and data
+  maintain   (started by mobd) run a restart requested from the apps: --operation ID
   mcp        Run the built-in MCP server over stdio
   --version  Print version
   --help     Show help
@@ -108,6 +110,9 @@ func run(args []string) error {
 	}
 	if command == "uninstall" {
 		return uninstall(args)
+	}
+	if command == "maintain" {
+		return maintainCommand(args)
 	}
 	if command == "permissions" {
 		return permissionsCommand(args)
@@ -190,14 +195,25 @@ func run(args []string) error {
 		if err != nil {
 			return err
 		}
+		st := maintenance.Store{Dir: manager.Dir()}
 		if command == "restart" {
+			// Validates first and falls back to the last config that worked (docs/remote-maintenance.md).
 			login = login || manager.LoginEnabled()
-			if err := manager.Stop(); err != nil {
+			state, err := maintenance.Restart(st, manager, args, login, nil)
+			if state == maintenance.StateRolledBack {
+				fmt.Fprintf(os.Stderr, "%v\nmobd is running on the previous config; the refused one is in %s\n", err, st.Rejected())
 				return err
 			}
-		}
-		if err := manager.Start(cfg, args, login); err != nil {
-			return err
+			if err != nil {
+				return err
+			}
+		} else {
+			if err := manager.Start(cfg, args, login); err != nil {
+				return err
+			}
+			if err := st.SaveLastGood(path); err != nil {
+				log.Printf("saving the last good config: %v", err)
+			}
 		}
 		fmt.Printf("mobd started; listen=%s; health=%s/health\nconfig=%s; logs=%s\n", cfg.ListenAddr, service.LocalURL(cfg.ListenAddr), path, manager.LogPath())
 		afterStart(cfg.ControlSocket, func() error {
@@ -208,7 +224,7 @@ func run(args []string) error {
 		})
 		return nil
 	}
-	return serve(cfg)
+	return serve(cfg, path)
 }
 
 // stop stops the background service; desktops are kept unless closed with --close-desktops or
@@ -250,7 +266,7 @@ func streamPort(cfg config.Config) string {
 	return strconv.Itoa(cfg.StreamPort)
 }
 
-func serve(cfg config.Config) error {
+func serve(cfg config.Config, path string) error {
 	// Ask for missing macOS TCC grants before starting the remote API.
 	desktop.RequestPermissions()
 
@@ -299,6 +315,11 @@ func serve(cfg config.Config) error {
 		defer desktops.Shutdown()
 	}
 	srv := api.New(cfg, store, auth, desktops, runners...)
+	if m, err := maintenanceFor(path, os.Args[1:]); err != nil {
+		log.Printf("remote config and restart unavailable: %v", err)
+	} else {
+		srv.SetMaintenance(m)
+	}
 	srv.SetSupported(available[codex.Name], available[claude.Name], available[pi.Name])
 
 	httpSrv := &http.Server{

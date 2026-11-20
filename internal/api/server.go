@@ -65,8 +65,12 @@ type Server struct {
 	// starting marks dispatched turns whose desktop is still starting.
 	starting map[string]bool
 	closing  bool
-	runs     sync.WaitGroup
-	done     chan struct{}
+	// holding refuses new tasks during a restart from the apps (maintenance.go).
+	holding bool
+	// maint is remote config and restart; nil without it (tests, foreground serve sets it too).
+	maint *Maintenance
+	runs  sync.WaitGroup
+	done  chan struct{}
 }
 
 // New serves the given runners; cfg.DefaultRunner (or the first runner) starts
@@ -230,6 +234,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /tasks/{id}/questions/{qid}/answer", s.handleAnswer)
 	mux.HandleFunc("POST /tasks/{id}/steer", s.handleSteer)
 	mux.HandleFunc("DELETE /pair", s.handleUnpair)
+	mux.HandleFunc("GET /config", s.handleGetConfig)
+	mux.HandleFunc("PUT /config", s.handlePutConfig)
+	mux.HandleFunc("POST /maintenance", s.handleStartMaintenance)
+	mux.HandleFunc("GET /maintenance/{id}", s.handleGetMaintenance)
 	public := http.NewServeMux()
 	public.HandleFunc("POST /pair", s.handlePair)
 	public.HandleFunc("GET /pair", s.handlePairInfo)
@@ -302,6 +310,11 @@ func (s *Server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 	if s.closing {
 		s.mu.Unlock()
 		writeErr(w, http.StatusServiceUnavailable, "mobd is stopping")
+		return
+	}
+	if s.holding {
+		s.mu.Unlock()
+		writeErrCode(w, http.StatusServiceUnavailable, "maintenance", "mobd is restarting; try again in a moment")
 		return
 	}
 	if req.SessionID != "" {

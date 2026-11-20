@@ -1,6 +1,10 @@
 # Configuration reference
 
-Every mobd configuration setting, with its default value and environment variable.
+Every mobd configuration setting, with its default value and environment variable. Paired apps can change
+`runners`, the agents' programs and working folders, `claudeSettingSources`, `codexMode`, `maxRunning`,
+`questionTimeout` and `filesDir`, then restart mobd ([remote maintenance](remote-maintenance.md)); the rest is
+edited here. `mobd restart` checks the config first and goes back to the last one that worked if mobd does not
+start (`config.last-good.json`; the refused file is kept as `config.rejected.json`).
 
 
 | JSON key | Environment variable | Default | Meaning |
