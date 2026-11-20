@@ -88,6 +88,7 @@ static void mob_vt_output(void *refcon, void *frame_refcon, OSStatus status, VTE
 	dispatch_queue_t queue;
 	SCStream *stream;
 	SCStreamConfiguration *config;
+	SCContentFilter *filter;
 	VTCompressionSessionRef session;
 	MobSessionInfo *info;
 	CVPixelBufferRef last;
@@ -150,6 +151,34 @@ static void mob_vt_output(void *refcon, void *frame_refcon, OSStatus status, VTE
 	VTCompressionSessionEncodeFrame(session, pb, pts, kCMTimeInvalid, (CFDictionaryRef)props, NULL, NULL);
 }
 
+// ScreenCaptureKit delivers frames only when the screen changes, and a resize drops the last one:
+// capture one picture now, so the viewer gets the new size at once on an unchanged screen.
+- (void)captureNow {
+	if (@available(macOS 14.0, *)) {
+		SCStreamConfiguration *c = [[[SCStreamConfiguration alloc] init] autorelease];
+		c.width = width;
+		c.height = height;
+		c.pixelFormat = config.pixelFormat;
+		c.showsCursor = config.showsCursor;
+		int w = width, h = height;
+		[SCScreenshotManager captureSampleBufferWithFilter:filter configuration:c
+			completionHandler:^(CMSampleBufferRef sb, NSError *error) {
+				CVPixelBufferRef pb = (error || sb == NULL) ? NULL : CMSampleBufferGetImageBuffer(sb);
+				if (pb == NULL || (int)CVPixelBufferGetWidth(pb) != w || (int)CVPixelBufferGetHeight(pb) != h) return;
+				CVPixelBufferRetain(pb);
+				dispatch_async(queue, ^{
+					// A frame from the stream itself, or another resize, came first: it wins.
+					if (stopped || last != NULL || w != width || h != height) {
+						CVPixelBufferRelease(pb);
+						return;
+					}
+					last = pb;
+					[self encode:pb pts:CMClockGetTime(CMClockGetHostTimeClock())];
+				});
+			}];
+	}
+}
+
 - (void)stream:(SCStream *)s didOutputSampleBuffer:(CMSampleBufferRef)sb ofType:(SCStreamOutputType)type {
 	if (type != SCStreamOutputTypeScreen || stopped || !CMSampleBufferIsValid(sb)) return;
 	CFArrayRef atts = CMSampleBufferGetSampleAttachmentsArray(sb, false);
@@ -183,6 +212,7 @@ static void mob_vt_output(void *refcon, void *frame_refcon, OSStatus status, VTE
 	if (last) CVPixelBufferRelease(last);
 	[stream release];
 	[config release];
+	[filter release];
 	if (queue) dispatch_release(queue);
 	[super dealloc];
 }
@@ -238,7 +268,8 @@ void *mob_stream_start(uintptr_t ident, int width, int height, int fps, int kbps
 			c.showsCursor = show_cursor != 0;
 			c.queueDepth = 6;
 			s->config = c;
-			SCContentFilter *filter = [[[SCContentFilter alloc] initWithDisplay:display excludingWindows:@[]] autorelease];
+			SCContentFilter *filter = [[SCContentFilter alloc] initWithDisplay:display excludingWindows:@[]];
+			s->filter = filter;
 			s->stream = [[SCStream alloc] initWithFilter:filter configuration:c delegate:s];
 			NSError *addErr = nil;
 			if (![s->stream addStreamOutput:s type:SCStreamOutputTypeScreen sampleHandlerQueue:s->queue error:&addErr]) {
@@ -291,6 +322,7 @@ void mob_stream_size(void *p, int width, int height) {
 		s->config.width = width;
 		s->config.height = height;
 		[s->stream updateConfiguration:s->config completionHandler:nil];
+		[s captureNow];
 	});
 }
 
