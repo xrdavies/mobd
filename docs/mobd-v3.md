@@ -165,7 +165,7 @@ Invitation redemption and preview are documented in [pairing](pairing.md).
 
 | Method | Path | Notes |
 | --- | --- | --- |
-| GET | `/health`, `/healthz` | `apiVersion: 3`, `features`, `checks`, `runners` (each with `models`, `efforts`, `defaultModel`, `defaultEffort`, `permissions`), `maxRunning` |
+| GET | `/health`, `/healthz` | `apiVersion: 3`, `features`, `checks`, `runners` (each with `models`, `efforts`, `defaultModel`, `defaultEffort`, `permissions`), `agents` (every supported agent: `state`, `enabled`, `detail`, `install`, and when found `bin` (resolved program path) and `version` (its `--version`)), `workdir` and `claudeWorkdir` (where agents work), `maxRunning` |
 | DELETE | `/pair` | This device removes its own pairing (as `mobd clients delete`); 204, then its credential stops working. Feature `unpair` |
 | GET | `/sessions` | `?archived=false` (default) \| `true` \| `all`. Sorted pinned first, then `updatedAt` descending |
 | GET | `/sessions/{id}` | `{session, tasks, activities, questions}` |

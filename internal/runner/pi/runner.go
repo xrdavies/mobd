@@ -51,12 +51,13 @@ func (r *Runner) Check(ctx context.Context) runner.Status {
 	// The first run of a new binary can be slow (macOS scans it), so allow more than a normal start.
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	if _, err := exec.LookPath(r.cfg.PiBin); err != nil {
+	path, err := exec.LookPath(r.cfg.PiBin)
+	if err != nil {
 		return runner.Status{Missing: true, Detail: fmt.Sprintf("%q not found; install Pi or set MOBD_PI_BIN", r.cfg.PiBin)}
 	}
 	out, err := exec.CommandContext(ctx, r.cfg.PiBin, "--version").Output()
 	if err != nil {
-		return runner.Status{Detail: fmt.Sprintf("Pi --version failed: %v; install Pi or set MOBD_PI_BIN", err)}
+		return runner.Status{Bin: path, Detail: fmt.Sprintf("Pi --version failed: %v; install Pi or set MOBD_PI_BIN", err)}
 	}
 	version := strings.TrimSpace(string(out))
 	parts := strings.Split(version, ".")
@@ -66,9 +67,9 @@ func (r *Runner) Check(ctx context.Context) runner.Status {
 		minor, _ = strconv.Atoi(parts[1])
 	}
 	if major != 1 || minor < 4 {
-		return runner.Status{Detail: "Pi 1.4.x or later 1.x required (tested: 1.4.0); found " + version}
+		return runner.Status{Bin: path, Version: version, Detail: "Pi 1.4.x or later 1.x required (tested: 1.4.0); found " + version}
 	}
-	return runner.Status{OK: true, Detail: r.cfg.PiBin + " (" + version + ")"}
+	return runner.Status{OK: true, Bin: path, Version: version, Detail: r.cfg.PiBin + " (" + version + ")"}
 }
 
 // binary identifies the installed Pi file, so an upgrade or replacement is checked again.

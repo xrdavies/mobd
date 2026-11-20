@@ -212,7 +212,8 @@ func Version(ctx context.Context, name, bin, env string) runner.Status {
 	defer cancel()
 	out, err := exec.CommandContext(ctx, path, "--version").Output()
 	if err != nil {
-		return runner.Status{Detail: fmt.Sprintf("%s --version failed: %v", path, err)}
+		return runner.Status{Bin: path, Detail: fmt.Sprintf("%s --version failed: %v", path, err)}
 	}
-	return runner.Status{OK: true, Detail: fmt.Sprintf("%s (%s)", path, strings.TrimSpace(string(out)))}
+	version := strings.TrimSpace(string(out))
+	return runner.Status{OK: true, Bin: path, Version: version, Detail: fmt.Sprintf("%s (%s)", path, version)}
 }

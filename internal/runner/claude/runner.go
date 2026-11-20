@@ -55,7 +55,9 @@ func (r *Runner) Check(ctx context.Context) runner.Status {
 	if err != nil {
 		return st
 	}
-	return r.checkLogin(ctx, path, st.Detail)
+	res := r.checkLogin(ctx, path, st.Detail)
+	res.Bin, res.Version = st.Bin, st.Version
+	return res
 }
 
 func (r *Runner) Start(ctx context.Context, t *task.Task, opts runner.Options, emit runner.EmitFunc) error {

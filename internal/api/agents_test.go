@@ -54,6 +54,16 @@ func TestEverySupportedAgentsInstallationIsReported(t *testing.T) {
 	if a := byName["codex"]; a.State != "ready" || !a.Enabled || !strings.Contains(a.Detail, "9.9.9") {
 		t.Fatalf("codex %+v", a)
 	}
+	// The program and its version, for the apps' agent pages; resolved even when not enabled.
+	if a := byName["codex"]; a.Bin != cfg.CodexBin || a.Version != "codex-cli 9.9.9" {
+		t.Fatalf("codex program %q version %q", a.Bin, a.Version)
+	}
+	if a := byName["claude"]; a.Bin != cfg.ClaudeBin || a.Version != "2.0.0 (Claude Code)" {
+		t.Fatalf("claude program %q version %q", a.Bin, a.Version)
+	}
+	if a := byName["pi"]; a.Bin != "" || a.Version != "" {
+		t.Fatalf("missing pi reports a program: %+v", a)
+	}
 	if a := byName["claude"]; a.State != "disabled" || a.Enabled || !strings.Contains(a.Detail, `add "claude" to "runners"`) {
 		t.Fatalf("claude %+v", a)
 	}
@@ -63,12 +73,17 @@ func TestEverySupportedAgentsInstallationIsReported(t *testing.T) {
 
 	// /health lists them; only enabled agents are readiness checks (no warning for the others).
 	var health struct {
-		Agents []agentStatus
-		Checks map[string]check
+		Agents        []agentStatus
+		Checks        map[string]check
+		Workdir       string
+		ClaudeWorkdir string
 	}
 	json.Unmarshal(doJSON(t, s, http.MethodGet, "/health", "").Body.Bytes(), &health)
 	if len(health.Agents) != 3 || !health.Checks["codex"].OK {
 		t.Fatalf("health %+v", health)
+	}
+	if health.Workdir != cfg.CodexWorkDir {
+		t.Fatalf("health workdir %q, want %q", health.Workdir, cfg.CodexWorkDir)
 	}
 	if _, ok := health.Checks["pi"]; ok {
 		t.Fatal("a disabled agent is a readiness check")

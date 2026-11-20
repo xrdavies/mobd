@@ -94,6 +94,9 @@ type Status struct {
 	Detail string `json:"detail,omitempty"`
 	// Missing means the agent's program is not installed (not found on PATH).
 	Missing bool `json:"-"`
+	// Bin is the program's resolved path and Version what its --version printed, when found.
+	Bin     string `json:"-"`
+	Version string `json:"-"`
 }
 
 // Runner executes one turn and blocks until it finishes or ctx is cancelled.

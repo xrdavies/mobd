@@ -76,6 +76,9 @@ type agentStatus struct {
 	Detail  string `json:"detail,omitempty"`
 	// Install installs a missing agent.
 	Install string `json:"install,omitempty"`
+	// Bin is the program mobd runs (resolved path) and Version what its --version printed.
+	Bin     string `json:"bin,omitempty"`
+	Version string `json:"version,omitempty"`
 }
 
 // agentCheckTimeout bounds one agent's check; they run in parallel, so one slow agent (Pi's
@@ -119,6 +122,8 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		"checks":         checks,
 		"agents":         s.agentStatuses(r.Context()),
 		"streamSessions": s.streams.Count(),
+		// Where agents work: Codex and Pi use workdir; Claude its own when set (config.json).
+		"workdir": s.cfg.CodexWorkDir, "claudeWorkdir": s.cfg.ClaudeWorkDir,
 		// Agents' desktop tools and live view control in progress (screenUse events on /events).
 		"screenUse": s.screen.list(),
 		// Whether USB devices can be imported now: usbRedirection says only that the API exists.
@@ -199,7 +204,7 @@ func (s *Server) checkAgents(ctx context.Context) []agentStatus {
 			info := rn.Info()
 			_, enabled := s.runners.Get(info.Name)
 			st := rn.Check(ctx)
-			a := agentStatus{Name: info.Name, Label: info.Label, Enabled: enabled, Detail: st.Detail}
+			a := agentStatus{Name: info.Name, Label: info.Label, Enabled: enabled, Detail: st.Detail, Bin: st.Bin, Version: st.Version}
 			switch {
 			case st.Missing:
 				a.State, a.Install = "missing", info.Install

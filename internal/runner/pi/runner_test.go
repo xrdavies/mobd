@@ -267,12 +267,15 @@ func TestProtocolFailuresAndRetry(t *testing.T) {
 func TestMissingResumeAndOldVersion(t *testing.T) {
 	bin, dir := install(t, fakePi(reply))
 	r := testRunner(t, bin, dir)
+	if st := r.Check(context.Background()); !st.OK || st.Bin != bin || st.Version != "1.4.0" {
+		t.Fatalf("check %+v", st)
+	}
 	err := r.Start(context.Background(), &task.Task{ResumeID: "absent"}, runner.Options{}, nil)
 	if err == nil || !strings.Contains(err.Error(), "session file is unavailable") {
 		t.Fatal(err)
 	}
 	os.WriteFile(bin, []byte("#!/bin/sh\nprintf '0.73.1\\n'"), 0700)
-	if status := r.Check(context.Background()); status.OK {
+	if status := r.Check(context.Background()); status.OK || status.Version != "0.73.1" {
 		t.Fatal(status)
 	}
 }
