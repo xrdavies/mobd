@@ -26,11 +26,16 @@ const (
 // Operation is one restart (later: upgrade) requested from an app. It is stored on disk so a
 // client can read its result after the restart closed its connection.
 type Operation struct {
-	ID         string     `json:"id"`
-	Action     string     `json:"action"`
-	State      string     `json:"state"`
-	Step       string     `json:"step,omitempty"`
-	Error      string     `json:"error,omitempty"`
+	ID     string `json:"id"`
+	Action string `json:"action"`
+	State  string `json:"state"`
+	Step   string `json:"step,omitempty"`
+	Error  string `json:"error,omitempty"`
+	// Code is a machine-readable reason a failed operation did nothing (tasks_running).
+	Code string `json:"code,omitempty"`
+	// Version and Binary: an upgrade's target and its verified download.
+	Version    string     `json:"version,omitempty"`
+	Binary     string     `json:"binary,omitempty"`
 	StartedAt  time.Time  `json:"startedAt"`
 	FinishedAt *time.Time `json:"finishedAt,omitempty"`
 }
@@ -102,6 +107,12 @@ func (s Store) Running() *Operation {
 		return &op
 	}
 	return nil
+}
+
+// Fail records an operation that ended without changing anything; code is machine-readable.
+func (s Store) Fail(op *Operation, code, msg string) {
+	op.Code = code
+	s.finish(op, StateFailed, msg)
 }
 
 func (s Store) finish(op *Operation, state, msg string) {
@@ -217,8 +228,47 @@ func Restart(st Store, svc Service, args []string, login bool, step func(string)
 	return StateRolledBack, fmt.Errorf("mobd did not start with the new config: %w", startErr)
 }
 
-// RunOperation runs a stored restart operation and records its steps and result.
-func RunOperation(st Store, id string, svc Service, args []string, login bool) error {
+// Upgrade replaces exe with the verified binary and restarts the service on it. The config is checked
+// first; if the new mobd does not come up, the old binary is put back and started again.
+func Upgrade(st Store, svc Service, args []string, login bool, exe, bin string, step func(string)) (string, error) {
+	if step == nil {
+		step = func(string) {}
+	}
+	step("checking")
+	cfg, err := Check(args)
+	if err != nil {
+		st.reject(err.Error(), "")
+		return StateFailed, fmt.Errorf("the config does not load, so nothing was changed: %w", err)
+	}
+	step("swapping")
+	if err := Swap(exe, bin); err != nil {
+		return StateFailed, fmt.Errorf("replacing %s: %w", exe, err)
+	}
+	step("restarting")
+	if err := svc.Stop(); err != nil {
+		_ = Unswap(exe)
+		return StateFailed, fmt.Errorf("stop: %w", err)
+	}
+	startErr := svc.Start(cfg, args, login)
+	if startErr == nil {
+		configPath, _ := ConfigPath(args)
+		_ = st.SaveLastGood(configPath)
+		return StateDone, nil
+	}
+	step("rolling back")
+	if err := Unswap(exe); err != nil {
+		return StateFailed, fmt.Errorf("the new mobd did not start (%v) and the old one could not be restored (%v); it needs attention on the computer", startErr, err)
+	}
+	_ = svc.Stop()
+	if err := svc.Start(cfg, args, login); err != nil {
+		return StateFailed, fmt.Errorf("neither the new mobd (%v) nor the old one (%v) started; it needs attention on the computer", startErr, err)
+	}
+	return StateRolledBack, fmt.Errorf("the new mobd did not start, so the previous version runs again: %w", startErr)
+}
+
+// RunOperation runs a stored restart or upgrade operation and records its steps and result. exe is
+// the installed binary an upgrade replaces.
+func RunOperation(st Store, id string, svc Service, args []string, login bool, exe string) error {
 	op, err := st.Load(id)
 	if err != nil {
 		return err
@@ -226,10 +276,17 @@ func RunOperation(st Store, id string, svc Service, args []string, login bool) e
 	if op.State != StateRunning {
 		return errors.New("operation " + id + " already finished")
 	}
-	state, rerr := Restart(st, svc, args, login, func(s string) {
+	step := func(s string) {
 		op.Step = s
 		_ = st.Save(op)
-	})
+	}
+	var state string
+	var rerr error
+	if op.Action == "upgrade" {
+		state, rerr = Upgrade(st, svc, args, login, exe, op.Binary, step)
+	} else {
+		state, rerr = Restart(st, svc, args, login, step)
+	}
 	msg := ""
 	if rerr != nil {
 		msg = rerr.Error()

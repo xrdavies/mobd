@@ -61,7 +61,7 @@ main() {
     checksum() { sha256sum "$1" | cut -d ' ' -f1; }
   fi
   if running; then
-    printf 'mobd is running. Finish active tasks, run mobd stop (or stop mobd serve), then rerun this installer.\nUse mobd start --login afterwards if you want login startup.\n' >&2
+    printf 'mobd is running. To upgrade it, run: mobd upgrade\n(mobd 0.5.2 and older: finish active tasks, run mobd stop, rerun this installer, then mobd start --login if you want login startup.)\n' >&2
     return 1
   fi
   temp_dir=$(mktemp -d "${TMPDIR:-/tmp}/mobd-install.XXXXXX")

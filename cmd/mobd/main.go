@@ -55,6 +55,8 @@ const usage = `Usage: mobd <command> [options]
   usb        status | setup | remove: import USB devices shared from Mob Desktop (Linux; setup and
              remove need sudo)
   uninstall  Close every desktop, stop mobd and remove its service; keeps settings and data
+  upgrade    Install the latest mobd and restart it (refused while tasks run); --check only
+             reports whether one is available; --version X.Y.Z; --json
   maintain   (started by mobd) run a restart requested from the apps: --operation ID
   mcp        Run the built-in MCP server over stdio
   --version  Print version
@@ -110,6 +112,9 @@ func run(args []string) error {
 	}
 	if command == "uninstall" {
 		return uninstall(args)
+	}
+	if command == "upgrade" {
+		return upgradeCommand(args)
 	}
 	if command == "maintain" {
 		return maintainCommand(args)
@@ -315,10 +320,12 @@ func serve(cfg config.Config, path string) error {
 		defer desktops.Shutdown()
 	}
 	srv := api.New(cfg, store, auth, desktops, runners...)
+	managed := false
 	if m, err := maintenanceFor(path, os.Args[1:]); err != nil {
 		log.Printf("remote config and restart unavailable: %v", err)
 	} else {
 		srv.SetMaintenance(m)
+		managed = m.Service
 	}
 	srv.SetSupported(available[codex.Name], available[claude.Name], available[pi.Name])
 
@@ -332,7 +339,7 @@ func serve(cfg config.Config, path string) error {
 
 	adminSrv := &http.Server{Handler: control.Handler(control.Deps{Pairing: auth, Desktops: srv,
 		Grants: serverGrants{list: desktop.Grants, probe: probePermissions}, Listen: cfg.ListenAddr,
-		Version: version, Executable: executablePath(), LoginStartup: loginStartup()}),
+		Version: version, Executable: executablePath(), LoginStartup: loginStartup(), Busy: srv.Busy, Managed: managed}),
 		// Closing every desktop (stop, uninstall) can take a while.
 		ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 5 * time.Minute}
 	defer adminSrv.Close()

@@ -1,7 +1,8 @@
 # Remote maintenance: config, restart and upgrade from the apps
 
-Status: phase 1 (config API, controlled restart with fallback) implemented 2026-11-20 and tested on a macOS
-LaunchAgent; Linux systemd path not yet run on a real machine. Phase 2 (`mobd upgrade`) not implemented. Issue: [#11](https://github.com/xrdavies/mobd/issues/11) (input, not
+Status: phases 1 and 2 (config API, controlled restart, `mobd upgrade` and the upgrade operation, each with
+fallback) implemented 2026-11-20. Restart tested on a macOS LaunchAgent and a Linux systemd user service (Ubuntu
+24.04 VM); upgrade tested on Linux against a local release server. Phase 3 (the apps) not started. Issue: [#11](https://github.com/xrdavies/mobd/issues/11) (input, not
 spec; see [Part 2](#part-2-decisions) for what we kept, changed and dropped).
 
 This document has three parts: [the feature](#part-1-feature), [the decisions](#part-2-decisions) and
@@ -188,6 +189,11 @@ arguments. Interrupted tasks are never replayed.
 
 With mobd stopped, `mobd upgrade` swaps the binary without the task check and leaves mobd stopped. The upgrade
 instructions in the README and `install.sh`'s output become `mobd upgrade`; `install.sh` stays for first installs.
+
+Implementation notes: on macOS the new binary must carry the installed one's Developer ID team (a development
+build without one refuses and points to `install.sh`); Linux checks SHA-256 only, like `install.sh`. Verified
+downloads are kept in `~/.mobd/upgrade/<version>/`; the replaced binary is kept as `mobd.previous` next to it.
+`MOBD_UPDATE_BASE` points mobd at another release server (HTTPS, or HTTP to localhost for tests).
 
 ### Restarts not started from the apps
 

@@ -38,6 +38,7 @@ func maintenanceFor(path string, args []string) (api.Maintenance, error) {
 	}
 	h := maintenance.Helper{Exe: exe, Dir: dir, Path: os.Getenv("PATH"), Cwd: cwd}
 	m.StartHelper = h.Start
+	m.Upgrader = upgrader(dir)
 	return m, nil
 }
 
@@ -60,5 +61,14 @@ func maintainCommand(args []string) error {
 	if err != nil {
 		return err
 	}
-	return maintenance.RunOperation(maintenance.Store{Dir: manager.Dir()}, *id, manager, saved, manager.LoginEnabled())
+	return maintenance.RunOperation(maintenance.Store{Dir: manager.Dir()}, *id, manager, saved, manager.LoginEnabled(), executablePath())
+}
+
+// upgrader is this binary's upgrader; MOBD_UPDATE_BASE points it at another release server (tests).
+func upgrader(dir string) *maintenance.Upgrader {
+	base := os.Getenv("MOBD_UPDATE_BASE")
+	if base == "" {
+		base = maintenance.DefaultBase
+	}
+	return &maintenance.Upgrader{Base: base, Exe: executablePath(), Current: version, Cache: filepath.Join(dir, "upgrade")}
 }

@@ -1,13 +1,23 @@
 package api
 
 import (
+	"archive/tar"
+	"bytes"
+	"compress/gzip"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/xrdavies/mobd/internal/config"
 	"github.com/xrdavies/mobd/internal/maintenance"
@@ -35,7 +45,7 @@ func maintServer(t *testing.T, service bool) (*Server, string, *[]string) {
 	s := newTestServer(t, cfg, task.NewStore(), codex.New(cfg))
 	var started []string
 	s.SetMaintenance(Maintenance{Store: maintenance.Store{Dir: dir}, Args: args, Service: service,
-		StartHelper: func(id string) error { started = append(started, id); return nil }})
+		StartHelper: func(id string) error { startedMu.Lock(); started = append(started, id); startedMu.Unlock(); return nil }})
 	return s, path, &started
 }
 
@@ -128,5 +138,97 @@ func TestRestartRefusesInvalidConfigAndTerminalMobd(t *testing.T) {
 	fg, _, _ := maintServer(t, false)
 	if rr := doJSON(t, fg, http.MethodPost, "/maintenance", `{"action":"restart"}`); rr.Code != http.StatusConflict || !strings.Contains(rr.Body.String(), "not_a_service") {
 		t.Fatalf("terminal mobd: %d %s", rr.Code, rr.Body)
+	}
+}
+
+// startedMu guards the fake helper's list: upgrades start it from their own goroutine.
+var startedMu sync.Mutex
+
+func startedIDs(p *[]string) []string {
+	startedMu.Lock()
+	defer startedMu.Unlock()
+	return append([]string(nil), *p...)
+}
+
+// fakeRelease serves mobd 9.9.9 for this platform.
+func fakeRelease(t *testing.T) string {
+	t.Helper()
+	var key, arch string
+	switch runtime.GOOS + "/" + runtime.GOARCH {
+	case "darwin/arm64":
+		key, arch = "darwin-aarch64", "darwin_arm64"
+	case "linux/amd64":
+		key, arch = "linux-x86_64", "linux_amd64"
+	case "linux/arm64":
+		key, arch = "linux-aarch64", "linux_arm64"
+	default:
+		t.Skip("no releases for this platform")
+	}
+	var buf bytes.Buffer
+	gz := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gz)
+	for name, body := range map[string]string{"LICENSE": "", "README.md": "", "mobd": "#!/bin/sh\necho 'mobd 9.9.9'\n"} {
+		tw.WriteHeader(&tar.Header{Name: name, Mode: 0o755, Size: int64(len(body)), Typeflag: tar.TypeReg})
+		tw.Write([]byte(body))
+	}
+	tw.Close()
+	gz.Close()
+	sum := sha256.Sum256(buf.Bytes())
+	mux := http.NewServeMux()
+	mux.HandleFunc("/mobd/latest.json", func(w http.ResponseWriter, r *http.Request) { w.Write([]byte(`{"version":"9.9.9"}`)) })
+	mux.HandleFunc("/mobd/v9.9.9/release.json", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintf(w, `{"version":"9.9.9","platforms":{%q:{"sha256":%q}}}`, key, hex.EncodeToString(sum[:]))
+	})
+	mux.HandleFunc("/mobd/v9.9.9/mobd_9.9.9_"+arch+".tar.gz", func(w http.ResponseWriter, r *http.Request) { w.Write(buf.Bytes()) })
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	return srv.URL
+}
+
+func waitOp(t *testing.T, s *Server, id string, done func(maintenance.Operation) bool) maintenance.Operation {
+	t.Helper()
+	var op maintenance.Operation
+	for i := 0; i < 200; i++ {
+		json.Unmarshal(doJSON(t, s, http.MethodGet, "/maintenance/"+id, "").Body.Bytes(), &op)
+		if done(op) {
+			return op
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	t.Fatalf("operation stuck: %+v", op)
+	return op
+}
+
+func TestUpgradeDownloadsThenNeedsAnIdleComputer(t *testing.T) {
+	s, _, started := maintServer(t, true)
+	exe := filepath.Join(t.TempDir(), "mobd")
+	os.WriteFile(exe, []byte("old"), 0o755)
+	s.maint.Upgrader = &maintenance.Upgrader{Base: fakeRelease(t), Exe: exe, Current: "0.5.2", Cache: t.TempDir(), Verify: func(string) error { return nil }}
+
+	var rel maintenance.Release
+	json.Unmarshal(doJSON(t, s, http.MethodGet, "/maintenance/latest", "").Body.Bytes(), &rel)
+	if rel.Latest != "9.9.9" || !rel.Newer || !rel.CanUpgrade {
+		t.Fatalf("latest %+v", rel)
+	}
+
+	busy, _ := s.store.Create("busy")
+	var res struct{ OperationID string }
+	json.Unmarshal(doJSON(t, s, http.MethodPost, "/maintenance", `{"action":"upgrade"}`).Body.Bytes(), &res)
+	op := waitOp(t, s, res.OperationID, func(o maintenance.Operation) bool { return o.State != maintenance.StateRunning })
+	if op.Code != "tasks_running" || op.Version != "9.9.9" || len(startedIDs(started)) != 0 {
+		t.Fatalf("busy upgrade %+v", op)
+	}
+	if b, _ := os.ReadFile(exe); string(b) != "old" {
+		t.Fatal("binary replaced while busy")
+	}
+
+	s.store.UpdateStatus(busy.ID, task.StatusSucceeded, "")
+	json.Unmarshal(doJSON(t, s, http.MethodPost, "/maintenance", `{"action":"upgrade"}`).Body.Bytes(), &res)
+	waitOp(t, s, res.OperationID, func(maintenance.Operation) bool { return len(startedIDs(started)) == 1 })
+	if ids := startedIDs(started); ids[0] != res.OperationID {
+		t.Fatalf("helper started for %v", ids)
+	}
+	if rr := doJSON(t, s, http.MethodPost, "/tasks", `{"prompt":"hi"}`); rr.Code != http.StatusServiceUnavailable {
+		t.Fatalf("tasks not held: %d", rr.Code)
 	}
 }

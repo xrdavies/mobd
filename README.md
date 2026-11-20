@@ -66,10 +66,12 @@ a gateway or an SSH tunnel. `mobd init` sets `listen` to `0.0.0.0:8080` (all IPv
 The download domain serves files; clients connect to your office computer's mobd URL.
 Follow the [office smoke checklist](docs/office-smoke-checklist.md) to verify the setup.
 
-To upgrade, finish active tasks, run `mobd stop`, rerun the installer, then run
-`mobd start` (or `mobd start --login` to restore login startup). Configuration,
-conversations and attachments are preserved. Stop a foreground `mobd serve`
-process manually before installing. mobd does not use Tauri updater.
+To upgrade, run `mobd upgrade` once no task is running (`mobd upgrade --check` only reports whether a newer
+version is out). It downloads and checks the release like the installer, replaces the binary, restarts mobd,
+and goes back to the previous version if the new one does not start. Configuration, conversations,
+attachments and login startup are kept. Paired apps can do the same remotely
+([remote maintenance](docs/remote-maintenance.md)). Versions without `mobd upgrade` (0.5.2 and older): stop
+mobd, rerun the installer, then `mobd start`.
 
 The background service is a per-user macOS LaunchAgent, not a root daemon. `start`
 rejects an already loaded service or occupied port. `restart` preserves login

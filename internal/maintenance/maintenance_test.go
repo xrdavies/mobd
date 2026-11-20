@@ -142,7 +142,7 @@ func TestFailedStartRollsBackToLastGood(t *testing.T) {
 		return nil
 	}}
 	op, _ := st.New("restart")
-	err := RunOperation(st, op.ID, svc, args, false)
+	err := RunOperation(st, op.ID, svc, args, false, "")
 	op, _ = st.Load(op.ID)
 	if op.State != StateRolledBack || err == nil || !strings.Contains(op.Error, "did not answer") || op.FinishedAt == nil {
 		t.Fatalf("op %+v err %v", op, err)

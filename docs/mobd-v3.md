@@ -169,8 +169,9 @@ Invitation redemption and preview are documented in [pairing](pairing.md).
 | DELETE | `/pair` | This device removes its own pairing (as `mobd clients delete`); 204, then its credential stops working. Feature `unpair` |
 | GET | `/config` | Editable startup config: `{rev, values, effective, editable, overridden, pendingRestart, configError?, lastRejected?, canRestart}` (feature `maintenance`, [remote-maintenance.md](remote-maintenance.md)) |
 | PUT | `/config` | `{rev, changes}` (null removes a key) → **200** `{rev, diff, needsRestart}`; **400** `not_editable`; **409** `config_changed`; **422** `invalid`. Validated before writing; does not restart |
-| POST | `/maintenance` | `{action: "restart"}` → **202** `{operationId}`; **409** `tasks_running` (`count`), `maintenance_running`, `not_a_service`; **422** `invalid`. New tasks get **503** `maintenance` until the restart |
-| GET | `/maintenance/{id}` | `{id, action, state: running\|done\|failed\|rolled-back, step?, error?, startedAt, finishedAt?}` |
+| POST | `/maintenance` | `{action: "restart"}` or `{action: "upgrade", version?}` → **202** `{operationId}`. An upgrade downloads and checks first, then fails with `code: tasks_running` (download kept), `up_to_date` or `download_failed` if it cannot go ahead. Restart: **409** `tasks_running` (`count`), `maintenance_running`, `not_a_service`; **422** `invalid`. New tasks get **503** `maintenance` until the restart |
+| GET | `/maintenance/{id}` | `{id, action, state: running\|done\|failed\|rolled-back, step?, error?, code?, version?, startedAt, finishedAt?}` |
+| GET | `/maintenance/latest` | `{current, latest, newer, notes, canUpgrade, reason?}`, as `mobd upgrade --check --json` |
 | GET | `/sessions` | `?archived=false` (default) \| `true` \| `all`. Sorted pinned first, then `updatedAt` descending |
 | GET | `/sessions/{id}` | `{session, tasks, activities, questions}` |
 | PATCH | `/sessions/{id}` | Body `{title?, pinned?, archived?, model?, effort?}` → updated session. `model`/`effort` set the conversation's settings (`""` = the agent's default from settings.json); effort must be one of its runner's |

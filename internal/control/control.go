@@ -103,6 +103,10 @@ type Deps struct {
 	// LoginStartup reports whether the background service starts at login; nil where the system
 	// has no service management (Windows).
 	LoginStartup func() bool
+	// Busy counts running and queued tasks, so `mobd upgrade` can refuse while work runs.
+	Busy func() int
+	// Managed is true when this mobd is the background service (not `mobd serve` in a terminal).
+	Managed bool
 }
 
 // DesktopList is GET /desktops on the control socket.
@@ -129,6 +133,10 @@ func Handler(deps Deps) http.Handler {
 		if deps.LoginStartup != nil {
 			body["loginStartup"] = deps.LoginStartup()
 		}
+		if deps.Busy != nil {
+			body["busy"] = deps.Busy()
+		}
+		body["managed"] = deps.Managed
 		reply(w, 200, body)
 	})
 	mux.HandleFunc("POST /probes", func(w http.ResponseWriter, r *http.Request) {

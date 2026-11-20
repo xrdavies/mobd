@@ -1,8 +1,10 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -22,6 +24,8 @@ type Maintenance struct {
 	Service bool
 	// StartHelper starts `mobd maintain --operation ID` outside the service.
 	StartHelper func(id string) error
+	// Upgrader checks and downloads releases; nil turns upgrades off.
+	Upgrader *maintenance.Upgrader
 }
 
 // holdFor bounds how long new tasks wait for a restart that never stops this process (the helper
@@ -119,6 +123,9 @@ func (s *Server) handlePutConfig(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// Busy counts running and queued tasks (also for `mobd upgrade` over the control socket).
+func (s *Server) Busy() int { return s.busy() }
+
 // busy counts the running and queued tasks: a queued one would start in the middle of a restart.
 func (s *Server) busy() int {
 	running, queued := s.store.Queue()
@@ -132,14 +139,15 @@ func (s *Server) handleStartMaintenance(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	var req struct {
-		Action string `json:"action"`
+		Action  string `json:"action"`
+		Version string `json:"version"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&req); err != nil {
 		writeErr(w, http.StatusBadRequest, "body must be {action}")
 		return
 	}
-	if req.Action != "restart" {
-		writeErrCode(w, http.StatusBadRequest, "unknown_action", "action must be restart")
+	if req.Action != "restart" && !(req.Action == "upgrade" && m.Upgrader != nil) {
+		writeErrCode(w, http.StatusBadRequest, "unknown_action", "action must be restart or upgrade")
 		return
 	}
 	if !m.Service {
@@ -148,6 +156,10 @@ func (s *Server) handleStartMaintenance(w http.ResponseWriter, r *http.Request) 
 	}
 	if op := m.Store.Running(); op != nil {
 		writeJSON(w, http.StatusConflict, map[string]any{"error": "another restart is in progress", "code": "maintenance_running", "operation": op})
+		return
+	}
+	if req.Action == "upgrade" {
+		s.startUpgrade(w, req.Version)
 		return
 	}
 	// Apply only while nothing runs (D6). Checked again here: the app's view can be stale and other
@@ -205,4 +217,69 @@ func (s *Server) handleGetMaintenance(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, op)
+}
+
+// startUpgrade answers at once; the download and checks run while mobd keeps serving (D7). Only then
+// does it check that no task runs (D6), hold new tasks and hand over to the helper.
+func (s *Server) startUpgrade(w http.ResponseWriter, version string) {
+	m := s.maint
+	op, err := m.Store.New("upgrade")
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	op.Step, op.Version = "downloading", version
+	_ = m.Store.Save(op)
+	log.Printf("maintenance: upgrade %s started from a paired client", op.ID)
+	s.hub.publish("maintenance", op)
+	writeJSON(w, http.StatusAccepted, map[string]string{"operationId": op.ID})
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
+		defer cancel()
+		bin, v, err := m.Upgrader.Prepare(ctx, version)
+		if err != nil {
+			m.Store.Fail(&op, "download_failed", "nothing was changed: "+err.Error())
+			return
+		}
+		op.Version, op.Binary = v, bin
+		if !newerThan(v, m.Upgrader.Current) && version == "" {
+			m.Store.Fail(&op, "up_to_date", "mobd "+m.Upgrader.Current+" is up to date")
+			return
+		}
+		s.mu.Lock()
+		if n := s.busy(); n > 0 || s.holding {
+			s.mu.Unlock()
+			m.Store.Fail(&op, "tasks_running", fmt.Sprintf("%d task(s) running; the download is kept, try again when they finish", n))
+			return
+		}
+		s.holding = true
+		s.mu.Unlock()
+		op.Step = "checking"
+		_ = m.Store.Save(op)
+		if err := m.StartHelper(op.ID); err != nil {
+			s.mu.Lock()
+			s.holding = false
+			s.mu.Unlock()
+			m.Store.Fail(&op, "", "could not start the upgrade: "+err.Error())
+			return
+		}
+		time.AfterFunc(holdFor, func() { s.mu.Lock(); s.holding = false; s.mu.Unlock() })
+	}()
+}
+
+func newerThan(a, b string) bool {
+	return maintenance.Newer(a, b)
+}
+
+func (s *Server) handleLatest(w http.ResponseWriter, r *http.Request) {
+	if s.maint == nil || s.maint.Upgrader == nil {
+		http.NotFound(w, r)
+		return
+	}
+	rel, err := s.maint.Upgrader.Check(r.Context())
+	if err != nil {
+		writeErrCode(w, http.StatusBadGateway, "check_failed", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, rel)
 }

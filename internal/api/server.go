@@ -237,6 +237,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /config", s.handleGetConfig)
 	mux.HandleFunc("PUT /config", s.handlePutConfig)
 	mux.HandleFunc("POST /maintenance", s.handleStartMaintenance)
+	mux.HandleFunc("GET /maintenance/latest", s.handleLatest)
 	mux.HandleFunc("GET /maintenance/{id}", s.handleGetMaintenance)
 	public := http.NewServeMux()
 	public.HandleFunc("POST /pair", s.handlePair)
