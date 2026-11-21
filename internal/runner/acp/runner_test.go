@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -213,6 +214,9 @@ func TestTurnTranslatesTheSession(t *testing.T) {
 	if req["session/set_model"]["modelId"] != "m-b" || req["session/set_config_option"]["value"] != "high" {
 		t.Fatalf("settings %+v", req)
 	}
+	if info := req["initialize"]["clientInfo"].(map[string]any); info["version"] == "" || info["name"] != "mobd" {
+		t.Fatalf("clientInfo %+v", info)
+	}
 	if fs := req["initialize"]["clientCapabilities"].(map[string]any)["fs"].(map[string]any); fs["writeTextFile"] != false {
 		t.Fatal("file writes offered")
 	}
@@ -296,3 +300,66 @@ func TestCancelAndFailure(t *testing.T) {
 }
 
 func readFile(p string) string { b, _ := os.ReadFile(p); return string(b) }
+
+func TestModelsAreNamedForMobAndMappedBack(t *testing.T) {
+	// DeepSeek Harness: grouped choices whose values are JSON; OpenCode: plain values.
+	var o configOption
+	_ = json.Unmarshal([]byte(`{"id":"model","category":"model","currentValue":"[\"ds\",\"deepseek-v4-flash\"]",
+		"options":[{"group":"ds","name":"DeepSeek","options":[{"value":"[\"ds\",\"deepseek-v4-flash\"]","name":"deepseek-v4-flash"},
+		{"value":"[\"ds\",\"x\"]","name":"Deep Think"}]}, {"group":"oc","options":[{"value":"opencode/big-pickle","name":"Big Pickle"}]}]}`), &o)
+	names, values := modelNames(o.choices())
+	if strings.Join(names, ",") != "deepseek-v4-flash,Deep-Think,opencode/big-pickle" || values["Deep-Think"] != `["ds","x"]` {
+		t.Fatalf("%v %v", names, values)
+	}
+	if modelName(o.current(), values) != "deepseek-v4-flash" || modelName("opencode/big-pickle", values) != "opencode/big-pickle" {
+		t.Fatal("current model name")
+	}
+	// What a runner learns is kept for the next start.
+	cfg := config.Config{DataDir: t.TempDir()}
+	r := New("x", config.AgentConfig{Label: "X", Bin: "x"}, cfg)
+	r.learn(func(l *learned) { l.Models, l.Values, l.Model = names, values, "Deep-Think" })
+	again := New("x", config.AgentConfig{Label: "X", Bin: "x"}, cfg)
+	if again.Info().DefaultModel != "Deep-Think" || len(again.Info().Models) != 3 || again.modelValue("Deep-Think") != `["ds","x"]` {
+		t.Fatalf("cached %+v", again.Info())
+	}
+}
+
+func TestApproveEnvOnlyWhenApproving(t *testing.T) {
+	r := New("x", config.AgentConfig{Env: map[string]string{"A": "1"}, ApproveEnv: map[string]string{"ASK": "yes"}}, config.Config{})
+	has := func(env []string, kv string) bool { return slices.Contains(env, kv) }
+	if e := r.env(nil, false); !has(e, "A=1") || has(e, "ASK=yes") {
+		t.Fatal("bypass got the approval environment")
+	}
+	if e := r.env(nil, true); !has(e, "A=1") || !has(e, "ASK=yes") {
+		t.Fatal("approve lacks the approval environment")
+	}
+}
+
+func TestCancelWithdrawsAPendingApproval(t *testing.T) {
+	r, _ := fake(t, "approve")
+	asked := make(chan struct{})
+	ask := func(ctx context.Context, kind, text, details string) (task.Question, error) {
+		close(asked)
+		<-ctx.Done() // nobody answers
+		return task.Question{}, ctx.Err()
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- r.Start(ctx, &task.Task{ID: "t6", Prompt: "x"}, runner.Options{Permissions: "approve", Ask: ask}, (&events{}).emit)
+	}()
+	select {
+	case <-asked:
+	case <-time.After(10 * time.Second):
+		t.Fatal("no approval asked")
+	}
+	cancel()
+	select {
+	case err := <-done:
+		if err != context.Canceled {
+			t.Fatalf("cancel: %v", err)
+		}
+	case <-time.After(15 * time.Second):
+		t.Fatal("the pending approval kept the turn running")
+	}
+}

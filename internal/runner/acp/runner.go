@@ -8,12 +8,14 @@ package acp
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -27,6 +29,9 @@ import (
 // ProtocolVersion is the ACP version mobd speaks (D8).
 const ProtocolVersion = 1
 
+// ClientVersion is mobd's version, sent in the handshake (agents may require it).
+var ClientVersion = "dev"
+
 // checkTimeout bounds the readiness handshake; agents written in JS can take a few seconds to start.
 const checkTimeout = 20 * time.Second
 
@@ -37,19 +42,37 @@ type Runner struct {
 	a    config.AgentConfig
 
 	mu sync.Mutex
-	// What the agent told us at its last handshake and session (capabilities can change with versions).
+	// What the agent told us at its last handshake and session (capabilities can change with versions),
+	// kept in the data directory: the model list is only known once a session started.
 	caps learned
 }
 
 type learned struct {
-	image, loadSession, resume, cost bool
-	efforts                          []string
-	model                            string
+	Image       bool     `json:"image,omitempty"`
+	LoadSession bool     `json:"loadSession,omitempty"`
+	Resume      bool     `json:"resume,omitempty"`
+	Cost        bool     `json:"cost,omitempty"`
+	Efforts     []string `json:"efforts,omitempty"`
+	Model       string   `json:"model,omitempty"`
+	// Models are the agent's models as Mob names them, Values what the agent calls them (modelNames).
+	Models []string          `json:"models,omitempty"`
+	Values map[string]string `json:"values,omitempty"`
 }
 
 // New creates the runner for the ACP agent name, configured as a (cfg.AllACP()).
 func New(name string, a config.AgentConfig, cfg config.Config) *Runner {
-	return &Runner{name: name, cfg: cfg, a: a}
+	r := &Runner{name: name, cfg: cfg, a: a}
+	if data, err := os.ReadFile(r.cachePath()); err == nil {
+		_ = json.Unmarshal(data, &r.caps)
+	}
+	return r
+}
+
+func (r *Runner) cachePath() string {
+	if r.cfg.DataDir == "" {
+		return ""
+	}
+	return filepath.Join(r.cfg.DataDir, "agents", r.name+".json")
 }
 
 var _ runner.Runner = (*Runner)(nil)
@@ -60,8 +83,8 @@ func (r *Runner) Info() runner.Info {
 	c := r.caps
 	r.mu.Unlock()
 	return runner.Info{Protocol: config.ProtocolACP, Name: r.name, Label: r.a.Label, Install: r.a.Install,
-		Efforts: append([]string{}, c.efforts...), DefaultModel: c.model,
-		Images: c.image, Resume: c.loadSession || c.resume, Cost: c.cost, Steer: false}
+		Efforts: slices.Clone(c.Efforts), DefaultModel: c.Model, Models: slices.Clone(c.Models),
+		Images: c.Image, Resume: c.LoadSession || c.Resume, Cost: c.Cost, Steer: false}
 }
 
 func (r *Runner) Options() []runner.Option {
@@ -73,14 +96,37 @@ func (r *Runner) Options() []runner.Option {
 
 func (r *Runner) learn(f func(*learned)) {
 	r.mu.Lock()
+	before, _ := json.Marshal(r.caps)
 	f(&r.caps)
+	after, _ := json.Marshal(r.caps)
 	r.mu.Unlock()
+	if p := r.cachePath(); p != "" && string(before) != string(after) {
+		if err := os.MkdirAll(filepath.Dir(p), 0o700); err == nil {
+			_ = os.WriteFile(p, after, 0o600)
+		}
+	}
 }
 
-func (r *Runner) env(extra []string) []string {
+// modelValue is what the agent calls the model Mob names m.
+func (r *Runner) modelValue(m string) string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if v, ok := r.caps.Values[m]; ok {
+		return v
+	}
+	return m
+}
+
+// env is the agent's environment; approve adds what makes it ask before acting (approveEnv).
+func (r *Runner) env(extra []string, approve bool) []string {
 	env := append(os.Environ(), extra...)
 	for k, v := range r.a.Env {
 		env = append(env, k+"="+v)
+	}
+	if approve {
+		for k, v := range r.a.ApproveEnv {
+			env = append(env, k+"="+v)
+		}
 	}
 	return env
 }
@@ -94,7 +140,7 @@ func (r *Runner) Check(ctx context.Context) runner.Status {
 	ctx, cancel := context.WithTimeout(ctx, checkTimeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, path, r.a.Args...)
-	cmd.Dir, cmd.Env = r.a.Workdir, r.env(nil)
+	cmd.Dir, cmd.Env = r.a.Workdir, r.env(nil, false)
 	cmd.WaitDelay = time.Second
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -119,7 +165,7 @@ func (r *Runner) Check(ctx context.Context) runner.Status {
 			r.a.Label, r.a.Bin, strings.Join(r.a.Args, " "), err)}
 	}
 	r.learn(func(l *learned) {
-		l.image, l.loadSession, l.resume = init.image(), init.Caps.LoadSession, init.resumes()
+		l.Image, l.LoadSession, l.Resume = init.image(), init.Caps.LoadSession, init.resumes()
 	})
 	version := init.Agent.Version
 	detail := path
@@ -153,7 +199,7 @@ func (r *Runner) Start(ctx context.Context, t *task.Task, opts runner.Options, e
 		return err
 	}
 	runCtx, stop := context.WithCancelCause(context.WithoutCancel(ctx))
-	tr := newTurn(r, t, opts, emit, newConn(inputW, stop), stop)
+	tr := newTurn(runCtx, r, t, opts, emit, newConn(inputW, stop), stop)
 	defer func() {
 		stop(context.Canceled)
 		inputW.Close()
@@ -177,7 +223,7 @@ func (r *Runner) Start(ctx context.Context, t *task.Task, opts runner.Options, e
 		case <-runCtx.Done():
 		}
 	})
-	err = cli.Run(runCtx, cli.Command{Name: r.name, Path: path, Args: r.a.Args, Dir: r.a.Workdir, Env: r.env(opts.Env),
+	err = cli.Run(runCtx, cli.Command{Name: r.name, Path: path, Args: r.a.Args, Dir: r.a.Workdir, Env: r.env(opts.Env, opts.Permissions == "approve"),
 		Stdin: inputR, Cgroup: opts.Cgroup, OOMScoreAdj: opts.OOMScoreAdj, Started: opts.Started}, tr, emit)
 	if ctx.Err() != nil {
 		return ctx.Err()

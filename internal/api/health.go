@@ -119,9 +119,11 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	for _, rn := range s.runners.All() {
 		info := rn.Info()
 		c := checks[info.Name]
-		// Models and defaults come from settings.json; a default it leaves empty is the agent's own.
+		// Models and defaults come from settings.json; what it leaves empty is the agent's own.
 		a := set.Agents[info.Name]
-		info.Models = a.Models
+		if len(a.Models) > 0 || info.Models == nil {
+			info.Models = a.Models
+		}
 		if a.DefaultModel != "" {
 			info.DefaultModel = a.DefaultModel
 		}

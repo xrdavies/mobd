@@ -129,6 +129,10 @@ environment, folder and (on Linux) the conversation's desktop.
   accept. Approvals ("Ask before commands and edits") become `Questions` like today: ACP's
   `session/request_permission` maps to an approval question; "allow always" and "reject always" are not offered,
   because settings.json is the one place permissions are set.
+  ACP has no "ask first" switch: an agent asks according to its own permission config (OpenCode allows commands
+  and edits by default). An agent section's `approveEnv` is added to the agent's environment when its permissions
+  are "approve"; the OpenCode preset sets `OPENCODE_PERMISSION` to ask for commands, edits, web fetches and folders
+  outside the project. Pending approvals are withdrawn when the turn is cancelled.
 - **Reason:** one path for the apps, whatever the agent.
 
 ### D7. Capabilities are honest, not forced equal
@@ -149,7 +153,10 @@ environment, folder and (on Linux) the conversation's desktop.
 
 - **Choice:** ACP agents publish their settings as config options (`model`, reasoning level …). mobd maps the
   options it recognizes to settings.json's model and effort, so the composer's pickers work as for any agent, and
-  sets them per turn with `session/set_config_option`. Other config options appear as the agent's options (D2).
+  sets them per turn with `session/set_config_option`. The model option's choices become the agent's model list in
+  `/health` `runners[].models` when settings.json lists none; a value that is not a plain model name (DeepSeek
+  Harness uses JSON values) goes by its display name, mapped back when set. What an agent reported is kept in
+  `<dataDir>/agents/<name>.json`, since only a session reveals it. Other config options are not shown yet.
 - **Reason:** no model lists to maintain for agents mobd doesn't know.
 
 ## Part 3: Design
@@ -246,7 +253,7 @@ type Configurable interface {
 ```
 
 - `protocol: "acp"` makes an agent use the ACP adapter; its keys are `label`, `bin`, `args`, `workdir` (default:
-  `workdir`), `env` and `install`. Model and effort come from the agent per session (D9); its other session config
+  `workdir`), `env`, `approveEnv` (D6) and `install`. Model and effort come from the agent per session (D9); its other session config
   options are not shown yet.
 - mobd ships presets for OpenCode and DeepSeek Harness (label, default command, install command), so turning them
   on needs no section at all.

@@ -43,15 +43,17 @@ same settings as their flat keys, which still work; one value may not be set bot
 | `agents.pi.bin` | `piBin` | |
 
 Other agents speak the Agent Client Protocol: `{"protocol": "acp", "label", "bin", "args", "workdir", "env",
-"install"}`. `workdir` defaults to `workdir`. mobd knows two, so adding their name to `runners` is enough:
+"approveEnv", "install"}`. `workdir` defaults to `workdir`; `approveEnv` is added to `env` when the agent's
+permissions are "Ask first" (OpenCode's preset sets `OPENCODE_PERMISSION`). mobd knows two, so adding their name to `runners` is enough:
 
 | Name | Agent | Runs | Install |
 | --- | --- | --- | --- |
 | `opencode` | OpenCode | `opencode acp` | `npm install -g opencode-ai` |
 | `dsh` | DeepSeek Harness | `dsh --profile acp` | `npm install -g @deepseek-ai/dsh` |
 
-A section overrides a preset's fields. Paired apps can change `bin` and `workdir`; `args` and `env` choose what
-program runs and are edited only on the computer.
+A section overrides a preset's fields. Paired apps can change `bin` and `workdir`; `args`, `env` and `approveEnv`
+choose what program runs and are edited only on the computer. Agents log in on their own (`opencode auth login`;
+DeepSeek Harness reads `DEEPSEEK_API_KEY`).
 
 ```json
 {

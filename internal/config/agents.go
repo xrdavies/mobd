@@ -20,7 +20,10 @@ type AgentConfig struct {
 	Args     []string          `json:"args,omitempty"`
 	Workdir  string            `json:"workdir,omitempty"`
 	Env      map[string]string `json:"env,omitempty"`
-	Install  string            `json:"install,omitempty"`
+	// ApproveEnv is added to Env when the agent's permissions are "approve" (settings.json): ACP has
+	// no approval switch, so this is what makes an agent ask before acting.
+	ApproveEnv map[string]string `json:"approveEnv,omitempty"`
+	Install    string            `json:"install,omitempty"`
 	// Claude Code only: which of its settings it loads (claudeSettingSources).
 	SettingSources string `json:"settingSources,omitempty"`
 	// Codex only: app-server or exec (codexMode).
@@ -44,7 +47,8 @@ var Legacy = map[string]string{
 // ACPPresets are ACP agents mobd knows: turning one on needs no section. A section overrides fields.
 var ACPPresets = map[string]AgentConfig{
 	"opencode": {Protocol: ProtocolACP, Label: "OpenCode", Bin: "opencode", Args: []string{"acp"},
-		Install: "npm install -g opencode-ai"},
+		Install:    "npm install -g opencode-ai",
+		ApproveEnv: map[string]string{"OPENCODE_PERMISSION": `{"bash":"ask","edit":"ask","webfetch":"ask","external_directory":"ask"}`}},
 	"dsh": {Protocol: ProtocolACP, Label: "DeepSeek Harness", Bin: "dsh", Args: []string{"--profile", "acp"},
 		Install: "npm install -g @deepseek-ai/dsh"},
 }
@@ -92,8 +96,8 @@ func nativeSections(cfg *Config, raw map[string]json.RawMessage) error {
 			set("mode", a.Mode, nil)
 			set("settingSources", a.SettingSources, nil)
 		}
-		if a.Label != "" || len(a.Args) > 0 || len(a.Env) > 0 || a.Install != "" {
-			bad = append(bad, "label/args/env/install")
+		if a.Label != "" || len(a.Args) > 0 || len(a.Env) > 0 || len(a.ApproveEnv) > 0 || a.Install != "" {
+			bad = append(bad, "label/args/env/approveEnv/install")
 		}
 		if len(bad) > 0 {
 			sort.Strings(bad)
@@ -144,6 +148,9 @@ func acpAgents(cfg *Config) error {
 			}
 			if a.Install == "" {
 				a.Install = preset.Install
+			}
+			if a.ApproveEnv == nil {
+				a.ApproveEnv = preset.ApproveEnv
 			}
 		}
 		if a.Label == "" {

@@ -312,6 +312,7 @@ func serve(cfg config.Config, path string) error {
 	// Agents spoken to over the Agent Client Protocol (docs/agent-adapters.md): configured ones and presets.
 	acpAgents := cfg.AllACP()
 	for name, a := range acpAgents {
+		acp.ClientVersion = version
 		available[name] = acp.New(name, a, cfg)
 	}
 	var runners []runner.Runner

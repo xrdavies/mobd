@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -23,6 +24,8 @@ type turn struct {
 	t    *task.Task
 	opts runner.Options
 	c    *conn
+	// ctx ends with the turn (cancel included): a pending approval is withdrawn with it.
+	ctx  context.Context
 	stop context.CancelCauseFunc
 	work sync.WaitGroup
 	ran  chan struct{}
@@ -40,6 +43,7 @@ type turn struct {
 	text      strings.Builder
 	afterTool bool
 	lastEmit  time.Time
+	sent      string // the message text last emitted, so a flush does not repeat it
 	thinkN    int
 	thinking  strings.Builder
 	tools     map[string]task.Activity
@@ -47,8 +51,8 @@ type turn struct {
 	hasUsage  bool
 }
 
-func newTurn(r *Runner, t *task.Task, opts runner.Options, emit runner.EmitFunc, c *conn, stop context.CancelCauseFunc) *turn {
-	tr := &turn{r: r, t: t, opts: opts, c: c, stop: stop, emitFn: emit, ran: make(chan struct{}), tools: map[string]task.Activity{}, msgN: 1}
+func newTurn(ctx context.Context, r *Runner, t *task.Task, opts runner.Options, emit runner.EmitFunc, c *conn, stop context.CancelCauseFunc) *turn {
+	tr := &turn{r: r, t: t, opts: opts, c: c, ctx: ctx, stop: stop, emitFn: emit, ran: make(chan struct{}), tools: map[string]task.Activity{}, msgN: 1}
 	c.onNotify = tr.notification
 	c.onRequest = tr.request
 	return tr
@@ -122,14 +126,13 @@ func (o configOption) current() string {
 	return s
 }
 
-// values are the option's choices, flat or in groups.
-func (o configOption) values() []string {
-	var flat []valueOption
-	var out []string
+// choices are the option's choices, flat or in groups.
+func (o configOption) choices() []valueOption {
+	var flat, out []valueOption
 	if json.Unmarshal(o.Options, &flat) == nil {
 		for _, v := range flat {
 			if v.Value != "" {
-				out = append(out, v.Value)
+				out = append(out, v)
 			}
 		}
 		if len(out) > 0 {
@@ -142,11 +145,52 @@ func (o configOption) values() []string {
 	if json.Unmarshal(o.Options, &groups) == nil {
 		for _, g := range groups {
 			for _, v := range g.Options {
-				out = append(out, v.Value)
+				if v.Value != "" {
+					out = append(out, v)
+				}
 			}
 		}
 	}
 	return out
+}
+
+func (o configOption) values() []string {
+	var out []string
+	for _, v := range o.choices() {
+		out = append(out, v.Value)
+	}
+	return out
+}
+
+// plainModel is a model value Mob can carry as is (the API's model names); other values, like
+// DeepSeek Harness's JSON ones, go by their display name.
+var plainModel = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$`)
+
+// modelNames names the agent's models for Mob and maps those names back to the agent's values.
+func modelNames(choices []valueOption) (names []string, values map[string]string) {
+	values = map[string]string{}
+	for _, c := range choices {
+		name := c.Value
+		if !plainModel.MatchString(name) {
+			name = strings.Join(strings.Fields(c.Name), "-")
+			if !plainModel.MatchString(name) || values[name] != "" {
+				continue
+			}
+			values[name] = c.Value
+		}
+		names = append(names, name)
+	}
+	return names, values
+}
+
+// modelName is Mob's name for an agent's model value.
+func modelName(value string, values map[string]string) string {
+	for n, v := range values {
+		if v == value {
+			return n
+		}
+	}
+	return value
 }
 
 func (o configOption) is(category string, ids ...string) bool {
@@ -178,7 +222,7 @@ func (tr *turn) run(ctx context.Context, mcp []any, prompt []map[string]any) err
 		return fmt.Errorf("%s: %w", tr.r.a.Label, err)
 	}
 	tr.r.learn(func(l *learned) {
-		l.image, l.loadSession, l.resume = init.image(), init.Caps.LoadSession, init.resumes()
+		l.Image, l.LoadSession, l.Resume = init.image(), init.Caps.LoadSession, init.resumes()
 	})
 	if !init.image() && len(tr.opts.Images) > 0 {
 		return fmt.Errorf("%s does not accept images", tr.r.a.Label)
@@ -295,16 +339,24 @@ func (tr *turn) settings(ctx context.Context, s sessionResult) (string, error) {
 		model = s.Models.Current
 	}
 	modelOpt, hasModelOpt := s.option("model", "model")
-	if hasModelOpt && modelOpt.current() != "" {
-		model = modelOpt.current()
+	var names []string
+	values := map[string]string{}
+	if hasModelOpt {
+		names, values = modelNames(modelOpt.choices())
+		if c := modelOpt.current(); c != "" {
+			model = modelName(c, values)
+		}
 	}
 	effortOpt, hasEffort := s.option("thought_level", effortIDs...)
 	tr.r.learn(func(l *learned) {
 		if model != "" {
-			l.model = model
+			l.Model = model
+		}
+		if hasModelOpt {
+			l.Models, l.Values = names, values
 		}
 		if hasEffort {
-			l.efforts = effortOpt.values()
+			l.Efforts = effortOpt.values()
 		}
 	})
 	set := func(o configOption, value string) error {
@@ -315,7 +367,7 @@ func (tr *turn) settings(ctx context.Context, s sessionResult) (string, error) {
 		var err error
 		switch {
 		case hasModelOpt:
-			err = set(modelOpt, m)
+			err = set(modelOpt, tr.r.modelValue(m))
 		case s.Models != nil:
 			err = tr.c.call(withTimeout(ctx, 30*time.Second), "session/set_model", map[string]any{"sessionId": s.SessionID, "modelId": m}, nil)
 		default:
@@ -388,7 +440,7 @@ func (tr *turn) permission(params json.RawMessage) map[string]string {
 	if len(p.ToolCall.RawInput) > 0 && string(p.ToolCall.RawInput) != "null" {
 		details = runner.Clip(string(p.ToolCall.RawInput), 600)
 	}
-	q, err := tr.opts.Ask(context.Background(), task.QuestionApproval, title, details)
+	q, err := tr.opts.Ask(tr.ctx, task.QuestionApproval, title, details)
 	if err != nil {
 		return cancelled
 	}
@@ -470,7 +522,7 @@ func (tr *turn) notification(method string, params json.RawMessage) error {
 		due := time.Since(tr.lastEmit) >= 400*time.Millisecond && strings.TrimSpace(tr.text.String()) != ""
 		ev := task.Event{Type: "message", MessageID: tr.messageID(), Message: tr.text.String()}
 		if due {
-			tr.lastEmit = time.Now()
+			tr.lastEmit, tr.sent = time.Now(), ev.MessageID+"\n"+ev.Message
 		}
 		tr.mu.Unlock()
 		if due {
@@ -498,7 +550,7 @@ func (tr *turn) notification(method string, params json.RawMessage) error {
 		}
 		if u.Cost != nil && strings.EqualFold(u.Cost.Currency, "USD") {
 			tr.usage.CostUSD, tr.hasUsage = u.Cost.Amount, true
-			tr.r.learn(func(l *learned) { l.cost = true })
+			tr.r.learn(func(l *learned) { l.Cost = true })
 		}
 		tr.mu.Unlock()
 	}
@@ -610,8 +662,10 @@ func (tr *turn) flushText() error {
 	tr.mu.Lock()
 	text := tr.text.String()
 	ev := task.Event{Type: "message", MessageID: tr.messageID(), Message: text}
+	repeat := ev.MessageID+"\n"+text == tr.sent
+	tr.sent = ev.MessageID + "\n" + text
 	tr.mu.Unlock()
-	if strings.TrimSpace(text) == "" {
+	if repeat || strings.TrimSpace(text) == "" {
 		return nil
 	}
 	return tr.emit(ev)

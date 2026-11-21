@@ -192,7 +192,7 @@ func (c *conn) initialize(ctx context.Context) (initResult, error) {
 			"fs":       map[string]bool{"readTextFile": false, "writeTextFile": false},
 			"terminal": false,
 		},
-		"clientInfo": map[string]string{"name": "mobd", "title": "Mob"},
+		"clientInfo": map[string]string{"name": "mobd", "title": "Mob", "version": ClientVersion},
 	}, &res)
 	if err != nil {
 		return res, err
