@@ -220,8 +220,8 @@ func TestAgentKeysGoToSectionsAndReplaceFlatKeys(t *testing.T) {
 	if err != nil || cfg.ClaudeBin != "/bin/echo" || cfg.ClaudeSettingSources != "all" {
 		t.Fatalf("loaded %+v %v", cfg.ClaudeBin, err)
 	}
-	// Removing the last key removes the section.
-	if _, _, err := Change(args, rev, map[string]json.RawMessage{"agents.claude.bin": json.RawMessage(`null`), "agents.claude.settingSources": json.RawMessage(`null`)}); err != nil {
+	// Removing the last key removes the section; empty removes like null.
+	if _, _, err := Change(args, rev, map[string]json.RawMessage{"agents.claude.bin": json.RawMessage(`null`), "agents.claude.settingSources": json.RawMessage(`""`)}); err != nil {
 		t.Fatal(err)
 	}
 	data, _ = os.ReadFile(path)

@@ -266,7 +266,7 @@ type Configurable interface {
   `options`: `{key, label, help?, type, choices?, value, restart, overridden?}`, `type` one of `bool`, `choice`,
   `path`, `text`, `number`; `overridden` when a flag or environment variable sets it on the computer (read-only).
   Agents not turned on are listed too, so the apps can show their options before enabling them.
-- `GET /config` / `PUT /config` take `agents.<name>.<key>` keys; validation comes from the adapter. Remote
+- `GET /config` / `PUT /config` take `agents.<name>.<key>` keys (`null` or `""` goes back to the default); validation comes from the adapter. Remote
   maintenance's editable rules apply per option (`args` and `env` of ACP agents are local-only, like `mcpCommand`:
   they choose what program runs).
 - New feature flag `agentOptions`; apps without it keep today's per-agent screens.

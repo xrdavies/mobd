@@ -339,7 +339,8 @@ func Change(args []string, rev string, changes map[string]json.RawMessage) (stri
 				sec = map[string]json.RawMessage{}
 			}
 			old := sec[key]
-			if string(bytes.TrimSpace(v)) == "null" {
+			// Empty is the default too: some clients' JSON encoders drop nulls.
+			if t := string(bytes.TrimSpace(v)); t == "null" || t == `""` {
 				if old != nil {
 					delete(sec, key)
 					diff = append(diff, Diff{Key: k, From: old})
