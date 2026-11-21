@@ -258,7 +258,7 @@ fresh one written.
 
 `GET /settings` answers `{settings, agents, installed}` (`installed` is the same list as `/health`'s `agents`): `settings` is the file, `agents` gives each enabled
 agent's `label`, `efforts`, and its own defaults (`agentDefaultModel`, `agentDefaultEffort`) for
-labelling an empty default. Edit `settings` and `PUT` it back whole with the same `rev`. A stale
+labelling an empty default, and `agentModels`, the models an ACP agent reports. Edit `settings` and `PUT` it back whole with the same `rev`. A stale
 `rev` (another device saved first) gets **409** `settings_changed`: reload and edit again. Every
 enabled agent needs an entry; values are validated (models as model names, at most 50 per agent,
 efforts from the agent's list, permissions `bypass`/`approve`; Codex `approve` needs `codexMode`

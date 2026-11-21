@@ -38,6 +38,8 @@ type agentInfo struct {
 	Efforts            []string `json:"efforts"`
 	AgentDefaultModel  string   `json:"agentDefaultModel,omitempty"`
 	AgentDefaultEffort string   `json:"agentDefaultEffort,omitempty"`
+	// AgentModels are the models the agent itself reports (ACP agents), to suggest in the model list.
+	AgentModels []string `json:"agentModels,omitempty"`
 }
 
 type settingsView struct {
@@ -52,7 +54,7 @@ func (s *Server) settingsView() settingsView {
 	v := settingsView{Settings: s.settings.Get(), Agents: map[string]agentInfo{}, Installed: s.agentStatuses(context.Background())}
 	for _, rn := range s.runners.All() {
 		info := rn.Info()
-		v.Agents[info.Name] = agentInfo{Label: info.Label, Efforts: info.Efforts, AgentDefaultModel: info.DefaultModel, AgentDefaultEffort: info.DefaultEffort}
+		v.Agents[info.Name] = agentInfo{Label: info.Label, Efforts: info.Efforts, AgentDefaultModel: info.DefaultModel, AgentDefaultEffort: info.DefaultEffort, AgentModels: info.Models}
 	}
 	return v
 }
