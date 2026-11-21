@@ -54,6 +54,9 @@ func (s *Server) settingsView() settingsView {
 	v := settingsView{Settings: s.settings.Get(), Agents: map[string]agentInfo{}, Installed: s.agentStatuses(context.Background())}
 	for _, rn := range s.runners.All() {
 		info := rn.Info()
+		if info.Efforts == nil {
+			info.Efforts = []string{} // an agent without an effort setting (some ACP agents)
+		}
 		v.Agents[info.Name] = agentInfo{Label: info.Label, Efforts: info.Efforts, AgentDefaultModel: info.DefaultModel, AgentDefaultEffort: info.DefaultEffort, AgentModels: info.Models}
 	}
 	return v

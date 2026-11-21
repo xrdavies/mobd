@@ -16,6 +16,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -83,13 +84,13 @@ func (r *Runner) Info() runner.Info {
 	c := r.caps
 	r.mu.Unlock()
 	return runner.Info{Protocol: config.ProtocolACP, Name: r.name, Label: r.a.Label, Install: r.a.Install,
-		Efforts: slices.Clone(c.Efforts), DefaultModel: c.Model, Models: slices.Clone(c.Models),
+		Efforts: append([]string{}, c.Efforts...), DefaultModel: c.Model, Models: slices.Clone(c.Models),
 		Images: c.Image, Resume: c.LoadSession || c.Resume, Cost: c.Cost, Steer: false}
 }
 
 func (r *Runner) Options() []runner.Option {
 	return []runner.Option{
-		runner.PathOption("bin", "Program", r.a.Label+"'s executable; it runs with: "+strings.Join(r.a.Args, " "), r.a.Bin),
+		runner.PathOption("bin", "Program", r.a.Label+"'s executable, started with "+strconv.Quote(strings.Join(r.a.Args, " ")), r.a.Bin),
 		runner.PathOption("workdir", "Works in", "The folder "+r.a.Label+" works in", r.a.Workdir),
 	}
 }
