@@ -1,6 +1,6 @@
 # Agent adapters: one shape for every agent framework
 
-Status: design, 2026-11-21; not implemented. ACP status checked 2026-11-21 (see [ACP status](#acp-status)).
+Status: mobd implemented 2026-11-22 (phases 1 and 3); apps in progress. ACP status checked 2026-11-21 (see [ACP status](#acp-status)).
 
 This document has three parts: [the feature](#part-1-feature), [the decisions](#part-2-decisions) and
 [the design](#part-3-design).
@@ -245,17 +245,20 @@ type Configurable interface {
 }
 ```
 
-- `protocol: "acp"` makes an agent use the ACP adapter; its options are `label`, `bin`, `args`, `workdir`, `env`,
-  plus the config options the agent reports.
+- `protocol: "acp"` makes an agent use the ACP adapter; its keys are `label`, `bin`, `args`, `workdir` (default:
+  `workdir`), `env` and `install`. Model and effort come from the agent per session (D9); its other session config
+  options are not shown yet.
 - mobd ships presets for OpenCode and DeepSeek Harness (label, default command, install command), so turning them
   on needs no section at all.
-- Flat keys (`claudeBin` …) are still read (D3). `GET /config` reports the sections; the flat keys show as
-  `legacy` with where they map to.
+- Flat keys (`claudeBin` …) are still read (D3); setting a key both ways is an error. A section key written through
+  `PUT /config` replaces its flat key in the file (the diff shows both).
 
 ### API
 
-- `/health` `runners[]` and `/settings` `agents{}` gain `protocol` (`native` or `acp`) and `options` (the list from
-  D2 with current values).
+- `/health` `agents[]` (and `/settings` `installed[]`, the same list) gain `protocol` (`native` or `acp`) and
+  `options`: `{key, label, help?, type, choices?, value, restart, overridden?}`, `type` one of `bool`, `choice`,
+  `path`, `text`, `number`; `overridden` when a flag or environment variable sets it on the computer (read-only).
+  Agents not turned on are listed too, so the apps can show their options before enabling them.
 - `GET /config` / `PUT /config` take `agents.<name>.<key>` keys; validation comes from the adapter. Remote
   maintenance's editable rules apply per option (`args` and `env` of ACP agents are local-only, like `mcpCommand`:
   they choose what program runs).

@@ -15,6 +15,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -900,6 +901,7 @@ func TestHealthReadiness(t *testing.T) {
 		Checks     map[string]check
 		Runner     string
 		Runners    []runnerHealth
+		Agents     []agentStatus
 	}
 	if err := json.Unmarshal(doJSON(t, s, http.MethodGet, "/health", "").Body.Bytes(), &body); err != nil {
 		t.Fatal(err)
@@ -920,6 +922,17 @@ func TestHealthReadiness(t *testing.T) {
 	if body.Runner != "codex" || len(body.Runners) != 1 || !body.Runners[0].Available || !body.Runners[0].Default ||
 		!body.Runners[0].Resume || len(body.Runners[0].Efforts) != 5 || body.Runners[0].Models[0] != "gpt-5.5" {
 		t.Fatalf("runners %+v", body.Runners)
+	}
+	// Each agent publishes its adapter and settings for the apps to draw (feature agentOptions).
+	var cx agentStatus
+	for _, a := range body.Agents {
+		if a.Name == "codex" {
+			cx = a
+		}
+	}
+	if cx.Protocol != "native" || len(cx.Options) != 2 || cx.Options[0].Key != "bin" || cx.Options[0].Value != bin ||
+		cx.Options[1].Key != "mode" || len(cx.Options[1].Choices) != 2 || !slices.Contains(body.Features, "agentOptions") {
+		t.Fatalf("codex agent %+v", cx)
 	}
 }
 

@@ -12,13 +12,14 @@ import (
 	"time"
 
 	"github.com/xrdavies/mobd/internal/desktop"
+	"github.com/xrdavies/mobd/internal/maintenance"
 	"github.com/xrdavies/mobd/internal/runner"
 )
 
 // APIVersion is advertised on /health; clients gate features on it.
 const APIVersion = 3
 
-var baseFeatures = []string{"queue", "activities", "sessionAdmin", "events", "screen", "uploads", "taskOptions", "runners", "questions", "steer", "pairing", "stream", "streamResize", "settings", "fileTransfers", "fileFolders", "sessionHistory", "agentCollaboration", "usbRedirection", "screenUse", "unpair"}
+var baseFeatures = []string{"queue", "activities", "sessionAdmin", "events", "screen", "uploads", "taskOptions", "runners", "questions", "steer", "pairing", "stream", "streamResize", "settings", "fileTransfers", "fileFolders", "sessionHistory", "agentCollaboration", "usbRedirection", "screenUse", "unpair", "agentOptions"}
 
 // features adds what this server's desktops can do: sessionDesktops where each conversation
 // has its own desktop (Linux).
@@ -83,6 +84,16 @@ type agentStatus struct {
 	// Bin is the program mobd runs (resolved path) and Version what its --version printed.
 	Bin     string `json:"bin,omitempty"`
 	Version string `json:"version,omitempty"`
+	// Protocol is native (mobd's own adapter) or acp; Options are its config.json settings
+	// (agents.<name>.<key>, docs/agent-adapters.md), drawn by the apps (feature agentOptions).
+	Protocol string        `json:"protocol,omitempty"`
+	Options  []agentOption `json:"options,omitempty"`
+}
+
+type agentOption struct {
+	runner.Option
+	// Overridden: set by a flag or environment variable on the computer; read-only in the apps.
+	Overridden bool `json:"overridden,omitempty"`
 }
 
 // agentCheckTimeout bounds one agent's check; they run in parallel, so one slow agent (Pi's
@@ -212,7 +223,8 @@ func (s *Server) checkAgents(ctx context.Context) []agentStatus {
 			info := rn.Info()
 			_, enabled := s.runners.Get(info.Name)
 			st := rn.Check(ctx)
-			a := agentStatus{Name: info.Name, Label: info.Label, Enabled: enabled, Detail: st.Detail, Bin: st.Bin, Version: st.Version}
+			a := agentStatus{Name: info.Name, Label: info.Label, Enabled: enabled, Detail: st.Detail, Bin: st.Bin, Version: st.Version,
+				Protocol: info.Protocol, Options: s.agentOptions(rn)}
 			switch {
 			case st.Missing:
 				a.State, a.Install = "missing", info.Install
@@ -228,6 +240,24 @@ func (s *Server) checkAgents(ctx context.Context) []agentStatus {
 		})
 	}
 	wg.Wait()
+	return out
+}
+
+// agentOptions are an adapter's options, marked when the computer overrides them.
+func (s *Server) agentOptions(rn runner.Runner) []agentOption {
+	c, ok := rn.(runner.Configurable)
+	if !ok {
+		return nil
+	}
+	var overridden []string
+	if s.maint != nil {
+		overridden = maintenance.Overridden(s.maint.Args)
+	}
+	name := rn.Info().Name
+	var out []agentOption
+	for _, o := range c.Options() {
+		out = append(out, agentOption{Option: o, Overridden: slices.Contains(overridden, "agents."+name+"."+o.Key)})
+	}
 	return out
 }
 

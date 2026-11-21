@@ -38,10 +38,21 @@ type Runner struct {
 func New(cfg config.Config) *Runner { return &Runner{cfg: cfg} }
 
 var _ runner.Runner = (*Runner)(nil)
+var _ runner.Configurable = (*Runner)(nil)
+
+func (r *Runner) Options() []runner.Option {
+	return []runner.Option{
+		runner.PathOption("bin", "Program", "Claude Code's executable", r.cfg.ClaudeBin),
+		runner.PathOption("workdir", "Works in", "The folder Claude Code works in", r.cfg.ClaudeWorkDir),
+		{Key: "settingSources", Label: "Settings it loads", Type: "choice", Value: r.cfg.ClaudeSettingSources, Restart: true,
+			Help:    "Project: only the project's settings (and your sign-in). All: also your personal ~/.claude",
+			Choices: []runner.Choice{{Value: "project", Label: "Project"}, {Value: "all", Label: "All"}}},
+	}
+}
 
 func (r *Runner) Info() runner.Info {
 	model, effort := r.defaults()
-	return runner.Info{Name: Name, Label: "Claude Code", Efforts: Efforts, Install: "curl -fsSL https://claude.ai/install.sh | bash", DefaultModel: model, DefaultEffort: effort,
+	return runner.Info{Protocol: "native", Name: Name, Label: "Claude Code", Efforts: Efforts, Install: "curl -fsSL https://claude.ai/install.sh | bash", DefaultModel: model, DefaultEffort: effort,
 		Images: true, Resume: true, Cost: true}
 }
 

@@ -40,10 +40,20 @@ func New(cfg config.Config) *Runner {
 func (r *Runner) appServer() bool { return r.cfg.CodexMode == "app-server" }
 
 var _ runner.Runner = (*Runner)(nil)
+var _ runner.Configurable = (*Runner)(nil)
+
+func (r *Runner) Options() []runner.Option {
+	return []runner.Option{
+		runner.PathOption("bin", "Program", "Codex's executable", r.cfg.CodexBin),
+		{Key: "mode", Label: "Mode", Type: "choice", Value: r.cfg.CodexMode, Restart: true,
+			Help:    "App server: approvals and adding to a running turn. Exec: one process per turn",
+			Choices: []runner.Choice{{Value: "app-server", Label: "App server"}, {Value: "exec", Label: "Exec"}}},
+	}
+}
 
 func (r *Runner) Info() runner.Info {
 	model, effort := defaults()
-	return runner.Info{Name: Name, Label: "Codex", Efforts: Efforts, Install: "npm install -g @openai/codex", DefaultModel: model, DefaultEffort: effort,
+	return runner.Info{Protocol: "native", Name: Name, Label: "Codex", Efforts: Efforts, Install: "npm install -g @openai/codex", DefaultModel: model, DefaultEffort: effort,
 		Images: true, Resume: true, Steer: r.appServer()}
 }
 

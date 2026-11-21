@@ -77,7 +77,7 @@ func TestChangeValidatesAndKeepsOtherKeys(t *testing.T) {
 func TestOverriddenKeys(t *testing.T) {
 	t.Setenv("MOBD_CLAUDE_BIN", "/x/claude")
 	got := Overridden([]string{"--config", "c.json", "--workdir=/w"})
-	if strings.Join(got, ",") != "claudeBin,workdir" {
+	if strings.Join(got, ",") != "agents.claude.bin,claudeBin,workdir" {
 		t.Fatalf("overridden %v", got)
 	}
 }
@@ -188,4 +188,62 @@ func TestStaleRunningOperationCountsAsFailed(t *testing.T) {
 	if _, err := st.Load("../x"); err == nil {
 		t.Fatal("path outside the store loaded")
 	}
+}
+
+func TestAgentKeysGoToSectionsAndReplaceFlatKeys(t *testing.T) {
+	dir, args, path := setup(t, `,"claudeBin":"/bin/sh"`)
+	f, _ := Read(args)
+	if _, _, err := Change(args, f.Rev, map[string]json.RawMessage{"agents.opencode.args": json.RawMessage(`["x"]`)}); !errors.As(err, new(*NotEditableError)) {
+		t.Fatalf("an ACP agent's args are local only: %v", err)
+	}
+	if _, _, err := Change(args, f.Rev, map[string]json.RawMessage{"agents.codex.workdir": json.RawMessage(`"/tmp"`)}); !errors.As(err, new(*NotEditableError)) {
+		t.Fatalf("codex has no own workdir: %v", err)
+	}
+	rev, diff, err := Change(args, f.Rev, map[string]json.RawMessage{
+		"agents.claude.bin":            json.RawMessage(`"/bin/echo"`),
+		"agents.claude.settingSources": json.RawMessage(`"all"`),
+	})
+	if err != nil || len(diff) != 3 {
+		t.Fatalf("change %v %+v", err, diff)
+	}
+	var raw map[string]any
+	data, _ := os.ReadFile(path)
+	json.Unmarshal(data, &raw)
+	if raw["claudeBin"] != nil {
+		t.Fatalf("flat key kept next to its section: %s", data)
+	}
+	claude := raw["agents"].(map[string]any)["claude"].(map[string]any)
+	if claude["bin"] != "/bin/echo" || claude["settingSources"] != "all" {
+		t.Fatalf("section %s", data)
+	}
+	cfg, err := Check(args)
+	if err != nil || cfg.ClaudeBin != "/bin/echo" || cfg.ClaudeSettingSources != "all" {
+		t.Fatalf("loaded %+v %v", cfg.ClaudeBin, err)
+	}
+	// Removing the last key removes the section.
+	if _, _, err := Change(args, rev, map[string]json.RawMessage{"agents.claude.bin": json.RawMessage(`null`), "agents.claude.settingSources": json.RawMessage(`null`)}); err != nil {
+		t.Fatal(err)
+	}
+	data, _ = os.ReadFile(path)
+	if strings.Contains(string(data), `"agents"`) {
+		t.Fatalf("empty sections kept: %s", data)
+	}
+	// An ACP preset turned on needs its program.
+	f, _ = Read(args)
+	if _, _, err := Change(args, f.Rev, map[string]json.RawMessage{"runners": json.RawMessage(`["codex","opencode"]`), "agents.opencode.bin": json.RawMessage(`"/no/opencode"`)}); err == nil || !strings.Contains(err.Error(), "opencode is enabled") {
+		t.Fatalf("missing ACP program: %v", err)
+	}
+	f, _ = Read(args)
+	if _, _, err := Change(args, f.Rev, map[string]json.RawMessage{"runners": json.RawMessage(`["codex","opencode"]`), "agents.opencode.bin": json.RawMessage(`"/bin/cat"`)}); err != nil {
+		t.Fatalf("ACP agent on: %v", err)
+	}
+	cfg, _ = Check(args)
+	if a, ok := cfg.ACP("opencode"); !ok || a.Bin != "/bin/cat" || a.Args[0] != "acp" {
+		t.Fatalf("preset with program %+v", a)
+	}
+	eff, _ := Effective(cfg)
+	if eff["agents"].(map[string]any)["opencode"].(map[string]any)["bin"] != "/bin/cat" {
+		t.Fatalf("effective %+v", eff["agents"])
+	}
+	_ = dir
 }

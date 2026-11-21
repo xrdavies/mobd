@@ -86,6 +86,39 @@ type Info struct {
 	Cost bool `json:"cost"`
 	// Steer reports whether messages can be added to a running turn.
 	Steer bool `json:"steer"`
+	// Protocol is "native" (mobd's own adapter) or "acp" (Agent Client Protocol).
+	Protocol string `json:"protocol,omitempty"`
+}
+
+// Option is one setting an adapter takes in config.json, as agents.<name>.<key>
+// (docs/agent-adapters.md D2). The apps draw an agent's settings from these.
+type Option struct {
+	Key   string `json:"key"`
+	Label string `json:"label"`
+	Help  string `json:"help,omitempty"`
+	// Type is bool, choice, path, text or number.
+	Type    string   `json:"type"`
+	Choices []Choice `json:"choices,omitempty"`
+	// Value is what the running mobd uses.
+	Value any `json:"value"`
+	// Restart: the change applies after mobd restarts (all config.json options do).
+	Restart bool `json:"restart"`
+}
+
+// Choice is one value of a choice option.
+type Choice struct {
+	Value string `json:"value"`
+	Label string `json:"label"`
+}
+
+// Configurable adapters declare their options.
+type Configurable interface {
+	Options() []Option
+}
+
+// PathOption is the usual program or folder option.
+func PathOption(key, label, help, value string) Option {
+	return Option{Key: key, Label: label, Help: help, Type: "path", Value: value, Restart: true}
 }
 
 // Status is the readiness of a runner on this machine.

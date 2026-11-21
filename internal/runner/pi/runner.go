@@ -41,10 +41,16 @@ type Runner struct {
 func New(cfg config.Config) *Runner { return &Runner{cfg: cfg, active: map[string]*turn{}} }
 
 var _ runner.Runner = (*Runner)(nil)
+var _ runner.Configurable = (*Runner)(nil)
+
+func (r *Runner) Options() []runner.Option {
+	return []runner.Option{runner.PathOption("bin", "Program", "Pi's executable", r.cfg.PiBin)}
+}
+
 var _ runner.Steerer = (*Runner)(nil)
 
 func (r *Runner) Info() runner.Info {
-	return runner.Info{Name: Name, Label: "Pi", Efforts: efforts, Install: "npm install -g --ignore-scripts @earendil-works/pi-coding-agent@1.4.0", Images: true, Resume: true, Cost: true, Steer: true}
+	return runner.Info{Protocol: "native", Name: Name, Label: "Pi", Efforts: efforts, Install: "npm install -g --ignore-scripts @earendil-works/pi-coding-agent@1.4.0", Images: true, Resume: true, Cost: true, Steer: true}
 }
 
 func (r *Runner) Check(ctx context.Context) runner.Status {

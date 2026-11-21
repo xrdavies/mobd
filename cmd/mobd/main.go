@@ -6,11 +6,13 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"maps"
 	"net"
 	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -24,6 +26,7 @@ import (
 	"github.com/xrdavies/mobd/internal/mcpserver"
 	"github.com/xrdavies/mobd/internal/pairing"
 	"github.com/xrdavies/mobd/internal/runner"
+	"github.com/xrdavies/mobd/internal/runner/acp"
 	"github.com/xrdavies/mobd/internal/runner/claude"
 	"github.com/xrdavies/mobd/internal/runner/codex"
 	"github.com/xrdavies/mobd/internal/runner/pi"
@@ -306,11 +309,16 @@ func serve(cfg config.Config, path string) error {
 		return fmt.Errorf("open conversation state: %w", err)
 	}
 	available := map[string]runner.Runner{codex.Name: codex.New(cfg), claude.Name: claude.New(cfg), pi.Name: pi.New(cfg)}
+	// Agents spoken to over the Agent Client Protocol (docs/agent-adapters.md): configured ones and presets.
+	acpAgents := cfg.AllACP()
+	for name, a := range acpAgents {
+		available[name] = acp.New(name, a, cfg)
+	}
 	var runners []runner.Runner
 	for _, name := range cfg.Runners {
 		rn, ok := available[name]
 		if !ok {
-			return fmt.Errorf("unknown runner %q (known: codex, claude, pi)", name)
+			return fmt.Errorf("unknown runner %q", name)
 		}
 		runners = append(runners, rn)
 	}
@@ -327,7 +335,11 @@ func serve(cfg config.Config, path string) error {
 		srv.SetMaintenance(m)
 		managed = m.Service
 	}
-	srv.SetSupported(available[codex.Name], available[claude.Name], available[pi.Name])
+	supported := []runner.Runner{available[codex.Name], available[claude.Name], available[pi.Name]}
+	for _, name := range slices.Sorted(maps.Keys(acpAgents)) {
+		supported = append(supported, available[name])
+	}
+	srv.SetSupported(supported...)
 
 	httpSrv := &http.Server{
 		Addr:              cfg.ListenAddr,

@@ -62,6 +62,7 @@ func (s *Server) configView() (configView, error) {
 	for _, k := range maintenance.Editable {
 		v.Editable = append(v.Editable, k.JSON)
 	}
+	v.Editable = append(v.Editable, maintenance.AgentKeys(s.cfg)...)
 	if v.Overridden == nil {
 		v.Overridden = []string{}
 	}

@@ -1,7 +1,7 @@
 # Configuration reference
 
 Every mobd configuration setting, with its default value and environment variable. Paired apps can change
-`runners`, the agents' programs and working folders, `claudeSettingSources`, `codexMode`, `maxRunning`,
+`runners`, the agents' sections (`agents.<name>.<key>`), `claudeSettingSources`, `codexMode`, `maxRunning`,
 `questionTimeout` and `filesDir`, then restart mobd ([remote maintenance](remote-maintenance.md)); the rest is
 edited here. `mobd restart` checks the config first and goes back to the last one that worked if mobd does not
 start (`config.last-good.json`; the refused file is kept as `config.rejected.json`).
@@ -23,12 +23,46 @@ start (`config.last-good.json`; the refused file is kept as `config.rejected.jso
 | `filesDir` | `MOBD_FILES_DIR` | `~/mob-files` | Folder shared with paired devices for file transfers; unfinished uploads in its hidden `.uploads/` |
 | `corsOrigins` | `MOBD_CORS_ORIGINS` | `http://localhost:1420,http://127.0.0.1:1420,tauri://localhost,http://tauri.localhost` | Comma-separated exact origins; a nonempty value replaces the defaults |
 | `questionTimeout` | `MOBD_QUESTION_TIMEOUT` | `30m` | How long a turn waits for your answer to the agent's question or approval request |
-| `runners` | `MOBD_RUNNERS` | `codex,claude` | Enabled runners |
+| `runners` | `MOBD_RUNNERS` | `codex,claude` | Enabled runners: `codex`, `claude`, `pi`, `opencode`, `dsh` or an ACP agent named in `agents` |
 | `codexMode` | `MOBD_CODEX_MODE` | `app-server` | `app-server` (approvals, steering, streaming) or `exec` |
 | `claudeSettingSources` | `MOBD_CLAUDE_SETTING_SOURCES` | `project` | Claude settings loaded; `all` includes your personal `~/.claude` (with `project`, only its `env` and `apiKeyHelper` are used, for logging in) |
 | `claudeBin` | `MOBD_CLAUDE_BIN` | `claude` | Claude Code executable |
 | `claudeWorkdir` | `MOBD_CLAUDE_WORKDIR` | Codex workdir | Claude working directory |
 | `piBin` | `MOBD_PI_BIN` | `pi` | Pi CLI (tested with 1.4.0; requires 1.4.x or later 1.x); uses `workdir` |
+| `agents` | — | presets | Per-agent sections, below |
+
+### Agent sections
+
+Each agent can have a section under `agents` ([agent-adapters.md](agent-adapters.md)). Native agents take the
+same settings as their flat keys, which still work; one value may not be set both ways.
+
+| Section key | Same as | Values |
+| --- | --- | --- |
+| `agents.claude.bin` / `.workdir` / `.settingSources` | `claudeBin` / `claudeWorkdir` / `claudeSettingSources` | |
+| `agents.codex.bin` / `.mode` | `codexBin` / `codexMode` | |
+| `agents.pi.bin` | `piBin` | |
+
+Other agents speak the Agent Client Protocol: `{"protocol": "acp", "label", "bin", "args", "workdir", "env",
+"install"}`. `workdir` defaults to `workdir`. mobd knows two, so adding their name to `runners` is enough:
+
+| Name | Agent | Runs | Install |
+| --- | --- | --- | --- |
+| `opencode` | OpenCode | `opencode acp` | `npm install -g opencode-ai` |
+| `dsh` | DeepSeek Harness | `dsh --profile acp` | `npm install -g @deepseek-ai/dsh` |
+
+A section overrides a preset's fields. Paired apps can change `bin` and `workdir`; `args` and `env` choose what
+program runs and are edited only on the computer.
+
+```json
+{
+  "runners": ["claude", "codex", "opencode", "my-agent"],
+  "agents": {
+    "claude": { "settingSources": "all" },
+    "opencode": { "bin": "/opt/homebrew/bin/opencode" },
+    "my-agent": { "protocol": "acp", "label": "My agent", "bin": "my-agent", "args": ["--acp"] }
+  }
+}
+```
 
 Conversation desktops (Linux; accepted and validated everywhere):
 

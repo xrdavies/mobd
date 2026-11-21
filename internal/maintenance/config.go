@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"sort"
 	"strings"
@@ -45,7 +46,46 @@ var Editable = []Key{
 }
 
 func editable(name string) bool {
+	if _, _, ok := agentKey(name); ok {
+		return true
+	}
 	return slices.ContainsFunc(Editable, func(k Key) bool { return k.JSON == name })
+}
+
+// agentKeysFor are the section keys the apps may change for an agent (docs/agent-adapters.md): its
+// program, folder and own options. An ACP agent's args and env stay local: they choose what runs.
+func agentKeysFor(name string) []string {
+	switch name {
+	case "claude":
+		return []string{"bin", "workdir", "settingSources"}
+	case "codex":
+		return []string{"bin", "mode"}
+	case "pi":
+		return []string{"bin"}
+	}
+	return []string{"bin", "workdir"}
+}
+
+var agentNamePattern = regexp.MustCompile(`^[a-z][a-z0-9-]{0,31}$`)
+
+// agentKey splits "agents.<name>.<key>" when it is an editable agent key.
+func agentKey(k string) (name, key string, ok bool) {
+	parts := strings.Split(k, ".")
+	if len(parts) != 3 || parts[0] != "agents" || !agentNamePattern.MatchString(parts[1]) {
+		return "", "", false
+	}
+	return parts[1], parts[2], slices.Contains(agentKeysFor(parts[1]), parts[2])
+}
+
+// AgentKeys are the editable agent keys for every agent cfg knows, as "agents.<name>.<key>".
+func AgentKeys(cfg config.Config) []string {
+	var out []string
+	for _, name := range cfg.KnownAgents() {
+		for _, k := range agentKeysFor(name) {
+			out = append(out, "agents."+name+"."+k)
+		}
+	}
+	return out
 }
 
 var (
@@ -143,7 +183,7 @@ func Read(args []string) (File, error) {
 	}
 	f := File{Rev: Rev(data), Values: map[string]json.RawMessage{}}
 	for k, v := range raw {
-		if editable(k) {
+		if editable(k) || k == "agents" {
 			f.Values[k] = v
 		}
 	}
@@ -173,6 +213,22 @@ func Effective(cfg config.Config) (map[string]any, error) {
 	for _, k := range Editable {
 		out[k.JSON] = all[k.JSON]
 	}
+	// Every agent's options, as agents.<name>.<key> (the natives' come from their flat keys).
+	agents := map[string]any{
+		"claude": map[string]any{"bin": cfg.ClaudeBin, "workdir": cfg.ClaudeWorkDir, "settingSources": cfg.ClaudeSettingSources},
+		"codex":  map[string]any{"bin": cfg.CodexBin, "mode": cfg.CodexMode},
+		"pi":     map[string]any{"bin": cfg.PiBin},
+	}
+	for name, a := range cfg.AllACP() {
+		bin := a.Bin
+		if found, err := exec.LookPath(bin); err == nil {
+			if abs, err := filepath.Abs(found); err == nil {
+				bin = abs
+			}
+		}
+		agents[name] = map[string]any{"bin": bin, "workdir": a.Workdir}
+	}
+	out["agents"] = agents
 	return out, nil
 }
 
@@ -188,8 +244,14 @@ func Overridden(args []string) []string {
 		})
 		if env || flag {
 			out = append(out, k.JSON)
+			for section, flat := range config.Legacy {
+				if flat == k.JSON {
+					out = append(out, "agents."+section)
+				}
+			}
 		}
 	}
+	sort.Strings(out)
 	return out
 }
 
@@ -206,6 +268,15 @@ func Check(args []string) (config.Config, error) {
 		}
 	}
 	bins := map[string]string{"codex": cfg.CodexBin, "claude": cfg.ClaudeBin, "pi": cfg.PiBin}
+	for name, a := range cfg.AllACP() {
+		bins[name] = a.Bin
+		if !slices.Contains(cfg.Runners, name) {
+			continue
+		}
+		if info, err := os.Stat(a.Workdir); err != nil || !info.IsDir() {
+			return cfg, fmt.Errorf("agents.%s.workdir %s is not a folder", name, a.Workdir)
+		}
+	}
 	for _, name := range cfg.Runners {
 		if _, err := exec.LookPath(bins[name]); err != nil {
 			return cfg, fmt.Errorf("%s is enabled but its program %q is not found", name, bins[name])
@@ -251,8 +322,39 @@ func Change(args []string, rev string, changes map[string]json.RawMessage) (stri
 	}
 	sort.Strings(keys)
 	var diff []Diff
+	sections, err := agentSections(raw)
+	if err != nil {
+		return "", nil, err
+	}
 	for _, k := range keys {
 		v := changes[k]
+		if name, key, ok := agentKey(k); ok {
+			// A section key replaces the flat key it supersedes (claudeBin → agents.claude.bin).
+			if flat := config.Legacy[name+"."+key]; raw[flat] != nil {
+				diff = append(diff, Diff{Key: flat, From: raw[flat]})
+				delete(raw, flat)
+			}
+			sec := sections[name]
+			if sec == nil {
+				sec = map[string]json.RawMessage{}
+			}
+			old := sec[key]
+			if string(bytes.TrimSpace(v)) == "null" {
+				if old != nil {
+					delete(sec, key)
+					diff = append(diff, Diff{Key: k, From: old})
+				}
+			} else if !bytes.Equal(compact(old), compact(v)) {
+				sec[key] = v
+				diff = append(diff, Diff{Key: k, From: old, To: v})
+			}
+			if len(sec) == 0 {
+				delete(sections, name)
+			} else {
+				sections[name] = sec
+			}
+			continue
+		}
 		old := raw[k]
 		if string(bytes.TrimSpace(v)) == "null" {
 			if old == nil {
@@ -270,6 +372,11 @@ func Change(args []string, rev string, changes map[string]json.RawMessage) (stri
 	}
 	if len(diff) == 0 {
 		return rev, nil, nil
+	}
+	if len(sections) == 0 {
+		delete(raw, "agents")
+	} else if data, err := json.Marshal(sections); err == nil {
+		raw["agents"] = data
 	}
 	out, err := json.MarshalIndent(raw, "", "  ")
 	if err != nil {
@@ -292,6 +399,17 @@ func Change(args []string, rev string, changes map[string]json.RawMessage) (stri
 		return "", nil, err
 	}
 	return Rev(out), diff, nil
+}
+
+// agentSections is config.json's "agents" object, by agent and key.
+func agentSections(raw map[string]json.RawMessage) (map[string]map[string]json.RawMessage, error) {
+	out := map[string]map[string]json.RawMessage{}
+	if a := raw["agents"]; a != nil {
+		if err := json.Unmarshal(a, &out); err != nil {
+			return nil, &InvalidError{Reason: "agents must be an object of agent sections: " + err.Error()}
+		}
+	}
+	return out, nil
 }
 
 func compact(v json.RawMessage) []byte {

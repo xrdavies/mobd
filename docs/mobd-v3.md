@@ -165,7 +165,7 @@ Invitation redemption and preview are documented in [pairing](pairing.md).
 
 | Method | Path | Notes |
 | --- | --- | --- |
-| GET | `/health`, `/healthz` | `apiVersion: 3`, `features`, `checks`, `runners` (each with `models`, `efforts`, `defaultModel`, `defaultEffort`, `permissions`), `agents` (every supported agent: `state`, `enabled`, `detail`, `install`, and when found `bin` (resolved program path) and `version` (its `--version`)), `workdir` and `claudeWorkdir` (where agents work), `maxRunning` |
+| GET | `/health`, `/healthz` | `apiVersion: 3`, `features`, `checks`, `runners` (each with `models`, `efforts`, `defaultModel`, `defaultEffort`, `permissions`), `agents` (every supported agent: `state`, `enabled`, `detail`, `install`, and when found `bin` (resolved program path) and `version` (its `--version`), `protocol` (`native` or `acp`) and `options` (its config.json settings for the apps to draw, feature `agentOptions`, [agent-adapters.md](agent-adapters.md))), `workdir` and `claudeWorkdir` (where agents work), `maxRunning` |
 | DELETE | `/pair` | This device removes its own pairing (as `mobd clients delete`); 204, then its credential stops working. Feature `unpair` |
 | GET | `/config` | Editable startup config: `{rev, values, effective, editable, overridden, pendingRestart, configError?, lastRejected?, canRestart}` (feature `maintenance`, [remote-maintenance.md](remote-maintenance.md)) |
 | PUT | `/config` | `{rev, changes}` (null removes a key) → **200** `{rev, diff, needsRestart}`; **400** `not_editable`; **409** `config_changed`; **422** `invalid`. Validated before writing; does not restart |

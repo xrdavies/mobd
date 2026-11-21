@@ -10,6 +10,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -34,14 +35,16 @@ type Config struct {
 	MaxRunning    int            `json:"maxRunning"`
 	DataDir       string         `json:"dataDir"`
 	// FilesDir is the folder shared with paired devices: uploads land here, downloads come from here.
-	FilesDir             string        `json:"filesDir"`
-	CodexMode            string        `json:"codexMode"`
-	Runners              []string      `json:"runners"`
-	ClaudeBin            string        `json:"claudeBin"`
-	ClaudeWorkDir        string        `json:"claudeWorkdir"`
-	ClaudeSettingSources string        `json:"claudeSettingSources"`
-	PiBin                string        `json:"piBin"`
-	QuestionTimeout      time.Duration `json:"-"`
+	FilesDir             string   `json:"filesDir"`
+	CodexMode            string   `json:"codexMode"`
+	Runners              []string `json:"runners"`
+	ClaudeBin            string   `json:"claudeBin"`
+	ClaudeWorkDir        string   `json:"claudeWorkdir"`
+	ClaudeSettingSources string   `json:"claudeSettingSources"`
+	PiBin                string   `json:"piBin"`
+	// Agents are per-agent sections (agents.go): native agents' keys, and ACP agents.
+	Agents          map[string]AgentConfig `json:"agents,omitempty"`
+	QuestionTimeout time.Duration          `json:"-"`
 
 	// Desktops (desktop.go). Linux only, except desktopMode; inert until the Linux desktop manager.
 	DesktopMode           string        `json:"desktopMode"`
@@ -176,6 +179,11 @@ func Load(args []string) (Config, string, error) {
 		if err = dec.Decode(new(any)); err != io.EOF {
 			return cfg, path, fmt.Errorf("config %s: unexpected trailing data", path)
 		}
+		var raw map[string]json.RawMessage
+		_ = json.Unmarshal(data, &raw)
+		if err := nativeSections(&cfg, raw); err != nil {
+			return cfg, path, fmt.Errorf("config %s: %w", path, err)
+		}
 	} else if explicit || !os.IsNotExist(err) {
 		return cfg, path, fmt.Errorf("config %s: %w", path, err)
 	}
@@ -287,12 +295,13 @@ func Load(args []string) (Config, string, error) {
 		return cfg, path, errors.New("codexMode must be app-server or exec")
 	}
 	if len(cfg.Runners) == 0 {
-		return cfg, path, errors.New("runners must name at least one agent (codex, claude, pi)")
+		return cfg, path, errors.New("runners must name at least one agent (codex, claude, pi, …)")
 	}
 	enabled := make(map[string]bool)
+	known := cfg.KnownAgents()
 	for _, name := range cfg.Runners {
-		if name != "codex" && name != "claude" && name != "pi" {
-			return cfg, path, fmt.Errorf("unknown runner %q (known: codex, claude, pi)", name)
+		if _, section := cfg.Agents[name]; !section && !slices.Contains(known, name) {
+			return cfg, path, fmt.Errorf("unknown runner %q (known: %s; others need an agents.%s section with protocol acp)", name, strings.Join(known, ", "), name)
 		}
 		if enabled[name] {
 			return cfg, path, fmt.Errorf("duplicate runner %q", name)
@@ -323,6 +332,9 @@ func Load(args []string) (Config, string, error) {
 		if err != nil {
 			return cfg, path, err
 		}
+	}
+	if err := acpAgents(&cfg); err != nil {
+		return cfg, path, err
 	}
 	if cfg.DataDir == "" {
 		cfg.DataDir = filepath.Dir(cfg.StatePath)
