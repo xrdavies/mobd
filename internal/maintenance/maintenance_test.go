@@ -247,3 +247,18 @@ func TestAgentKeysGoToSectionsAndReplaceFlatKeys(t *testing.T) {
 	}
 	_ = dir
 }
+
+func TestReadShowsOnlyEditableAgentKeys(t *testing.T) {
+	_, args, _ := setup(t, `,"agents":{"dsh":{"workdir":"/w","env":{"DEEPSEEK_API_KEY":"sk-secret"},"args":["--profile","acp"]},"opencode":{"approveEnv":{"X":"y"}}}`)
+	f, err := Read(args)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(f.Values["agents"])
+	if strings.Contains(got, "sk-secret") || strings.Contains(got, "env") || strings.Contains(got, "args") || strings.Contains(got, "opencode") {
+		t.Fatalf("local-only agent keys reach paired clients: %s", got)
+	}
+	if !strings.Contains(got, `"workdir":"/w"`) {
+		t.Fatalf("editable keys missing: %s", got)
+	}
+}

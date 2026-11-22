@@ -183,9 +183,33 @@ func Read(args []string) (File, error) {
 	}
 	f := File{Rev: Rev(data), Values: map[string]json.RawMessage{}}
 	for k, v := range raw {
-		if editable(k) || k == "agents" {
+		if editable(k) {
 			f.Values[k] = v
 		}
+	}
+	// Only the agents' editable keys: env, approveEnv and args stay on the computer (they can hold
+	// API keys, and paired clients read this).
+	sections, err := agentSections(raw)
+	if err != nil {
+		return File{}, err
+	}
+	shown := map[string]map[string]json.RawMessage{}
+	for name, sec := range sections {
+		for key, v := range sec {
+			if slices.Contains(agentKeysFor(name), key) {
+				if shown[name] == nil {
+					shown[name] = map[string]json.RawMessage{}
+				}
+				shown[name][key] = v
+			}
+		}
+	}
+	if len(shown) > 0 {
+		data, err := json.Marshal(shown)
+		if err != nil {
+			return File{}, err
+		}
+		f.Values["agents"] = data
 	}
 	return f, nil
 }
