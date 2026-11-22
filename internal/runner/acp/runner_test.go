@@ -78,6 +78,8 @@ func fakeAgent(mode, logPath string) {
 				"rawInput": map[string]any{"command": []string{"ls", "-a"}}})
 			update(map[string]any{"sessionUpdate": "tool_call_update", "toolCallId": "t1", "status": "completed",
 				"content": []any{map[string]any{"type": "content", "content": map[string]string{"type": "text", "text": "a.txt"}}}})
+			// DeepSeek Harness files its shell tool under "other".
+			update(map[string]any{"sessionUpdate": "tool_call", "toolCallId": "t9", "title": "bash", "kind": "other", "status": "completed"})
 			if mode == "approve" {
 				send(map[string]any{"jsonrpc": "2.0", "id": 99, "method": "session/request_permission", "params": map[string]any{
 					"sessionId": "s-1", "toolCall": map[string]any{"toolCallId": "t2", "title": "Run rm -rf build"},
@@ -172,7 +174,7 @@ func TestCheckCompletesTheHandshake(t *testing.T) {
 		t.Fatalf("%+v", st)
 	}
 	info := r.Info()
-	if !info.Images || !info.Resume || info.Steer || info.Protocol != "acp" || info.Label != "Fake" {
+	if !info.Images || !info.Resume || info.Steer || !info.Approvals || info.Protocol != "acp" || info.Label != "Fake" {
 		t.Fatalf("capabilities from the handshake: %+v", info)
 	}
 	r.a.Bin = "/no/such/agent"
@@ -196,6 +198,9 @@ func TestTurnTranslatesTheSession(t *testing.T) {
 	cmd := acts["t1"]
 	if cmd.Kind != task.ActivityCommand || cmd.Status != task.ActivityCompleted || cmd.Command != "ls -a" || cmd.Text != "a.txt" {
 		t.Fatalf("command %+v", cmd)
+	}
+	if acts["t9"].Kind != task.ActivityCommand {
+		t.Fatalf("shell tool of kind other: %+v", acts["t9"])
 	}
 	if think := acts["acp:task1:thinking:1"]; think.Text != "pondering" {
 		t.Fatalf("thinking %+v", acts)

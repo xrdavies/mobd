@@ -52,7 +52,7 @@ func (r *Runner) Options() []runner.Option {
 
 func (r *Runner) Info() runner.Info {
 	model, effort := r.defaults()
-	return runner.Info{Protocol: "native", Name: Name, Label: "Claude Code", Efforts: Efforts, Install: "curl -fsSL https://claude.ai/install.sh | bash", DefaultModel: model, DefaultEffort: effort,
+	return runner.Info{Protocol: "native", Approvals: true, Name: Name, Label: "Claude Code", Efforts: Efforts, Install: "curl -fsSL https://claude.ai/install.sh | bash", DefaultModel: model, DefaultEffort: effort,
 		Images: true, Resume: true, Cost: true}
 }
 

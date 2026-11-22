@@ -89,6 +89,7 @@ App-server capabilities:
 - **Hard approvals.** `approve` sets `approvalPolicy: "untrusted"`. Codex's `item/commandExecution/requestApproval` and `item/fileChange/requestApproval` requests become approval cards ("Allow the agent to run …?") through `Options.Ask`, answered `accept`/`decline`; no answer means decline. Default `bypass` uses `never`.
 - **Interrupt.** Cancelling sends `turn/interrupt` and gives Codex 3 s to stop before the process group is killed.
 - **Steering.** `POST /tasks/{id}/steer {prompt}` sends `turn/steer` to the running turn (runners with `steer: true` in `/health`); the message is saved as a user message in the conversation.
+- **Approvals.** `approvals: true` in `/health` when the runner can ask before commands and edits (settings.json `permissions: "approve"`): Claude Code, Codex in app-server mode, Pi and ACP agents that ask the client; false for Codex in exec mode and DeepSeek Harness.
 - **Streaming.** `item/agentMessage/delta` updates the reply in the timeline while Codex writes it (throttled to ~400 ms).
 
 The protocol is marked experimental by Codex; `codex app-server generate-ts --out <dir>` prints the types for the installed version.

@@ -54,7 +54,7 @@ func (r *Runner) Options() []runner.Option {
 func (r *Runner) Info() runner.Info {
 	model, effort := defaults()
 	return runner.Info{Protocol: "native", Name: Name, Label: "Codex", Efforts: Efforts, Install: "npm install -g @openai/codex", DefaultModel: model, DefaultEffort: effort,
-		Images: true, Resume: true, Steer: r.appServer()}
+		Images: true, Resume: true, Steer: r.appServer(), Approvals: r.appServer()}
 }
 
 func (r *Runner) Check(ctx context.Context) runner.Status {

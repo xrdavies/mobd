@@ -43,8 +43,9 @@ same settings as their flat keys, which still work; one value may not be set bot
 | `agents.pi.bin` | `piBin` | |
 
 Other agents speak the Agent Client Protocol: `{"protocol": "acp", "label", "bin", "args", "workdir", "env",
-"approveEnv", "install"}`. `workdir` defaults to `workdir`; `approveEnv` is added to `env` when the agent's
-permissions are "Ask first" (OpenCode's preset sets `OPENCODE_PERMISSION`). mobd knows two, so adding their name to `runners` is enough:
+"approveEnv", "approvals", "install"}`. `workdir` defaults to `workdir`; `approveEnv` is added to `env` when the agent's
+permissions are "Ask first" (OpenCode's preset sets `OPENCODE_PERMISSION`); `"approvals": false` marks an agent that
+never asks (DeepSeek Harness), so "Ask first" is not offered for it. mobd knows two, so adding their name to `runners` is enough:
 
 | Name | Agent | Runs | Install |
 | --- | --- | --- | --- |

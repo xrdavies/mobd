@@ -40,6 +40,8 @@ type agentInfo struct {
 	AgentDefaultEffort string   `json:"agentDefaultEffort,omitempty"`
 	// AgentModels are the models the agent itself reports (ACP agents), to suggest in the model list.
 	AgentModels []string `json:"agentModels,omitempty"`
+	// Approvals is false for an agent that cannot ask before acting (permissions stay "bypass").
+	Approvals bool `json:"approvals"`
 }
 
 type settingsView struct {
@@ -57,7 +59,7 @@ func (s *Server) settingsView() settingsView {
 		if info.Efforts == nil {
 			info.Efforts = []string{} // an agent without an effort setting (some ACP agents)
 		}
-		v.Agents[info.Name] = agentInfo{Label: info.Label, Efforts: info.Efforts, AgentDefaultModel: info.DefaultModel, AgentDefaultEffort: info.DefaultEffort, AgentModels: info.Models}
+		v.Agents[info.Name] = agentInfo{Label: info.Label, Efforts: info.Efforts, AgentDefaultModel: info.DefaultModel, AgentDefaultEffort: info.DefaultEffort, AgentModels: info.Models, Approvals: info.Approvals}
 	}
 	return v
 }
@@ -153,6 +155,10 @@ func (s *Server) validateSettings(next, current settings.Settings) error {
 		case "approve":
 			if name == "codex" && s.cfg.CodexMode == "exec" {
 				return invalid("Codex can only ask before commands in app-server mode (codexMode is exec)")
+			}
+			// Only a new choice: a value saved before the agent said so stays, so other saves work.
+			if !info.Approvals && stored[name].Permissions != "approve" {
+				return invalid("%s cannot ask before commands and edits; it decides on its own", info.Label)
 			}
 		default:
 			return invalid("%s: permissions must be bypass or approve", info.Label)

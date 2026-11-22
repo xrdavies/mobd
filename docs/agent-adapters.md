@@ -133,6 +133,10 @@ environment, folder and (on Linux) the conversation's desktop.
   and edits by default). An agent section's `approveEnv` is added to the agent's environment when its permissions
   are "approve"; the OpenCode preset sets `OPENCODE_PERMISSION` to ask for commands, edits, web fetches and folders
   outside the project. Pending approvals are withdrawn when the turn is cancelled.
+  Some ACP agents never ask the client: DeepSeek Harness's ACP server answers permission requests itself. A
+  section's `"approvals": false` (set by the dsh preset) makes the agent report `approvals: false`
+  (`/health` `runners[]`, `/settings` `agents{}`); the apps then offer only "Run without asking", and mobd refuses a
+  new "approve" for it (a value saved earlier is kept, so other saves still work).
 - **Reason:** one path for the apps, whatever the agent.
 
 ### D7. Capabilities are honest, not forced equal
@@ -253,7 +257,7 @@ type Configurable interface {
 ```
 
 - `protocol: "acp"` makes an agent use the ACP adapter; its keys are `label`, `bin`, `args`, `workdir` (default:
-  `workdir`), `env`, `approveEnv` (D6) and `install`. Model and effort come from the agent per session (D9); its other session config
+  `workdir`), `env`, `approveEnv` and `approvals` (D6) and `install`. Model and effort come from the agent per session (D9); its other session config
   options are not shown yet.
 - mobd ships presets for OpenCode and DeepSeek Harness (label, default command, install command), so turning them
   on needs no section at all.

@@ -86,6 +86,9 @@ type Info struct {
 	Cost bool `json:"cost"`
 	// Steer reports whether messages can be added to a running turn.
 	Steer bool `json:"steer"`
+	// Approvals reports whether the agent can ask before commands and edits (permissions
+	// "approve"); some ACP agents decide on their own. Apps treat a missing value as true.
+	Approvals bool `json:"approvals"`
 	// Protocol is "native" (mobd's own adapter) or "acp" (Agent Client Protocol).
 	Protocol string `json:"protocol,omitempty"`
 }

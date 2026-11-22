@@ -606,6 +606,10 @@ func (tr *turn) tool(u update) error {
 			}
 		}
 	}
+	// Agents that file their shell tool under "other" (DeepSeek Harness): a command is a command.
+	if a.Kind == task.ActivityTool && (a.Command != "" || slices.Contains([]string{"bash", "shell", "terminal"}, strings.ToLower(a.Title))) {
+		a.Kind = task.ActivityCommand
+	}
 	for _, l := range u.Locations {
 		if l.Path != "" && a.Kind == task.ActivityFileChange && !slices.ContainsFunc(a.Changes, func(c task.FileChange) bool { return c.Path == l.Path }) {
 			a.Changes = append(a.Changes, task.FileChange{Path: l.Path, Kind: "edit"})

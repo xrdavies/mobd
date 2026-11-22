@@ -23,7 +23,10 @@ type AgentConfig struct {
 	// ApproveEnv is added to Env when the agent's permissions are "approve" (settings.json): ACP has
 	// no approval switch, so this is what makes an agent ask before acting.
 	ApproveEnv map[string]string `json:"approveEnv,omitempty"`
-	Install    string            `json:"install,omitempty"`
+	// Approvals false: the agent never asks the client (it decides on its own), so permissions
+	// "approve" cannot be offered. Default true.
+	Approvals *bool  `json:"approvals,omitempty"`
+	Install   string `json:"install,omitempty"`
 	// Claude Code only: which of its settings it loads (claudeSettingSources).
 	SettingSources string `json:"settingSources,omitempty"`
 	// Codex only: app-server or exec (codexMode).
@@ -49,8 +52,9 @@ var ACPPresets = map[string]AgentConfig{
 	"opencode": {Protocol: ProtocolACP, Label: "OpenCode", Bin: "opencode", Args: []string{"acp"},
 		Install:    "npm install -g opencode-ai",
 		ApproveEnv: map[string]string{"OPENCODE_PERMISSION": `{"bash":"ask","edit":"ask","webfetch":"ask","external_directory":"ask"}`}},
+	// Its ACP server answers permission requests itself ("automation-only").
 	"dsh": {Protocol: ProtocolACP, Label: "DeepSeek Harness", Bin: "dsh", Args: []string{"--profile", "acp"},
-		Install: "npm install -g @deepseek-ai/dsh"},
+		Install: "npm install -g @deepseek-ai/dsh", Approvals: new(bool)},
 }
 
 var agentName = regexp.MustCompile(`^[a-z][a-z0-9-]{0,31}$`)
@@ -96,8 +100,8 @@ func nativeSections(cfg *Config, raw map[string]json.RawMessage) error {
 			set("mode", a.Mode, nil)
 			set("settingSources", a.SettingSources, nil)
 		}
-		if a.Label != "" || len(a.Args) > 0 || len(a.Env) > 0 || len(a.ApproveEnv) > 0 || a.Install != "" {
-			bad = append(bad, "label/args/env/approveEnv/install")
+		if a.Label != "" || len(a.Args) > 0 || len(a.Env) > 0 || len(a.ApproveEnv) > 0 || a.Approvals != nil || a.Install != "" {
+			bad = append(bad, "label/args/env/approveEnv/approvals/install")
 		}
 		if len(bad) > 0 {
 			sort.Strings(bad)
@@ -151,6 +155,9 @@ func acpAgents(cfg *Config) error {
 			}
 			if a.ApproveEnv == nil {
 				a.ApproveEnv = preset.ApproveEnv
+			}
+			if a.Approvals == nil {
+				a.Approvals = preset.Approvals
 			}
 		}
 		if a.Label == "" {

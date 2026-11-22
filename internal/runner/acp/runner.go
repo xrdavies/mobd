@@ -85,7 +85,8 @@ func (r *Runner) Info() runner.Info {
 	r.mu.Unlock()
 	return runner.Info{Protocol: config.ProtocolACP, Name: r.name, Label: r.a.Label, Install: r.a.Install,
 		Efforts: append([]string{}, c.Efforts...), DefaultModel: c.Model, Models: slices.Clone(c.Models),
-		Images: c.Image, Resume: c.LoadSession || c.Resume, Cost: c.Cost, Steer: false}
+		Images: c.Image, Resume: c.LoadSession || c.Resume, Cost: c.Cost, Steer: false,
+		Approvals: r.a.Approvals == nil || *r.a.Approvals}
 }
 
 func (r *Runner) Options() []runner.Option {

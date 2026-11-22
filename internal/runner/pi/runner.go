@@ -50,7 +50,7 @@ func (r *Runner) Options() []runner.Option {
 var _ runner.Steerer = (*Runner)(nil)
 
 func (r *Runner) Info() runner.Info {
-	return runner.Info{Protocol: "native", Name: Name, Label: "Pi", Efforts: efforts, Install: "npm install -g --ignore-scripts @earendil-works/pi-coding-agent@1.4.0", Images: true, Resume: true, Cost: true, Steer: true}
+	return runner.Info{Protocol: "native", Name: Name, Label: "Pi", Efforts: efforts, Install: "npm install -g --ignore-scripts @earendil-works/pi-coding-agent@1.4.0", Images: true, Resume: true, Cost: true, Steer: true, Approvals: true}
 }
 
 func (r *Runner) Check(ctx context.Context) runner.Status {

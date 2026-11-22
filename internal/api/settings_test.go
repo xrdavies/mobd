@@ -11,6 +11,7 @@ import (
 
 	"github.com/xrdavies/mobd/internal/config"
 	"github.com/xrdavies/mobd/internal/desktop"
+	"github.com/xrdavies/mobd/internal/runner/acp"
 	"github.com/xrdavies/mobd/internal/runner/claude"
 	"github.com/xrdavies/mobd/internal/runner/codex"
 	"github.com/xrdavies/mobd/internal/settings"
@@ -269,5 +270,37 @@ func TestTurnPermissionsFollowTheSettings(t *testing.T) {
 	defer done()
 	if opts.Permissions != "approve" {
 		t.Fatalf("after settings: %q", opts.Permissions)
+	}
+}
+
+func TestAnAgentThatCannotAskIsNotSetToAskFirst(t *testing.T) {
+	cfg := config.Config{DataDir: t.TempDir(), Runners: []string{"dsh"}}
+	a := config.ACPPresets["dsh"]
+	s := newTestServer(t, cfg, task.NewStore(), acp.New("dsh", a, cfg))
+	v := getSettings(t, s)
+	if v.Agents["dsh"].Approvals || v.Agents["dsh"].Efforts == nil {
+		t.Fatalf("dsh: %+v", v.Agents["dsh"])
+	}
+	next := v.Settings
+	d := next.Agents["dsh"]
+	d.Permissions = "approve"
+	next.Agents["dsh"] = d
+	if code, body := putSettings(t, s, next); code != http.StatusBadRequest || !strings.Contains(body, "decides on its own") {
+		t.Fatalf("approve for dsh: %d %s", code, body)
+	}
+	// A value stored earlier stays, so other changes still save.
+	stored := s.settings.Get()
+	d = stored.Agents["dsh"]
+	d.Permissions = "approve"
+	stored.Agents["dsh"] = d
+	if _, _, err := s.settings.Replace(stored, func(settings.Settings, settings.Settings) error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	next = getSettings(t, s).Settings
+	d = next.Agents["dsh"]
+	d.Models = []string{"deepseek-v4-flash"}
+	next.Agents["dsh"] = d
+	if code, body := putSettings(t, s, next); code != http.StatusOK {
+		t.Fatalf("other change with a stored approve: %d %s", code, body)
 	}
 }
