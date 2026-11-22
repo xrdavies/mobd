@@ -1,6 +1,8 @@
 # Agent adapters: one shape for every agent framework
 
-Status: mobd implemented 2026-11-22 (phases 1 and 3); apps in progress. ACP status checked 2026-11-21 (see [ACP status](#acp-status)).
+Status: implemented 2026-11-22 in mobd, Mob Desktop, Mob for iOS and Android, and the site (all four phases); see
+[Results](#results) for what was tested and the known limits. ACP status checked 2026-11-21 (see
+[ACP status](#acp-status)).
 
 This document has three parts: [the feature](#part-1-feature), [the decisions](#part-2-decisions) and
 [the design](#part-3-design).
@@ -303,6 +305,28 @@ type Configurable interface {
 4. DeepSeek Harness works the same way.
 5. An ACP agent reports no steering, and the apps hide it.
 6. mobd never offers ACP client file or terminal methods.
+
+### Results
+
+Tested 2026-11-22 with OpenCode 1.19.6 and DeepSeek Harness 0.2.2-rc.5, on macOS (arm64) and Ubuntu 24.04 (arm64).
+
+| Acceptance | Result |
+| --- | --- |
+| 1. Flat keys and sections | Met; config tests load both forms alike and refuse a value set both ways. |
+| 2. Options drawn by the apps | Met on Desktop, iOS and Android; no agent names decide what is shown (labels and avatar colors only). |
+| 3. OpenCode everywhere | Met: turns with steps and shell commands, approve and reject, resume, model choice, Mob's MCP tools, cancel (also with an approval pending) through the API on macOS and Linux; real chats from Desktop, iOS and Android. |
+| 4. DeepSeek Harness | Met except approvals: its ACP server answers permission requests itself, so it reports `approvals: false` and the apps offer only "Run without asking" (D6). Needs `DEEPSEEK_API_KEY` (its web Models page, or `agents.dsh.env`). |
+| 5. No steering for ACP agents | Met: the composers offer only Stop while an ACP agent works. |
+| 6. No client file or terminal methods | Met (`initialize` declares neither; requests for them are refused). |
+
+Known limits:
+
+- An agent's session config options other than model and effort (OpenCode's session mode, for example) are not
+  shown in the apps yet (D9).
+- An ACP agent's models and effort levels are learned from its first session and kept in
+  `<dataDir>/agents/<name>.json`; before that the apps show no model list or effort menu for it, and the API
+  refuses an effort.
+- Image prompts to ACP agents are implemented (when `initialize` offers them) but were not tested with a real agent.
 
 ### Sources
 
