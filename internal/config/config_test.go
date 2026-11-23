@@ -218,3 +218,30 @@ func TestInit(t *testing.T) {
 		t.Fatalf("must not overwrite config: %v", err)
 	}
 }
+
+func TestInitTurnsOnOnlyInstalledAgents(t *testing.T) {
+	home, bin := t.TempDir(), t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("PATH", bin)
+	for _, name := range []string{"claude", "opencode"} {
+		os.WriteFile(filepath.Join(bin, name), []byte("#!/bin/sh\n"), 0o700)
+	}
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := Init(path); err != nil {
+		t.Fatal(err)
+	}
+	var c struct{ Runners []string }
+	data, _ := os.ReadFile(path)
+	if json.Unmarshal(data, &c); strings.Join(c.Runners, ",") != "claude,opencode" {
+		t.Fatalf("runners %v in %s", c.Runners, data)
+	}
+	// Nothing installed: runners left out, so the default applies.
+	t.Setenv("PATH", t.TempDir())
+	empty := filepath.Join(t.TempDir(), "config.json")
+	if err := Init(empty); err != nil {
+		t.Fatal(err)
+	}
+	if data, _ := os.ReadFile(empty); strings.Contains(string(data), "runners") {
+		t.Fatalf("runners without agents: %s", data)
+	}
+}

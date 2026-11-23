@@ -60,6 +60,14 @@ func (macOS) RequestGrant(name string) error {
 		requestPostAccess()
 	case "screenRecording":
 		requestScreenAccess()
+		// macOS acts on that request only the first time: once mobd's entry was removed from the list,
+		// asking again adds nothing. A capture attempt still lists mobd (switched off) in System
+		// Settings, so the user can turn it on there instead of looking for the program.
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			_, _ = macOS{}.Snapshot(ctx, SnapshotOptions{MaxWidth: 64, Format: "jpeg", Quality: 10})
+		}()
 	case "files":
 		if !fullDiskAccess() {
 			for _, dir := range protectedFolders() {

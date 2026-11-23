@@ -9,6 +9,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -386,7 +387,32 @@ func movedKeys(path string, data []byte) error {
 		" (mobd start rewrites service.json from config.json)", path, filepath.Base(path), strings.Join(found, ", "))
 }
 
-// Init creates a private config without overwriting an existing file.
+// initAgents are the agents `mobd init` turns on when it finds their program, in this order.
+var initAgents = [][2]string{{"codex", "codex"}, {"claude", "claude"}, {"pi", "pi"}, {"opencode", "opencode"}, {"dsh", "dsh"}}
+
+// installedAgents are the initAgents whose program is on PATH or in a usual install folder (Mob
+// Desktop runs `mobd init` with a GUI app's short PATH).
+func installedAgents() []string {
+	home, _ := os.UserHomeDir()
+	dirs := []string{filepath.Join(home, ".local", "bin"), "/opt/homebrew/bin", "/usr/local/bin"}
+	var out []string
+	for _, a := range initAgents {
+		if _, err := exec.LookPath(a[1]); err == nil {
+			out = append(out, a[0])
+			continue
+		}
+		for _, d := range dirs {
+			if info, err := os.Stat(filepath.Join(d, a[1])); err == nil && !info.IsDir() && info.Mode()&0o111 != 0 {
+				out = append(out, a[0])
+				break
+			}
+		}
+	}
+	return out
+}
+
+// Init creates a private config without overwriting an existing file. It turns on the agents it
+// finds installed; with none, runners is left out (the default, which then names what to install).
 func Init(path string) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 		return err
@@ -396,7 +422,16 @@ func Init(path string) error {
 		return err
 	}
 	// maxRunning is left out so the per-OS default applies.
-	_, writeErr := file.WriteString("{\n  \"listen\": \"0.0.0.0:8080\"\n}\n")
+	content := map[string]any{"listen": "0.0.0.0:8080"}
+	if found := installedAgents(); len(found) > 0 {
+		content["runners"] = found
+	}
+	data, err := json.MarshalIndent(content, "", "  ")
+	if err != nil {
+		file.Close()
+		return err
+	}
+	_, writeErr := file.Write(append(data, '\n'))
 	closeErr := file.Close()
 	return errors.Join(writeErr, closeErr)
 }

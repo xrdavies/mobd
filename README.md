@@ -62,7 +62,7 @@ cannot answer a prompt later. `mobd permissions` asks for missing ones again, an
 reports them. The live desktop is
 streamed by mobd itself (H.264 over WebRTC); Screen Sharing is not needed. For direct LAN/VPN access,
 configure `listen` for that interface; loopback is enough behind Tailscale Serve,
-a gateway or an SSH tunnel. `mobd init` sets `listen` to `0.0.0.0:8080` (all IPv4 interfaces).
+a gateway or an SSH tunnel. `mobd init` sets `listen` to `0.0.0.0:8080` (all IPv4 interfaces) and turns on the agents it finds installed (`runners`).
 The download domain serves files; clients connect to your office computer's mobd URL.
 Follow the [office smoke checklist](docs/office-smoke-checklist.md) to verify the setup.
 
