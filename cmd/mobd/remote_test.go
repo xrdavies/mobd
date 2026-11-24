@@ -212,3 +212,20 @@ func TestStatusChecksTheAddressAndOffRemovesIt(t *testing.T) {
 		t.Fatal("still saved")
 	}
 }
+
+func TestTailnetAddressesAreProbedWithoutAProxy(t *testing.T) {
+	for base, want := range map[string]bool{
+		"https://office.tail49e461.ts.net":      true,
+		"https://office.tail49e461.ts.net.":     true,
+		"https://OFFICE.Tail49e461.TS.NET:443/": true,
+		"http://100.120.57.121:8080":            true,
+		"http://100.63.0.1:8080":                false, // outside 100.64.0.0/10
+		"https://mob.example.com":               false, // Cloudflare: public, may need the proxy
+		"https://notts.net":                     false,
+		"http://192.168.1.5:8080":               false,
+	} {
+		if got := tailnetURL(base); got != want {
+			t.Errorf("%s: %v, want %v", base, got, want)
+		}
+	}
+}

@@ -9,6 +9,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"os"
 	"os/exec"
@@ -104,7 +105,14 @@ func probeURL(socket, base string) error {
 	if err := control.Call(socket, "POST", "/probes", nil, &probe); err != nil {
 		return err
 	}
-	client := &http.Client{Timeout: 15 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	if tailnetURL(base) {
+		// Only reachable over the tailnet: a proxy (Clash, Surge…) would send it to its own server,
+		// which cannot resolve or reach it, and the check would fail with EOF.
+		transport.Proxy = nil
+	}
+	client := &http.Client{Timeout: 15 * time.Second, Transport: transport,
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	res, err := client.Get(strings.TrimRight(base, "/") + "/probe/" + probe.Code)
 	if err != nil {
 		return fmt.Errorf("cannot reach %s: %w", base, err)
@@ -114,6 +122,24 @@ func probeURL(socket, base string) error {
 		return fmt.Errorf("%s answers HTTP %d, but not as this mobd", base, res.StatusCode)
 	}
 	return nil
+}
+
+// tailnetPrefix is Tailscale's address range (CGNAT 100.64.0.0/10).
+var tailnetPrefix = netip.MustParsePrefix("100.64.0.0/10")
+
+// tailnetURL reports whether base is a Tailscale address: a MagicDNS name under ts.net or a
+// tailnet IP. Such addresses are checked without a proxy.
+func tailnetURL(base string) bool {
+	u, err := url.Parse(base)
+	if err != nil {
+		return false
+	}
+	host := strings.ToLower(strings.TrimSuffix(u.Hostname(), "."))
+	if host == "ts.net" || strings.HasSuffix(host, ".ts.net") {
+		return true
+	}
+	ip, err := netip.ParseAddr(host)
+	return err == nil && tailnetPrefix.Contains(ip.Unmap())
 }
 
 func (c *remoteCLI) port() string {
