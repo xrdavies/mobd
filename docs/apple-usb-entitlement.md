@@ -1,8 +1,8 @@
 # Apple USB entitlement application
 
 Status: USB-2. Granted 2026-11-28: Apple assigned the entitlement to team 69GK3C9666 (FB25504649).
-Next: provisioning profiles for `com.xrdavies.mobd.usb` ([After approval](#after-approval)), then the
-macOS receiver (not built yet). Linux import works and is documented for users (mymob.dev/usb/).
+Next: App ID and provisioning profiles ([your steps](#after-approval-your-steps)), then the
+[macOS receiver](macos-usb-importer.md) (designed, not built). Linux import works and is documented for users (mymob.dev/usb/).
 Companion to the [shared USB redirection design](usb-redirection.md). Until it is granted, the
 receiver can be developed on a test Mac with the checks lowered: [macos-usb-development.md](macos-usb-development.md).
 
@@ -79,14 +79,102 @@ Optional, before or after submitting: register the receiver's App ID in
 (Identifiers → **+** → App IDs → App, macOS, Explicit Bundle ID `com.xrdavies.mobd.usb`). Apple does
 not require it for the request; the entitlement is added to that identifier's profiles once granted.
 
-### After approval
+### After approval: your steps
 
-1. Apple adds the entitlement to the team. Create **Developer ID** and **Mac Development**
-   provisioning profiles for `com.xrdavies.mobd.usb` that include it ([TN3125](https://developer.apple.com/documentation/technotes/tn3125-inside-code-signing-provisioning-profiles)).
-2. Build the receiver as a small app-like bundle (a bare CLI cannot carry a profile): the profile as
-   `Contents/embedded.provisionprofile`, the entitlement in its signature, signed with the Developer
-   ID Application identity and notarized. mobd launches it and hands it the tunnel's socket.
-3. Check `codesign -d --entitlements - …`, then import a device on a clean Mac with SIP enabled.
+Apple granted the entitlement on 2026-11-28. These steps need the developer account (Account Holder
+or Admin) and a Mac you sit at; they are not something the maintainer bot can do. They give the
+[macOS receiver](macos-usb-importer.md) what it needs to run: an App ID with the capability, a
+development profile for testing (phase 0) and a Developer ID profile for releases (phase 2).
+Portal menus change now and then; if a name differs, look for the closest match and note it here.
+
+Do steps 1–6 to unblock development. Steps 7–8 can wait until the receiver works (phase 2).
+
+#### 1. Close the Feedback report
+
+Reply in FB25504649 with a short thank-you and close it, as Apple asked.
+
+#### 2. Register the App ID
+
+1. Open [Certificates, Identifiers & Profiles → Identifiers](https://developer.apple.com/account/resources/identifiers/list)
+   and click **+**.
+2. Choose **App IDs** → Continue → **App** → Continue.
+3. **Platform:** macOS. **Description:** `Mob USB receiver`. **Bundle ID:** Explicit,
+   `com.xrdavies.mobd.usb`.
+4. Look through **Capabilities** and the **Additional Capabilities** (or **Capability Requests**) tab
+   for the USB host controller capability Apple granted; its name mentions USB host controller or
+   `host-controller-interface`. Tick it. Leave everything else off.
+5. Continue → Register.
+
+If the capability is not listed anywhere, stop here and tell me: Apple may need to attach it to the
+team again, which is a reply in the Feedback report.
+
+#### 3. Make sure you have an Apple Development certificate
+
+Development profiles sign with an **Apple Development** certificate. The self-signed certificate
+from [dev signing](dev-signing.md) cannot be used with a profile.
+
+1. On the Mac you develop on, in Terminal: `security find-identity -v -p codesigning`.
+2. If a line says `Apple Development: … (69GK3C9666)` or similar with your team, you have one; go on.
+3. If not, the simplest way: Xcode → **Settings → Accounts** → select the team → **Manage
+   Certificates…** → **+** → **Apple Development**. Its private key stays in that Mac's keychain.
+
+#### 4. Register the test Macs
+
+Development profiles only run on listed Macs. Register each Mac that will test the receiver
+(at least M4002; also the Mac Studio if I should test there).
+
+1. On each Mac, in Terminal: `system_profiler SPHardwareDataType | grep "Provisioning UDID"`.
+2. In the portal: **Devices** → **+** → **Platform: macOS**, a name (`M4002`), the Provisioning UDID
+   → Continue → Register.
+
+#### 5. Create the development profile
+
+1. **Profiles** → **+** → under Development choose **macOS App Development** → Continue.
+2. **App ID:** `com.xrdavies.mobd.usb` → Continue.
+3. If asked for extra entitlements, choose the USB host controller one.
+4. **Certificate:** your Apple Development certificate from step 3. **Devices:** the Macs from step 4.
+5. **Name:** `Mob USB Development` → Generate → Download (`Mob_USB_Development.provisionprofile`).
+
+#### 6. Check the profile and hand it over
+
+In Terminal, in the folder you downloaded it to:
+
+```bash
+security cms -D -i Mob_USB_Development.provisionprofile | plutil -p - | grep -E 'usb.host-controller|application-identifier|ExpirationDate'
+```
+
+It should show `com.apple.developer.usb.host-controller-interface`, an application identifier
+ending in `com.xrdavies.mobd.usb`, and an expiry date. If the USB line is missing, the profile was
+made before step 2's capability was ticked: edit the App ID, then regenerate the profile.
+
+Then copy it to `~/Projects/mob-project/profiles/Mob_USB_Development.provisionprofile` on M4002 (and
+on the Mac Studio if you registered it) and tell me. A profile is not a secret (it holds no key),
+but keep it out of the public repositories.
+
+#### 7. Create the Developer ID profile (later, phase 2)
+
+1. **Profiles** → **+** → under Distribution choose **Developer ID** → Continue.
+2. **App ID:** `com.xrdavies.mobd.usb`. **Certificate:** the **Developer ID Application**
+   certificate that already signs mobd's releases (team `69GK3C9666`). No device list.
+3. **Name:** `Mob USB Developer ID` → Generate → Download. Check it with the command from step 6.
+
+#### 8. Give it to the release workflow (later, phase 2)
+
+In the mobd repository on GitHub: **Settings → Environments → release → Environment secrets → Add**:
+
+- Name: `MOBD_USB_PROFILE_BASE64`
+- Value: the output of `base64 -i Mob_USB_Developer_ID.provisionprofile | pbcopy` (it is copied to
+  the clipboard; paste it).
+
+Note the profile's expiry date in the [tracking table](#packaging-gate-and-tracking). When it
+expires, repeat steps 7–8; nothing else changes.
+
+### What the receiver does with them
+
+The receiver is a small app bundle (a bare program cannot carry a profile): the profile as
+`Contents/embedded.provisionprofile`, the entitlement in its signature, signed with the Developer ID
+Application identity and notarized. mobd launches it and hands it the device's socket. Design:
+[macos-usb-importer.md](macos-usb-importer.md).
 
 ## Request text
 
@@ -151,7 +239,9 @@ Do not modify today's release signing configuration merely to declare the key.
 | Team ID | `69GK3C9666` (the Team ID the published installer, dl.mymob.dev/mobd/install.sh, checks mobd's signature against) |
 | Importer Bundle ID and packaging | Proposed `com.xrdavies.mobd.usb`, helper app bundle launched by mobd; not built yet |
 | Submission date / Feedback ID | 2026-11-10, FB25504649 (Feedback Assistant) |
-| Apple approval and distribution profile | Entitlement granted to the team 2026-11-28 (FB25504649); App ID and profiles not created yet; release gate remains open |
+| Apple approval and distribution profile | Entitlement granted to the team 2026-11-28 (FB25504649); App ID and profiles: [your steps](#after-approval-your-steps), not done yet; release gate remains open |
+| Development profile (test Macs) | Not created |
+| Developer ID profile, expiry | Not created |
 | Clean-machine device import test | Not performed |
 
 Approval is not guaranteed and does not establish device compatibility. macOS

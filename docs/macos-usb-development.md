@@ -1,5 +1,9 @@
 # Developing the macOS USB receiver without Apple's entitlement
 
+**Superseded:** Apple granted the entitlement on 2026-11-28. With the development profile
+([your steps](apple-usb-entitlement.md#after-approval-your-steps)) the receiver runs on registered
+Macs with SIP on; this page is only for a Mac that cannot get the profile.
+
 **Development only.** Not an installation step for users, and never needed for a Linux office
 computer. Companion to the [USB design](usb-redirection.md) and the
 [Apple entitlement runbook](apple-usb-entitlement.md).
